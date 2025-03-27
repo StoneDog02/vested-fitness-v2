@@ -1,6 +1,7 @@
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
+import AddMessageModal from "~/components/coach/AddMessageModal";
 import {
   LineChart,
   Line,
@@ -11,6 +12,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useState } from "react";
+import { useLocation } from "@remix-run/react";
 
 export const meta: MetaFunction = () => {
   return [
@@ -22,8 +24,14 @@ export const meta: MetaFunction = () => {
   ];
 };
 
+interface CoachUpdate {
+  id: number;
+  date: string;
+  message: string;
+}
+
 // Mock updates from coach
-const mockCoachUpdates = [
+const initialCoachUpdates: CoachUpdate[] = [
   {
     id: 1,
     date: "2024-04-10",
@@ -56,7 +64,7 @@ const mockCheckInNotes = {
 };
 
 // Mock weight data
-const mockWeightData = [
+const initialWeightData = [
   { date: "2024-03-01", weight: 185 },
   { date: "2024-03-08", weight: 183 },
   { date: "2024-03-15", weight: 181 },
@@ -68,13 +76,35 @@ const mockWeightData = [
 
 export default function CoachAccess() {
   const [showAddWeight, setShowAddWeight] = useState(false);
+  const [showAddMessage, setShowAddMessage] = useState(false);
   const [newWeight, setNewWeight] = useState("");
+  const [mockWeightData, setMockWeightData] = useState(initialWeightData);
+  const [coachUpdates, setCoachUpdates] =
+    useState<CoachUpdate[]>(initialCoachUpdates);
+  const location = useLocation();
 
   const handleAddWeight = () => {
-    // In a real app, this would make an API call to save the weight
-    console.log("Adding weight:", newWeight);
+    if (!newWeight) return;
+
+    const today = new Date().toISOString().split("T")[0];
+    const newWeightEntry = {
+      date: today,
+      weight: parseFloat(newWeight),
+    };
+
+    setMockWeightData((prevData) => [...prevData, newWeightEntry]);
     setShowAddWeight(false);
     setNewWeight("");
+  };
+
+  const handleAddMessage = (message: string) => {
+    const today = new Date().toISOString().split("T")[0];
+    const newUpdate: CoachUpdate = {
+      id: coachUpdates.length + 1,
+      date: today,
+      message,
+    };
+    setCoachUpdates((prevUpdates) => [newUpdate, ...prevUpdates]);
   };
 
   const startWeight = mockWeightData[0].weight;
@@ -88,12 +118,22 @@ export default function CoachAccess() {
       </h1>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Left column with two stacked cards */}
+        {/* Left column with three stacked cards */}
         <div className="space-y-6">
           {/* Updates from Coach */}
-          <Card title="Updates from Coach">
+          <Card
+            title="Updates from Coach"
+            action={
+              <button
+                onClick={() => setShowAddMessage(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                +Add Message
+              </button>
+            }
+          >
             <div className="space-y-4">
-              {mockCoachUpdates.map((update) => (
+              {coachUpdates.map((update) => (
                 <div
                   key={update.id}
                   className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
@@ -137,7 +177,11 @@ export default function CoachAccess() {
           <Card title="Weight Progress">
             <div className="h-[400px] flex flex-col">
               <div className="flex-1">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer
+                  key={location.pathname}
+                  width="100%"
+                  height="100%"
+                >
                   <LineChart
                     data={mockWeightData}
                     margin={{
@@ -249,6 +293,12 @@ export default function CoachAccess() {
           </Card>
         </div>
       </div>
+
+      <AddMessageModal
+        isOpen={showAddMessage}
+        onClose={() => setShowAddMessage(false)}
+        onSubmit={handleAddMessage}
+      />
     </div>
   );
 }

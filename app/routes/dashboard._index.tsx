@@ -1,6 +1,7 @@
 import { json } from "@remix-run/node";
 import { useLoaderData, useMatches } from "@remix-run/react";
 import Card from "~/components/ui/Card";
+import Button from "~/components/ui/Button";
 import type { DailyWorkout } from "~/types/workout";
 
 type LoaderData = {
@@ -208,10 +209,21 @@ export default function Dashboard() {
     <>
       {role === "coach" ? (
         <div className="p-6 space-y-6">
-          <h1 className="text-3xl font-bold">Coach Dashboard</h1>
+          <div className="flex justify-between items-center">
+            <h1 className="text-3xl font-bold">Coach Dashboard</h1>
+            <Button
+              variant="primary"
+              onClick={() =>
+                window.open("https://kavabodybuilding.myshopify.com", "_blank")
+              }
+              className="bg-green-500 hover:bg-green-600"
+            >
+              Shop KAVA
+            </Button>
+          </div>
 
           {/* Metrics Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-2">Total Clients</h3>
               <p className="text-4xl font-bold">24</p>
@@ -224,6 +236,12 @@ export default function Dashboard() {
               <h3 className="font-semibold text-lg mb-2">Active Clients</h3>
               <p className="text-4xl font-bold">18</p>
               <p className="text-sm text-muted-foreground mt-2">75% of total</p>
+            </Card>
+
+            <Card className="p-6">
+              <h3 className="font-semibold text-lg mb-2">Inactive Clients</h3>
+              <p className="text-4xl font-bold text-red-500">6</p>
+              <p className="text-sm text-muted-foreground mt-2">25% of total</p>
             </Card>
 
             <Card className="p-6">
@@ -303,7 +321,18 @@ export default function Dashboard() {
         </div>
       ) : (
         <div className="p-6 space-y-6">
-          <h1 className="text-3xl font-bold">Client Dashboard</h1>
+          <div className="flex justify-between items-center">
+            <h1 className="text-3xl font-bold">Client Dashboard</h1>
+            <Button
+              variant="primary"
+              onClick={() =>
+                window.open("https://kavabodybuilding.myshopify.com", "_blank")
+              }
+              className="bg-green-500 hover:bg-green-600"
+            >
+              Shop KAVA
+            </Button>
+          </div>
 
           {/* Client Metrics Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -386,20 +415,38 @@ export default function Dashboard() {
                 {clientData?.workouts.map((workout) => (
                   <div
                     key={workout.id}
-                    className="flex items-center justify-between"
+                    className="p-4 bg-gray-lightest dark:bg-secondary-light/5 rounded-lg"
                   >
-                    <div>
-                      <p className="font-medium">{workout.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {workout.exercises.length} exercises
-                      </p>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="font-medium text-secondary dark:text-alabaster">
+                          {workout.name}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {workout.exercises.length} exercises
+                        </p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={workout.completed}
+                        readOnly
+                        className="w-4 h-4 rounded border-gray-300"
+                      />
                     </div>
-                    <input
-                      type="checkbox"
-                      checked={workout.completed}
-                      readOnly
-                      className="w-4 h-4 rounded border-gray-300"
-                    />
+                    <div className="space-y-2">
+                      {workout.exercises.map((exercise) => (
+                        <div key={exercise.id} className="text-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-secondary dark:text-alabaster/90">
+                              {exercise.name}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {exercise.description}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>

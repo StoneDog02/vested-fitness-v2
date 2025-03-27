@@ -110,18 +110,63 @@ const mockWorkout = {
 };
 
 // Mock calendar data (simplified)
-const mockCalendarData = [
-  { date: "Mon, Apr 8", workout: "Push Day", status: "completed" },
-  { date: "Tue, Apr 9", workout: "Pull Day", status: "completed" },
-  { date: "Wed, Apr 10", workout: "Leg Day", status: "missed" },
-  { date: "Thu, Apr 11", workout: "Push Day", status: "completed" },
-  { date: "Fri, Apr 12", workout: "Pull Day", status: "pending" },
-  { date: "Sat, Apr 13", workout: "Leg Day", status: "pending" },
-  { date: "Sun, Apr 14", workout: "Rest Day", status: "pending" },
-];
+const getCalendarData = () => {
+  const today = new Date();
+  const calendar = [];
+
+  // Find the most recent Sunday
+  const currentDay = today.getDay();
+  const startDate = new Date(today);
+  startDate.setDate(today.getDate() - currentDay);
+
+  // Generate 7 days starting from Sunday
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + i);
+
+    // Format date as "Wed, Mar 19" etc
+    const formattedDate = date
+      .toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })
+      .replace(",", "");
+
+    // Find the workout for this day
+    const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
+    const workoutDay = mockWorkout.schedule.find(
+      (day) => day.day.toLowerCase() === dayName.toLowerCase()
+    );
+
+    // Determine completion percentage based on date
+    let completion = 0;
+    if (date < today) {
+      // For past days, generate a random completion between 80-100%
+      completion = Math.floor(Math.random() * 21) + 80;
+    }
+
+    calendar.push({
+      date: formattedDate,
+      workout: workoutDay?.focus || "Rest Day",
+      completion,
+    });
+  }
+
+  return calendar;
+};
 
 export default function Workouts() {
   const [dayOffset, setDayOffset] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [calendarData, setCalendarData] = useState(getCalendarData());
+  const [submittedData, setSubmittedData] = useState<
+    Record<string, { exercises: Record<string, boolean> }>
+  >({});
+  const [completedExercises, setCompletedExercises] = useState<
+    Record<string, boolean>
+  >({});
 
   // Get the formatted date display
   const getDateDisplay = (offset: number) => {
@@ -174,14 +219,122 @@ export default function Workouts() {
 
   const handlePrevDay = () => {
     setDayOffset((prev) => prev - 1);
+    setCompletedExercises({}); // Reset completion state
   };
 
   const handleNextDay = () => {
     setDayOffset((prev) => prev + 1);
+    setCompletedExercises({}); // Reset completion state
   };
+
+  const handleExerciseCompletion = (
+    exerciseIds: string[],
+    completed: boolean
+  ) => {
+    setCompletedExercises((prev) => {
+      const newState = { ...prev };
+      exerciseIds.forEach((id) => {
+        newState[id] = completed;
+      });
+      return newState;
+    });
+  };
+
+  const handleSubmitWorkouts = async () => {
+    setIsSubmitting(true);
+    setShowSuccess(false);
+
+    // Simulate API call
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Get today's date for tracking submission
+    const today = new Date()
+      .toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })
+      .replace(",", "");
+
+    // Update submitted data with actual completion states
+    setSubmittedData((prev) => ({
+      ...prev,
+      [today]: {
+        exercises: { ...completedExercises },
+      },
+    }));
+
+    // Calculate completion percentage based on completed exercises
+    const totalExercises = mockWorkout.todayExercises.reduce(
+      (count, exerciseOrGroup) => {
+        return (
+          count + (Array.isArray(exerciseOrGroup) ? exerciseOrGroup.length : 1)
+        );
+      },
+      0
+    );
+
+    const completedCount =
+      Object.values(completedExercises).filter(Boolean).length;
+    const completionPercentage = Math.round(
+      (completedCount / totalExercises) * 100
+    );
+
+    // Update the compliance data for today with actual completion percentage
+    setCalendarData((prevData) => {
+      return prevData.map((day) => {
+        if (day.date === today) {
+          return {
+            ...day,
+            completion: completionPercentage,
+          };
+        }
+        return day;
+      });
+    });
+
+    setIsSubmitting(false);
+    setShowSuccess(true);
+
+    // Scroll to top of page
+    window.scrollTo({ top: 0, behavior: "smooth" });
+
+    // Hide success message after 5 seconds
+    setTimeout(() => {
+      setShowSuccess(false);
+    }, 5000);
+  };
+
+  // Get the date string for the currently displayed day
+  const displayedDateString = new Date(
+    new Date().setDate(new Date().getDate() + dayOffset)
+  )
+    .toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    })
+    .replace(",", "");
+
+  // Check if the current displayed date is submitted
+  const isDateSubmitted = displayedDateString in submittedData;
 
   return (
     <div className="p-6">
+      {/* Success Message */}
+      {showSuccess && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-green-100 border border-green-500 text-green-700 px-8 py-3 rounded-lg shadow-lg flex items-center">
+          <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Workouts submitted successfully!
+        </div>
+      )}
+
       <h1 className="text-3xl font-bold mb-6">Today&apos;s Workout</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -210,8 +363,12 @@ export default function Workouts() {
               </button>
 
               <div className="absolute left-1/2 -translate-x-1/2 text-center">
-                <h2 className="text-2xl font-bold">{dateDisplay.title}</h2>
-                <p className="text-gray-600">{dateDisplay.subtitle}</p>
+                <h2 className="text-xl font-semibold text-secondary dark:text-alabaster">
+                  {dateDisplay.title}
+                </h2>
+                <div className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                  {dateDisplay.subtitle}
+                </div>
               </div>
 
               <button
@@ -261,18 +418,79 @@ export default function Workouts() {
                         key={exerciseOrGroup[0].id}
                         exercises={exerciseOrGroup}
                         type={exerciseOrGroup.length > 2 ? "Giant" : "Super"}
+                        isSubmitted={isDateSubmitted}
+                        completionStates={
+                          isDateSubmitted
+                            ? exerciseOrGroup.map(
+                                (ex) =>
+                                  submittedData[displayedDateString].exercises[
+                                    ex.id
+                                  ]
+                              )
+                            : undefined
+                        }
+                        onCompletionChange={handleExerciseCompletion}
+                        dayOffset={dayOffset}
                       />
                     ) : (
                       <WorkoutCard
                         key={exerciseOrGroup.id}
                         exercises={[exerciseOrGroup]}
                         type="Single"
+                        isSubmitted={isDateSubmitted}
+                        completionStates={
+                          isDateSubmitted
+                            ? [
+                                submittedData[displayedDateString].exercises[
+                                  exerciseOrGroup.id
+                                ],
+                              ]
+                            : undefined
+                        }
+                        onCompletionChange={handleExerciseCompletion}
+                        dayOffset={dayOffset}
                       />
                     )}
                   </div>
                 ))
               )}
             </div>
+
+            {/* Submit Button */}
+            {workoutDay && workoutDay.focus !== "Rest Day" && (
+              <div className="mt-6 flex justify-end">
+                <Button
+                  variant="primary"
+                  className="px-8 text-lg flex items-center gap-2"
+                  onClick={handleSubmitWorkouts}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          fill="none"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      Submitting...
+                    </>
+                  ) : (
+                    "Submit Completed Workouts"
+                  )}
+                </Button>
+              </div>
+            )}
           </Card>
         </div>
 
@@ -327,33 +545,32 @@ export default function Workouts() {
           {/* Workout Calendar */}
           <Card title="Workout Compliance">
             <div className="space-y-2">
-              {mockCalendarData.map((day, index) => (
+              {calendarData.map((day, index) => (
                 <div
                   key={index}
-                  className="flex items-center justify-between border-b dark:border-davyGray last:border-0 pb-2 last:pb-0"
+                  className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-gray-lightest dark:hover:bg-secondary-light/5"
                 >
-                  <div>
-                    <span className="text-sm text-secondary dark:text-alabaster">
+                  <div className="flex items-baseline">
+                    <span className="text-secondary dark:text-alabaster">
                       {day.date}
                     </span>
                     <span className="text-xs text-gray-dark dark:text-gray-light ml-2">
                       ({day.workout})
                     </span>
                   </div>
-                  <div className="flex items-center">
-                    <span
-                      className={`inline-block w-3 h-3 rounded-full mr-2 ${
-                        day.status === "completed"
-                          ? "bg-green-500"
-                          : day.status === "missed"
-                          ? "bg-red-500"
-                          : "bg-gray-light dark:bg-davyGray"
-                      }`}
-                    ></span>
-                    <span className="text-sm capitalize text-gray-dark dark:text-gray-light">
-                      {day.status}
-                    </span>
-                  </div>
+                  <span
+                    className={`${
+                      day.completion >= 80
+                        ? "text-green-500"
+                        : day.completion >= 50
+                        ? "text-yellow-500"
+                        : day.completion > 0
+                        ? "text-red-500"
+                        : "text-gray-dark dark:text-gray-light"
+                    }`}
+                  >
+                    {day.completion > 0 ? `${day.completion}%` : "Pending"}
+                  </span>
                 </div>
               ))}
             </div>

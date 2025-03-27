@@ -1,34 +1,76 @@
 import type { Exercise } from "~/types/workout";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface WorkoutCardProps {
   exercises: Exercise[];
   type: "Single" | "Super" | "Giant";
+  isSubmitted?: boolean;
+  completionStates?: boolean[];
+  onCompletionChange?: (exerciseIds: string[], completed: boolean) => void;
+  dayOffset: number;
 }
 
-export default function WorkoutCard({ exercises, type }: WorkoutCardProps) {
+export default function WorkoutCard({
+  exercises,
+  type,
+  isSubmitted = false,
+  completionStates,
+  onCompletionChange,
+  dayOffset,
+}: WorkoutCardProps) {
   const [isCompleted, setIsCompleted] = useState(false);
   const [notes, setNotes] = useState("");
-  const [weights, setWeights] = useState<Record<string, string>>(
-    Object.fromEntries(
-      exercises.flatMap((exercise) =>
-        exercise.sets.map((set) => [
-          `${exercise.id}-${set.setNumber}`,
-          set.weight?.toString() || "",
-        ])
+  const [weights, setWeights] = useState<Record<string, string>>({});
+
+  // Reset state when day changes
+  useEffect(() => {
+    setIsCompleted(false);
+    setNotes("");
+    setWeights({});
+  }, [dayOffset]);
+
+  // Initialize completion state from props if available
+  useEffect(() => {
+    if (completionStates && completionStates.length > 0) {
+      setIsCompleted(completionStates[0]);
+    }
+  }, [completionStates]);
+
+  useEffect(() => {
+    // Initialize weights state only on the client side
+    setWeights(
+      Object.fromEntries(
+        exercises.flatMap((exercise) =>
+          exercise.sets.map((set) => [
+            `${exercise.id}-${set.setNumber}`,
+            set.weight?.toString() || "",
+          ])
+        )
       )
-    )
-  );
+    );
+  }, [exercises]);
 
   const handleWeightChange = (
     exerciseId: string,
     setNumber: number,
     value: string
   ) => {
+    if (isSubmitted) return; // Prevent changes if submitted
     setWeights((prev) => ({
       ...prev,
       [`${exerciseId}-${setNumber}`]: value,
     }));
+  };
+
+  const handleCompletionChange = (checked: boolean) => {
+    if (isSubmitted) return;
+    setIsCompleted(checked);
+    if (onCompletionChange) {
+      onCompletionChange(
+        exercises.map((ex) => ex.id),
+        checked
+      );
+    }
   };
 
   const getSetLabel = (
@@ -66,8 +108,11 @@ export default function WorkoutCard({ exercises, type }: WorkoutCardProps) {
           <input
             type="checkbox"
             checked={isCompleted}
-            onChange={(e) => setIsCompleted(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-primary-light"
+            onChange={(e) => handleCompletionChange(e.target.checked)}
+            disabled={isSubmitted}
+            className={`w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-primary-light ${
+              isSubmitted ? "cursor-not-allowed opacity-50" : ""
+            }`}
           />
           <span className="text-sm text-gray-600">Complete</span>
         </div>
@@ -114,7 +159,10 @@ export default function WorkoutCard({ exercises, type }: WorkoutCardProps) {
                             e.target.value
                           )
                         }
-                        className="w-20 px-2 py-1 border rounded bg-white dark:bg-transparent"
+                        disabled={isSubmitted}
+                        className={`w-20 px-2 py-1 border rounded bg-white dark:bg-transparent ${
+                          isSubmitted ? "cursor-not-allowed opacity-50" : ""
+                        }`}
                         placeholder="0"
                       />
                     </td>
@@ -177,8 +225,11 @@ export default function WorkoutCard({ exercises, type }: WorkoutCardProps) {
         <textarea
           id={`notes-${exercises[0].id}`}
           value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          className="w-full px-3 py-2 border rounded-md bg-white dark:bg-transparent"
+          onChange={(e) => !isSubmitted && setNotes(e.target.value)}
+          disabled={isSubmitted}
+          className={`w-full px-3 py-2 border rounded-md bg-white dark:bg-transparent ${
+            isSubmitted ? "cursor-not-allowed opacity-50" : ""
+          }`}
           rows={2}
           placeholder="Add any notes about this exercise..."
         />

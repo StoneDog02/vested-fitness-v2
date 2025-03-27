@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { MetaFunction } from "@remix-run/node";
 import { Link } from "@remix-run/react";
-import DashboardLayout from "~/components/layout/DashboardLayout";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 
@@ -86,7 +85,7 @@ export default function PaymentSettings() {
   };
 
   return (
-    <DashboardLayout userRole="client">
+    <>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-secondary dark:text-alabaster">
           Settings
@@ -249,32 +248,33 @@ export default function PaymentSettings() {
           </div>
         </Card>
 
-        {/* Current Subscription */}
-        <Card title="Current Subscription">
-          <div className="space-y-6">
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="text-lg font-semibold text-secondary">
+        {/* Subscription Info */}
+        <Card title="Subscription">
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-sm font-medium text-secondary">
                   {mockSubscription.plan}
                 </h3>
-                <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded">
-                  {mockSubscription.status.charAt(0).toUpperCase() +
-                    mockSubscription.status.slice(1)}
-                </span>
+                <p className="text-sm text-gray-dark">
+                  ${mockSubscription.amount}/{mockSubscription.interval}
+                </p>
               </div>
-              <p className="text-2xl font-bold text-primary">
-                ${mockSubscription.amount}
-                <span className="text-sm text-gray-dark font-normal">
-                  /{mockSubscription.interval}
-                </span>
-              </p>
-              <p className="text-sm text-gray-dark mt-1">
-                Next billing date:{" "}
+              <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded">
+                {mockSubscription.status}
+              </span>
+            </div>
+
+            <div className="border-t border-gray-light pt-4">
+              <h3 className="text-sm font-medium text-secondary mb-2">
+                Next Billing Date
+              </h3>
+              <p className="text-sm text-gray-dark">
                 {formatDate(mockSubscription.nextBillingDate)}
               </p>
             </div>
 
-            <div className="pt-4 border-t border-gray-light">
+            <div className="border-t border-gray-light pt-4">
               <h3 className="text-sm font-medium text-secondary mb-2">
                 Billing History
               </h3>
@@ -285,42 +285,22 @@ export default function PaymentSettings() {
                     className="flex justify-between items-center text-sm"
                   >
                     <div>
-                      <p className="font-medium text-secondary">
-                        {invoice.description}
-                      </p>
-                      <p className="text-gray-dark">
+                      <p className="text-gray-dark">{invoice.description}</p>
+                      <p className="text-xs text-gray-dark">
                         {formatDate(invoice.date)}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-medium text-secondary">
-                        ${invoice.amount}
-                      </p>
-                      <p className="text-xs text-green-600">
-                        {invoice.status.charAt(0).toUpperCase() +
-                          invoice.status.slice(1)}
-                      </p>
+                      <p className="text-gray-dark">${invoice.amount}</p>
+                      <p className="text-xs text-green-600">{invoice.status}</p>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-
-            <div className="flex space-x-3 pt-2">
-              <Button variant="outline" size="sm">
-                Download Invoices
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-red-500 border-red-500 hover:bg-red-50"
-              >
-                Cancel Subscription
-              </Button>
-            </div>
           </div>
         </Card>
       </div>
-    </DashboardLayout>
+    </>
   );
 }

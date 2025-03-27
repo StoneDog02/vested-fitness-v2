@@ -27,6 +27,9 @@ export default {
         night: "#070D0D",
         davyGray: "#585464",
         limeGreen: "#00CC03",
+        "primary-dark": "#059669",
+        "secondary-light": "#374151",
+        "gray-light": "#E5E7EB",
       },
       fontFamily: {
         sans: [
@@ -39,6 +42,15 @@ export default {
           "Segoe UI Symbol",
           "Noto Color Emoji",
         ],
+      },
+      keyframes: {
+        "fade-in": {
+          "0%": { opacity: "0", transform: "translate(-50%, -20px)" },
+          "100%": { opacity: "1", transform: "translate(-50%, 0)" },
+        },
+      },
+      animation: {
+        "fade-in": "fade-in 0.5s ease-out forwards",
       },
     },
   },

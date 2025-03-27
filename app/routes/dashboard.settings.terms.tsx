@@ -1,6 +1,5 @@
 import type { MetaFunction } from "@remix-run/node";
 import { Link } from "@remix-run/react";
-import DashboardLayout from "~/components/layout/DashboardLayout";
 import Card from "~/components/ui/Card";
 
 export const meta: MetaFunction = () => {
@@ -12,7 +11,7 @@ export const meta: MetaFunction = () => {
 
 export default function TermsAndConditions() {
   return (
-    <DashboardLayout userRole="client">
+    <>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-secondary dark:text-alabaster">
           Settings
@@ -218,6 +217,6 @@ export default function TermsAndConditions() {
           </div>
         </div>
       </Card>
-    </DashboardLayout>
+    </>
   );
 }

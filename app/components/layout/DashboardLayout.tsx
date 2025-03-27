@@ -1,7 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link, useLocation } from "@remix-run/react";
 import { UserRole } from "~/lib/supabase";
-import ThemeToggle from "../ui/ThemeToggle";
+import AccountDrawer from "../ui/AccountDrawer";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -13,6 +13,7 @@ export default function DashboardLayout({
   userRole,
 }: DashboardLayoutProps) {
   const location = useLocation();
+  const [isAccountDrawerOpen, setIsAccountDrawerOpen] = useState(false);
 
   const isActive = (path: string) => {
     // For dashboard path, only match exact
@@ -36,8 +37,6 @@ export default function DashboardLayout({
     { name: "Meals", path: "/dashboard/meals" },
     { name: "Workouts", path: "/dashboard/workouts" },
     { name: "Supplements", path: "/dashboard/supplements" },
-    { name: "Chat", path: "/dashboard/chat" },
-    { name: "Settings", path: "/dashboard/settings" },
   ];
 
   const navItems = userRole === "coach" ? coachNavItems : clientNavItems;
@@ -50,9 +49,13 @@ export default function DashboardLayout({
             <div className="flex items-center space-x-6">
               <Link
                 to="/dashboard"
-                className="text-xl font-bold text-primary whitespace-nowrap hover:text-primary/90 transition-colors"
+                className="flex items-center hover:opacity-90 transition-opacity"
               >
-                Vested Fitness
+                <img
+                  src="/KAVA-TRAIN.png"
+                  alt="KAVA TRAINING"
+                  className="h-48 w-auto dark:invert"
+                />
               </Link>
               <nav>
                 <div className="flex space-x-4 overflow-x-auto">
@@ -73,12 +76,14 @@ export default function DashboardLayout({
               </nav>
             </div>
             <div className="flex items-center gap-4">
-              <ThemeToggle label={false} />
               <div className="relative">
-                <button className="flex items-center gap-2 text-sm rounded-full focus:outline-none">
+                <button
+                  onClick={() => setIsAccountDrawerOpen(true)}
+                  className="flex items-center gap-2 text-sm rounded-full focus:outline-none hover:opacity-80 transition-opacity"
+                >
                   <span className="sr-only">Open user menu</span>
                   <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
-                    {/* Profile initial or image will go here */}U
+                    U
                   </div>
                   <span className="text-secondary dark:text-white transition-colors duration-200">
                     Profile
@@ -92,6 +97,12 @@ export default function DashboardLayout({
       <main className="px-4 py-6 mx-auto max-w-7xl sm:px-6 lg:px-8 transition-colors duration-200">
         {children}
       </main>
+
+      <AccountDrawer
+        isOpen={isAccountDrawerOpen}
+        onClose={() => setIsAccountDrawerOpen(false)}
+        userRole={userRole}
+      />
     </div>
   );
 }

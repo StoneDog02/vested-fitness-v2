@@ -1,206 +1,196 @@
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
+import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
+import AddSupplementModal from "~/components/coach/AddSupplementModal";
+import { useState } from "react";
+
+interface Supplement {
+  id: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  instructions: string;
+  compliance: number;
+}
+
+const mockSupplements: Supplement[] = [
+  {
+    id: "1",
+    name: "Whey Protein",
+    dosage: "30g",
+    frequency: "Post-workout",
+    instructions: "Mix with water or milk",
+    compliance: 85,
+  },
+  {
+    id: "2",
+    name: "Creatine Monohydrate",
+    dosage: "5g",
+    frequency: "Daily",
+    instructions: "Take with water",
+    compliance: 90,
+  },
+];
 
 export const meta: MetaFunction = () => {
   return [
     { title: "Client Supplements | Vested Fitness" },
-    { name: "description", content: "Manage client supplements" },
+    { name: "description", content: "Manage client supplement protocols" },
   ];
 };
 
-// Mock supplements data
-const mockSupplements = [
-  {
-    id: "1",
-    name: "Multivitamin",
-    dosage: "1 tablet",
-    frequency: "Daily",
-    timing: "Morning with breakfast",
-    notes: "Helps fill nutritional gaps in the diet",
-    startDate: "2024-01-15",
-  },
-  {
-    id: "2",
-    name: "Protein Powder",
-    dosage: "1 scoop (25g)",
-    frequency: "Daily",
-    timing: "Post-workout or as needed",
-    notes: "Whey isolate, 24g protein per serving",
-    startDate: "2024-01-15",
-  },
-  {
-    id: "3",
-    name: "Creatine Monohydrate",
-    dosage: "5g",
-    frequency: "Daily",
-    timing: "Any time with water",
-    notes: "No loading phase needed, consistent daily use",
-    startDate: "2024-02-10",
-  },
-];
-
-// Mock compliance data
-const mockComplianceData = [
-  {
-    date: "Apr 8",
-    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
-    taken: true,
-  },
-  {
-    date: "Apr 9",
-    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
-    taken: true,
-  },
-  { date: "Apr 10", supplements: ["Multivitamin", "Creatine"], taken: true },
-  {
-    date: "Apr 11",
-    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
-    taken: false,
-  },
-  {
-    date: "Apr 12",
-    supplements: ["Multivitamin", "Protein Powder"],
-    taken: true,
-  },
-];
-
 export default function ClientSupplements() {
-  return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-secondary">
-          John Smith&apos;s Supplements
-        </h1>
-      </div>
+  const [supplements, setSupplements] = useState<Supplement[]>(mockSupplements);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingSupplement, setEditingSupplement] = useState<Supplement | null>(
+    null
+  );
 
-      <div className="space-y-6">
-        {/* Client's Supplements */}
-        <Card
-          title="Client Supplements"
-          action={
-            <Button variant="outline" size="sm">
-              Add Supplement
-            </Button>
-          }
-        >
-          <div className="space-y-4">
-            {mockSupplements.map((supplement) => (
-              <div
-                key={supplement.id}
-                className="p-4 border border-gray-light dark:border-davyGray rounded-lg dark:bg-night/50"
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-medium text-secondary dark:text-alabaster text-lg">
-                      {supplement.name}
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 mt-2">
-                      <div>
-                        <span className="text-sm font-medium text-gray-dark dark:text-gray-light">
-                          Dosage:
-                        </span>
-                        <span className="text-sm text-secondary dark:text-alabaster ml-2">
+  const handleRemoveSupplement = (id: string) => {
+    setSupplements((prevSupplements) =>
+      prevSupplements.filter((supplement) => supplement.id !== id)
+    );
+  };
+
+  const handleAddSupplement = (
+    newSupplement: Omit<Supplement, "id" | "compliance">
+  ) => {
+    if (editingSupplement) {
+      // Update existing supplement
+      setSupplements((prev) =>
+        prev.map((supplement) =>
+          supplement.id === editingSupplement.id
+            ? { ...supplement, ...newSupplement }
+            : supplement
+        )
+      );
+      setEditingSupplement(null);
+    } else {
+      // Add new supplement
+      const supplement: Supplement = {
+        ...newSupplement,
+        id: Date.now().toString(),
+        compliance: 0,
+      };
+      setSupplements((prev) => [...prev, supplement]);
+    }
+    setIsAddModalOpen(false);
+  };
+
+  const handleEditClick = (supplement: Supplement) => {
+    setEditingSupplement(supplement);
+    setIsAddModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setIsAddModalOpen(false);
+    setEditingSupplement(null);
+  };
+
+  return (
+    <ClientDetailLayout>
+      <div className="p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold text-secondary dark:text-alabaster">
+            Client&apos;s Supplements
+          </h1>
+          <Button variant="primary" onClick={() => setIsAddModalOpen(true)}>
+            Add Supplement
+          </Button>
+        </div>
+
+        <div className="flex gap-6">
+          {/* Supplements List */}
+          <div className="flex-1 space-y-6">
+            {supplements.map((supplement) => (
+              <Card key={supplement.id}>
+                <div className="p-6">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="text-xl font-semibold text-secondary dark:text-alabaster mb-2">
+                        {supplement.name}
+                      </h3>
+                      <div className="space-y-2">
+                        <p className="text-sm text-gray-dark dark:text-gray-light">
+                          <span className="font-medium">Dosage:</span>{" "}
                           {supplement.dosage}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-gray-dark dark:text-gray-light">
-                          Frequency:
-                        </span>
-                        <span className="text-sm text-secondary dark:text-alabaster ml-2">
+                        </p>
+                        <p className="text-sm text-gray-dark dark:text-gray-light">
+                          <span className="font-medium">Frequency:</span>{" "}
                           {supplement.frequency}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-gray-dark dark:text-gray-light">
-                          Timing:
-                        </span>
-                        <span className="text-sm text-secondary dark:text-alabaster ml-2">
-                          {supplement.timing}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-gray-dark dark:text-gray-light">
-                          Started:
-                        </span>
-                        <span className="text-sm text-secondary dark:text-alabaster ml-2">
-                          {supplement.startDate}
-                        </span>
-                      </div>
-                    </div>
-                    {supplement.notes && (
-                      <div className="mt-2">
-                        <span className="text-sm font-medium text-gray-dark dark:text-gray-light">
-                          Notes:
-                        </span>
-                        <p className="text-sm text-secondary dark:text-alabaster mt-1">
-                          {supplement.notes}
+                        </p>
+                        <p className="text-sm text-gray-dark dark:text-gray-light">
+                          <span className="font-medium">Instructions:</span>{" "}
+                          {supplement.instructions}
                         </p>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex space-x-2">
-                    <button className="text-primary text-sm hover:underline">
-                      Edit
-                    </button>
-                    <button className="text-red-500 text-sm hover:underline">
-                      Remove
-                    </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditClick(supplement)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
+                        onClick={() => handleRemoveSupplement(supplement.id)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
-        </Card>
 
-        {/* Supplement Compliance */}
-        <Card title="Recent Supplement Compliance">
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead>
-                <tr className="border-b border-gray-light dark:border-davyGray">
-                  <th className="text-left py-3 text-sm font-medium text-secondary dark:text-alabaster">
-                    Date
-                  </th>
-                  <th className="text-left py-3 text-sm font-medium text-secondary dark:text-alabaster">
-                    Supplements
-                  </th>
-                  <th className="text-left py-3 text-sm font-medium text-secondary dark:text-alabaster">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {mockComplianceData.map((day, index) => (
-                  <tr
-                    key={index}
-                    className="border-b border-gray-light dark:border-davyGray last:border-0"
-                  >
-                    <td className="py-3 text-sm text-secondary dark:text-alabaster">
-                      {day.date}
-                    </td>
-                    <td className="py-3 text-sm text-secondary dark:text-alabaster">
-                      {day.supplements.join(", ")}
-                    </td>
-                    <td className="py-3">
+          {/* Supplement Compliance Card */}
+          <div className="w-fit">
+            <Card>
+              <div className="p-6">
+                <h2 className="text-xl font-semibold text-secondary dark:text-alabaster mb-4">
+                  Supplement Compliance
+                </h2>
+                <div className="space-y-2">
+                  {supplements.map((supplement) => (
+                    <div
+                      key={supplement.id}
+                      className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-gray-lightest dark:hover:bg-secondary-light/5"
+                    >
+                      <span className="text-secondary dark:text-alabaster mr-8">
+                        {supplement.name}
+                      </span>
                       <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          day.taken
-                            ? "bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-400"
-                            : "bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-400"
+                        className={`${
+                          supplement.compliance >= 80
+                            ? "text-green-500"
+                            : supplement.compliance >= 50
+                            ? "text-yellow-500"
+                            : "text-red-500"
                         }`}
                       >
-                        {day.taken ? "Taken" : "Missed"}
+                        {supplement.compliance}%
                       </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
           </div>
-        </Card>
+        </div>
+
+        <AddSupplementModal
+          isOpen={isAddModalOpen}
+          onClose={handleModalClose}
+          onAdd={handleAddSupplement}
+          editingSupplement={editingSupplement}
+        />
       </div>
-    </div>
+    </ClientDetailLayout>
   );
 }

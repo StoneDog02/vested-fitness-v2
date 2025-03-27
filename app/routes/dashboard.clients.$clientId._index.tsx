@@ -2,6 +2,7 @@ import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import ClientProfile from "~/components/coach/ClientProfile";
+import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 
 // Mock client data - in a real app, this would come from Supabase
 const mockClient = {
@@ -84,107 +85,109 @@ export const meta: MetaFunction = () => {
 
 export default function ClientDetails() {
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <ClientProfile client={mockClient} mealPlan={mockMealPlan} />
-          <Button variant="outline">Message Client</Button>
+    <ClientDetailLayout>
+      <div className="p-6">
+        <div className="mb-6">
+          <div className="flex items-center justify-between">
+            <ClientProfile client={mockClient} mealPlan={mockMealPlan} />
+            <Button variant="outline">Message Client</Button>
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Left column with two stacked cards */}
-        <div className="space-y-6">
-          {/* Updates to Client */}
-          <Card
-            title="Updates to Client"
-            action={
-              <button className="text-sm text-primary hover:underline">
-                +Add Message
-              </button>
-            }
-          >
-            <div className="space-y-4">
-              {mockUpdates.map((update) => (
-                <div
-                  key={update.id}
-                  className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
-                >
-                  <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
-                    {update.date}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Left column with two stacked cards */}
+          <div className="space-y-6">
+            {/* Updates to Client */}
+            <Card
+              title="Updates to Client"
+              action={
+                <button className="text-sm text-primary hover:underline">
+                  +Add Message
+                </button>
+              }
+            >
+              <div className="space-y-4">
+                {mockUpdates.map((update) => (
+                  <div
+                    key={update.id}
+                    className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
+                  >
+                    <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
+                      {update.date}
+                    </div>
+                    <p className="text-secondary dark:text-alabaster">
+                      {update.message}
+                    </p>
                   </div>
-                  <p className="text-secondary dark:text-alabaster">
-                    {update.message}
+                ))}
+              </div>
+            </Card>
+
+            {/* Check In Notes */}
+            <Card title="Check In Notes">
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
+                    Last Week
+                  </h4>
+                  <p className="text-sm text-gray-dark dark:text-gray-light">
+                    {mockCheckInNotes.lastWeek}
                   </p>
                 </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* Check In Notes */}
-          <Card title="Check In Notes">
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
-                  Last Week
-                </h4>
-                <p className="text-sm text-gray-dark dark:text-gray-light">
-                  {mockCheckInNotes.lastWeek}
-                </p>
+                <div>
+                  <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
+                    This Week
+                  </h4>
+                  <p className="text-sm text-gray-dark dark:text-gray-light">
+                    {mockCheckInNotes.thisWeek}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
-                  This Week
-                </h4>
-                <p className="text-sm text-gray-dark dark:text-gray-light">
-                  {mockCheckInNotes.thisWeek}
-                </p>
-              </div>
-            </div>
-          </Card>
-        </div>
+            </Card>
+          </div>
 
-        {/* Weight Chart */}
-        <div className="md:col-span-2">
-          <Card title="Weight Progress">
-            <div className="h-64 flex items-center justify-center">
-              {/* In a real app, you would render a chart here using Chart.js */}
-              <div className="text-center">
-                <p className="text-gray-dark dark:text-gray-light mb-2">
-                  Weight Chart Would Display Here
-                </p>
-                <div className="flex flex-col space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-sm text-secondary dark:text-alabaster font-medium">
-                      Starting Weight:
-                    </span>
-                    <span className="text-sm text-secondary dark:text-alabaster">
-                      {mockClient.startingWeight} lbs
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-secondary dark:text-alabaster font-medium">
-                      Current Weight:
-                    </span>
-                    <span className="text-sm text-secondary dark:text-alabaster">
-                      {mockClient.currentWeight} lbs
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-secondary dark:text-alabaster font-medium">
-                      Total Change:
-                    </span>
-                    <span className="text-sm text-green-500">
-                      -{mockClient.startingWeight - mockClient.currentWeight}{" "}
-                      lbs
-                    </span>
+          {/* Weight Chart */}
+          <div className="md:col-span-2">
+            <Card title="Weight Progress">
+              <div className="h-64 flex items-center justify-center">
+                {/* In a real app, you would render a chart here using Chart.js */}
+                <div className="text-center">
+                  <p className="text-gray-dark dark:text-gray-light mb-2">
+                    Weight Chart Would Display Here
+                  </p>
+                  <div className="flex flex-col space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-secondary dark:text-alabaster font-medium">
+                        Starting Weight:
+                      </span>
+                      <span className="text-sm text-secondary dark:text-alabaster">
+                        {mockClient.startingWeight} lbs
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-secondary dark:text-alabaster font-medium">
+                        Current Weight:
+                      </span>
+                      <span className="text-sm text-secondary dark:text-alabaster">
+                        {mockClient.currentWeight} lbs
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-secondary dark:text-alabaster font-medium">
+                        Total Change:
+                      </span>
+                      <span className="text-sm text-green-500">
+                        -{mockClient.startingWeight - mockClient.currentWeight}{" "}
+                        lbs
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </Card>
+            </Card>
+          </div>
         </div>
       </div>
-    </div>
+    </ClientDetailLayout>
   );
 }

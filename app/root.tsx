@@ -11,7 +11,12 @@ import { ThemeProvider } from "./context/ThemeContext";
 
 import styles from "./tailwind.css?url";
 
-export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: styles },
+  { rel: "icon", type: "image/png", href: "/KAVA-black.png" },
+  { rel: "shortcut icon", type: "image/png", href: "/KAVA-black.png" },
+  { rel: "apple-touch-icon", type: "image/png", href: "/KAVA-black.png" },
+];
 
 // This script detects the saved theme from localStorage and applies it immediately to prevent flash
 const themeScript = `
@@ -31,6 +36,7 @@ export default function App() {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#ffffff" />
         <Meta />
         <Links />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />

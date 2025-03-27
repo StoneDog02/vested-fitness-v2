@@ -236,25 +236,54 @@ const calculateMacros = (
   };
 };
 
-// Mock calendar data (simplified)
-const mockCalendarData = [
-  { date: "Mon, Apr 8", status: "completed" },
-  { date: "Tue, Apr 9", status: "completed" },
-  { date: "Wed, Apr 10", status: "missed" },
-  { date: "Thu, Apr 11", status: "completed" },
-  { date: "Fri, Apr 12", status: "pending" },
-  { date: "Sat, Apr 13", status: "pending" },
-  { date: "Sun, Apr 14", status: "pending" },
-];
+// Function to generate calendar data for the current week
+const generateCalendarData = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay()); // Set to Sunday
+
+  return Array.from({ length: 7 }).map((_, index) => {
+    const date = new Date(startOfWeek);
+    date.setDate(startOfWeek.getDate() + index);
+
+    return {
+      date: date.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      }),
+      status: date > today ? "pending" : "missed",
+      percentage: 0,
+    };
+  });
+};
 
 export default function Meals() {
   const [dayOffset, setDayOffset] = useState(0);
+  const [calendarData, setCalendarData] = useState(generateCalendarData());
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [submittedDays, setSubmittedDays] = useState<{
+    [key: string]: number[];
+  }>({});
 
   // Calculate the current date with offset
   const today = new Date();
   today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
   const currentDate = new Date(today);
   currentDate.setDate(today.getDate() + dayOffset);
+
+  // Format current date for lookup
+  const currentDateFormatted = currentDate.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+
+  // Get submitted meals for current day
+  const submittedMealsForDay = submittedDays[currentDateFormatted] || [];
+  const isDaySubmitted = submittedMealsForDay.length > 0;
 
   // Format the date with relative labels
   const getFormattedDate = (date: Date, today: Date) => {
@@ -296,6 +325,26 @@ export default function Meals() {
 
   return (
     <div className="p-6">
+      {/* Success Message */}
+      {showSuccess && (
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-primary text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-fade-in">
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+          <span>Submit Successful</span>
+        </div>
+      )}
+
       <h1 className="text-2xl font-bold text-secondary dark:text-alabaster mb-6">
         Meals
       </h1>
@@ -306,7 +355,10 @@ export default function Meals() {
           <Card>
             <div className="flex justify-between items-center mb-6">
               <button
-                onClick={() => setDayOffset(dayOffset - 1)}
+                onClick={() => {
+                  setDayOffset(dayOffset - 1);
+                  setCheckedMeals([]);
+                }}
                 className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1"
               >
                 <svg
@@ -337,7 +389,10 @@ export default function Meals() {
                 </div>
               </div>
               <button
-                onClick={() => setDayOffset(dayOffset + 1)}
+                onClick={() => {
+                  setDayOffset(dayOffset + 1);
+                  setCheckedMeals([]);
+                }}
                 className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1"
               >
                 Next
@@ -388,41 +443,38 @@ export default function Meals() {
                     <div className="flex items-center gap-3">
                       <label
                         htmlFor={`meal-${meal.id}`}
-                        className="text-sm text-gray-dark dark:text-gray-light cursor-pointer select-none"
+                        className={`text-sm ${
+                          isDaySubmitted
+                            ? "text-gray-dark dark:text-gray-light"
+                            : "text-gray-dark dark:text-gray-light cursor-pointer"
+                        } select-none`}
                       >
-                        {checkedMeals.includes(meal.id)
+                        {(isDaySubmitted &&
+                          submittedMealsForDay.includes(meal.id)) ||
+                        (!isDaySubmitted && checkedMeals.includes(meal.id))
                           ? "Completed"
+                          : isDaySubmitted
+                          ? "Not Completed"
                           : "Mark as complete"}
                       </label>
-                      <button
-                        onClick={() => toggleMealCheck(meal.id)}
-                        role="switch"
-                        aria-checked={checkedMeals.includes(meal.id)}
-                        className="relative inline-flex h-6 w-11 items-center rounded-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-colors duration-200 ease-in-out"
-                      >
-                        <span className="sr-only">Toggle meal completion</span>
-                        <div
-                          className={`
-                            absolute w-full h-full rounded-full transition-colors duration-200 ease-in-out
-                            ${
-                              checkedMeals.includes(meal.id)
-                                ? "bg-primary"
-                                : "bg-gray-light dark:bg-davyGray"
-                            }
-                          `}
-                        />
-                        <div
-                          className={`
-                            transform rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out
-                            ${
-                              checkedMeals.includes(meal.id)
-                                ? "translate-x-5"
-                                : "translate-x-0.5"
-                            }
-                            h-5 w-5
-                          `}
-                        />
-                      </button>
+                      <input
+                        type="checkbox"
+                        id={`meal-${meal.id}`}
+                        checked={
+                          isDaySubmitted
+                            ? submittedMealsForDay.includes(meal.id)
+                            : checkedMeals.includes(meal.id)
+                        }
+                        onChange={() =>
+                          !isDaySubmitted && toggleMealCheck(meal.id)
+                        }
+                        disabled={isDaySubmitted}
+                        className={`w-5 h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
+                          isDaySubmitted
+                            ? "cursor-not-allowed opacity-50"
+                            : "cursor-pointer"
+                        }`}
+                      />
                     </div>
                   </div>
 
@@ -481,6 +533,106 @@ export default function Meals() {
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* Submit Completed Meals Button */}
+            <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+              <Button
+                variant="primary"
+                disabled={isSubmitting || isDaySubmitted}
+                onClick={async () => {
+                  setIsSubmitting(true);
+
+                  try {
+                    // Calculate completion percentage
+                    const completionPercentage = Math.round(
+                      (checkedMeals.length / mockMealPlan.meals.length) * 100
+                    );
+
+                    // Format the current date to match calendar format
+                    const currentDateFormatted = currentDate.toLocaleDateString(
+                      "en-US",
+                      {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                      }
+                    );
+
+                    // Simulate API call with setTimeout
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+                    // Update calendar status based on completion percentage
+                    setCalendarData((prevData) =>
+                      prevData.map((day) =>
+                        day.date === currentDateFormatted
+                          ? {
+                              ...day,
+                              percentage: completionPercentage,
+                              status:
+                                completionPercentage >= 80
+                                  ? "completed"
+                                  : completionPercentage > 0
+                                  ? "partial"
+                                  : "missed",
+                            }
+                          : day
+                      )
+                    );
+
+                    // Store the submitted meals for this day
+                    setSubmittedDays((prev) => ({
+                      ...prev,
+                      [currentDateFormatted]: [...checkedMeals],
+                    }));
+
+                    // Show success message
+                    setShowSuccess(true);
+
+                    // Scroll to top smoothly
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+
+                    // Hide success message after 3 seconds
+                    setTimeout(() => {
+                      setShowSuccess(false);
+                    }, 3000);
+                  } finally {
+                    setIsSubmitting(false);
+                  }
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  {isSubmitting ? (
+                    <>
+                      <svg
+                        className="animate-spin h-5 w-5"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      <span>Submitting...</span>
+                    </>
+                  ) : isDaySubmitted ? (
+                    "Already Submitted"
+                  ) : (
+                    "Submit Completed Meals"
+                  )}
+                </span>
+              </Button>
             </div>
           </Card>
         </div>
@@ -562,7 +714,7 @@ export default function Meals() {
           {/* Compliance Calendar */}
           <Card title="Meal Compliance">
             <div className="space-y-3">
-              {mockCalendarData.map((day, index) => (
+              {calendarData.map((day, index) => (
                 <div
                   key={index}
                   className="flex items-center justify-between py-3 border-b dark:border-davyGray last:border-0"
@@ -573,15 +725,19 @@ export default function Meals() {
                   <div className="flex items-center gap-2">
                     <span
                       className={`inline-block w-3 h-3 rounded-full ${
-                        day.status === "completed"
+                        day.percentage >= 80
                           ? "bg-primary"
-                          : day.status === "missed"
-                          ? "bg-red-500"
-                          : "bg-gray-light dark:bg-davyGray"
+                          : day.percentage > 0
+                          ? "bg-yellow-500"
+                          : day.status === "pending"
+                          ? "bg-gray-light dark:bg-davyGray"
+                          : "bg-red-500"
                       }`}
                     ></span>
-                    <span className="text-sm capitalize text-gray-dark dark:text-gray-light">
-                      {day.status}
+                    <span className="text-sm text-gray-dark dark:text-gray-light">
+                      {day.status === "pending"
+                        ? "Pending"
+                        : `${day.percentage}%`}
                     </span>
                   </div>
                 </div>
