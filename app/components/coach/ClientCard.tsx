@@ -13,6 +13,7 @@ interface ClientCardProps {
     };
     workoutSplit: string;
     supplementCount: number;
+    goal: string;
   };
 }
 
@@ -36,7 +37,7 @@ export default function ClientCard({ client }: ClientCardProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-5 gap-4 mt-4 text-sm">
+      <div className="grid grid-cols-6 gap-4 mt-4 text-sm">
         <div>
           <p className="text-gray-dark dark:text-gray-light font-medium">
             Starting Weight
@@ -76,6 +77,12 @@ export default function ClientCard({ client }: ClientCardProps) {
           <p className="text-secondary dark:text-alabaster">
             {client.supplementCount}
           </p>
+        </div>
+        <div>
+          <p className="text-gray-dark dark:text-gray-light font-medium">
+            Goal
+          </p>
+          <p className="text-secondary dark:text-alabaster">{client.goal}</p>
         </div>
       </div>
     </Link>

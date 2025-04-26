@@ -1,7 +1,8 @@
-import { Link } from "@remix-run/react";
 import type { MetaFunction } from "@remix-run/node";
 import Button from "~/components/ui/Button";
 import ClientCard from "~/components/coach/ClientCard";
+import ClientInviteModal from "~/components/coach/ClientInviteModal";
+import { useState } from "react";
 
 export const meta: MetaFunction = () => {
   return [
@@ -24,6 +25,7 @@ const mockClients = [
     currentMacros: { protein: 180, carbs: 200, fat: 60 },
     workoutSplit: "Push/Pull/Legs",
     supplementCount: 3,
+    goal: "Build muscle and increase strength",
   },
   {
     id: "2",
@@ -37,6 +39,7 @@ const mockClients = [
     currentMacros: { protein: 120, carbs: 150, fat: 45 },
     workoutSplit: "Upper/Lower",
     supplementCount: 2,
+    goal: "Lose body fat and tone up",
   },
   {
     id: "3",
@@ -50,6 +53,7 @@ const mockClients = [
     currentMacros: { protein: 200, carbs: 180, fat: 65 },
     workoutSplit: "Full Body",
     supplementCount: 4,
+    goal: "Lose weight and improve cardiovascular health",
   },
   {
     id: "4",
@@ -63,19 +67,22 @@ const mockClients = [
     currentMacros: { protein: 110, carbs: 130, fat: 40 },
     workoutSplit: "Upper/Lower",
     supplementCount: 3,
+    goal: "Maintain current weight and improve athletic performance",
   },
 ];
 
 export default function ClientsIndex() {
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-secondary dark:text-alabaster">
           Clients
         </h1>
-        <Link to="/dashboard/clients/new">
-          <Button variant="primary">Add New Client</Button>
-        </Link>
+        <Button variant="primary" onClick={() => setIsInviteModalOpen(true)}>
+          Add New Client
+        </Button>
       </div>
 
       <div className="mb-6">
@@ -108,6 +115,11 @@ export default function ClientsIndex() {
           <ClientCard key={client.id} client={client} />
         ))}
       </div>
+
+      <ClientInviteModal
+        isOpen={isInviteModalOpen}
+        onClose={() => setIsInviteModalOpen(false)}
+      />
     </div>
   );
 }
