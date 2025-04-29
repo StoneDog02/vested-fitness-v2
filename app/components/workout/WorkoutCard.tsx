@@ -1,5 +1,5 @@
 import type { Exercise } from "~/types/workout";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface WorkoutCardProps {
   exercises: Exercise[];
@@ -92,17 +92,19 @@ export default function WorkoutCard({
       {/* Exercise Header */}
       <div className="flex justify-between items-start">
         <div>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex flex-col xs:flex-row xs:items-center gap-1 xs:gap-2 mb-2">
             {type !== "Single" && (
-              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-md text-sm font-medium">
+              <span className="px-2 py-0.5 xs:py-1 bg-green-100 text-green-800 rounded-md text-xs xs:text-sm font-medium w-max xs:w-auto mb-1 xs:mb-0">
                 {type === "Super" ? "Super Set" : "Giant Set"}
               </span>
             )}
-            <h3 className="text-xl font-semibold text-secondary dark:text-alabaster">
+            <h3 className="text-lg xs:text-xl font-semibold text-secondary dark:text-alabaster leading-tight">
               {exercises.map((ex) => ex.name).join(" + ")}
             </h3>
           </div>
-          <p className="text-sm text-gray-600">{exercises[0].description}</p>
+          <p className="text-xs xs:text-sm text-gray-600">
+            {exercises[0].description}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -114,7 +116,7 @@ export default function WorkoutCard({
               isSubmitted ? "cursor-not-allowed opacity-50" : ""
             }`}
           />
-          <span className="text-sm text-gray-600">Complete</span>
+          <span className="text-xs xs:text-sm text-gray-600">Complete</span>
         </div>
       </div>
 
@@ -175,41 +177,52 @@ export default function WorkoutCard({
 
         {/* Video Grid */}
         <div className="grid grid-cols-1 gap-4">
-          {exercises.map(
-            (exercise) =>
-              exercise.videoUrl && (
-                <div
-                  key={exercise.id}
-                  className="relative aspect-video bg-gray-100 rounded-lg flex items-center justify-center h-[150px]"
-                >
-                  <div className="absolute top-2 left-2">
-                    <span className="text-sm font-medium text-gray-600">
-                      {exercise.name}
-                    </span>
-                  </div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <svg
-                      className="w-12 h-12 text-gray-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
-                  </div>
+          {exercises.map((exercise) =>
+            exercise.videoUrl ? (
+              <div
+                key={exercise.id}
+                className="relative bg-gray-100 rounded-lg flex items-center justify-center h-[160px] sm:h-[220px] overflow-hidden"
+              >
+                <div className="absolute top-2 left-2 z-10">
+                  <span className="text-xs sm:text-sm font-medium text-gray-600">
+                    {exercise.name}
+                  </span>
                 </div>
-              )
+                <VideoPlayer url={exercise.videoUrl} label={exercise.name} />
+              </div>
+            ) : (
+              <div
+                key={exercise.id}
+                className="relative aspect-video bg-gray-100 rounded-lg flex items-center justify-center h-[120px] sm:h-[180px]"
+              >
+                <div className="absolute top-2 left-2">
+                  <span className="text-xs sm:text-sm font-medium text-gray-600">
+                    {exercise.name}
+                  </span>
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <svg
+                    className="w-10 h-10 sm:w-12 sm:h-12 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                </div>
+              </div>
+            )
           )}
         </div>
       </div>
@@ -234,6 +247,81 @@ export default function WorkoutCard({
           placeholder="Add any notes about this exercise..."
         />
       </div>
+    </div>
+  );
+}
+
+function VideoPlayer({ url, label }: { url: string; label: string }) {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleFullscreen = () => {
+    if (containerRef.current) {
+      if (!document.fullscreenElement) {
+        containerRef.current.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative w-full h-full flex items-center justify-center bg-black rounded-lg`}
+    >
+      <video
+        ref={videoRef}
+        src={url}
+        controls
+        className="w-full h-full max-h-[160px] sm:max-h-[220px] rounded-lg object-contain bg-black"
+        style={{ background: "#000" }}
+      >
+        <track kind="captions" label="English captions" src="" default />
+      </video>
+      <button
+        type="button"
+        onClick={handleFullscreen}
+        className="absolute bottom-2 right-2 bg-black/60 text-white rounded-full p-2 hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-primary z-20"
+        aria-label={
+          isFullscreen
+            ? `Exit fullscreen for ${label}`
+            : `Go fullscreen for ${label}`
+        }
+      >
+        {isFullscreen ? (
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 9L5 5m0 0v4m0-4h4m6 6l4 4m0 0h-4m4 0v-4"
+            />
+          </svg>
+        ) : (
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 3h6v6m0-6L10 14m-1 1H3v-6m0 6l11-11"
+            />
+          </svg>
+        )}
+      </button>
     </div>
   );
 }

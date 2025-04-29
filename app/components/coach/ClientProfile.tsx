@@ -26,8 +26,8 @@ export default function ClientProfile({
     : client.currentMacros;
 
   return (
-    <div className="p-4 bg-white dark:bg-night border border-gray-light dark:border-davyGray rounded-lg">
-      <div className="flex items-center space-x-3">
+    <div className="p-4 bg-white dark:bg-night border border-gray-light dark:border-davyGray rounded-lg w-full">
+      <div className="flex items-center gap-3 mb-6">
         <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white text-xl">
           {client.name.charAt(0)}
         </div>
@@ -36,9 +36,9 @@ export default function ClientProfile({
         </h3>
       </div>
 
-      <div className="grid grid-cols-5 gap-4 mt-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-y-6 gap-x-4">
         <div>
-          <p className="text-gray-dark dark:text-gray-light font-medium">
+          <p className="text-gray-dark dark:text-gray-light text-sm mb-1">
             Starting Weight
           </p>
           <p className="text-secondary dark:text-alabaster">
@@ -46,23 +46,31 @@ export default function ClientProfile({
           </p>
         </div>
         <div>
-          <p className="text-gray-dark dark:text-gray-light font-medium">
+          <p className="text-gray-dark dark:text-gray-light text-sm mb-1">
             Current Weight
           </p>
           <p className="text-secondary dark:text-alabaster">
             {client.currentWeight} lbs
           </p>
         </div>
-        <div>
-          <p className="text-gray-dark dark:text-gray-light font-medium">
+        <div className="col-span-2 sm:col-span-1">
+          <p className="text-gray-dark dark:text-gray-light text-sm mb-1">
             Macros
           </p>
-          <p className="text-secondary dark:text-alabaster">
-            P: {macros.protein}g | C: {macros.carbs}g | F: {macros.fat}g
-          </p>
+          <div className="space-y-0.5">
+            <p className="text-secondary dark:text-alabaster">
+              P: {macros.protein}g
+            </p>
+            <p className="text-secondary dark:text-alabaster">
+              C: {macros.carbs}g
+            </p>
+            <p className="text-secondary dark:text-alabaster">
+              F: {macros.fat}g
+            </p>
+          </div>
         </div>
         <div>
-          <p className="text-gray-dark dark:text-gray-light font-medium">
+          <p className="text-gray-dark dark:text-gray-light text-sm mb-1">
             Workout Split
           </p>
           <p className="text-secondary dark:text-alabaster">
@@ -70,7 +78,7 @@ export default function ClientProfile({
           </p>
         </div>
         <div>
-          <p className="text-gray-dark dark:text-gray-light font-medium">
+          <p className="text-gray-dark dark:text-gray-light text-sm mb-1">
             Supplements
           </p>
           <p className="text-secondary dark:text-alabaster">

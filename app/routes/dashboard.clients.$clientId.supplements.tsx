@@ -100,7 +100,7 @@ export default function ClientSupplements() {
           </Button>
         </div>
 
-        <div className="flex gap-6">
+        <div className="flex flex-col gap-6 md:flex-row">
           {/* Supplements List */}
           <div className="flex-1 space-y-6">
             {supplements.map((supplement) => (
@@ -150,7 +150,7 @@ export default function ClientSupplements() {
           </div>
 
           {/* Supplement Compliance Card */}
-          <div className="w-fit">
+          <div className="w-full md:w-fit">
             <Card>
               <div className="p-6">
                 <h2 className="text-xl font-semibold text-secondary dark:text-alabaster mb-4">

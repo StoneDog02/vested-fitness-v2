@@ -320,11 +320,15 @@ export default function Workouts() {
   const isDateSubmitted = displayedDateString in submittedData;
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       {/* Success Message */}
       {showSuccess && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-green-100 border border-green-500 text-green-700 px-8 py-3 rounded-lg shadow-lg flex items-center">
-          <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-green-100 border border-green-500 text-green-700 px-4 sm:px-8 py-2 sm:py-3 rounded-lg shadow-lg flex items-center text-sm sm:text-base">
+          <svg
+            className="w-4 h-4 sm:w-5 sm:h-5 mr-2"
+            fill="currentColor"
+            viewBox="0 0 20 20"
+          >
             <path
               fillRule="evenodd"
               d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
@@ -335,19 +339,21 @@ export default function Workouts() {
         </div>
       )}
 
-      <h1 className="text-3xl font-bold mb-6">Today&apos;s Workout</h1>
+      <h1 className="text-xl sm:text-3xl font-bold mb-4 sm:mb-6">
+        Today&apos;s Workout
+      </h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         <div className="md:col-span-2">
-          <Card className="mb-6">
+          <Card className="mb-4 sm:mb-6">
             {/* Date Navigation */}
-            <div className="relative flex justify-between items-center mb-6">
+            <div className="relative flex justify-between items-center mb-4 sm:mb-6">
               <button
                 onClick={handlePrevDay}
-                className="flex items-center text-green-500 hover:text-green-600 transition-colors"
+                className="flex items-center text-green-500 hover:text-green-600 transition-colors text-sm sm:text-base"
               >
                 <svg
-                  className="w-5 h-5 mr-1"
+                  className="w-4 h-4 sm:w-5 sm:h-5 mr-1"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -362,32 +368,32 @@ export default function Workouts() {
                 Previous
               </button>
 
-              <div className="absolute left-1/2 -translate-x-1/2 text-center pt-[0.75rem]">
-                <h2 className="text-xl font-semibold text-secondary dark:text-alabaster">
+              <div className="absolute left-1/2 -translate-x-1/2 text-center pt-2 sm:pt-[0.75rem]">
+                <h2 className="text-lg sm:text-xl font-semibold text-secondary dark:text-alabaster">
                   {dateDisplay.title}
                 </h2>
-                <div className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                <div className="text-xs sm:text-sm text-gray-dark dark:text-gray-light mt-0.5 sm:mt-1">
                   {dateDisplay.subtitle}
                 </div>
                 {dayOffset !== 0 ? (
                   <button
                     onClick={() => setDayOffset(0)}
-                    className="text-xs text-primary hover:text-primary-dark transition-colors duration-200 mt-1"
+                    className="text-xs text-primary hover:text-primary-dark transition-colors duration-200 mt-0.5 sm:mt-1"
                   >
                     Go to today
                   </button>
                 ) : (
-                  <div className="h-[1.5rem]"></div>
+                  <div className="h-4 sm:h-[1.5rem]"></div>
                 )}
               </div>
 
               <button
                 onClick={handleNextDay}
-                className="flex items-center text-green-500 hover:text-green-600 transition-colors"
+                className="flex items-center text-green-500 hover:text-green-600 transition-colors text-sm sm:text-base"
               >
                 Next
                 <svg
-                  className="w-5 h-5 ml-1"
+                  className="w-4 h-4 sm:w-5 sm:h-5 ml-1"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -403,12 +409,12 @@ export default function Workouts() {
             </div>
 
             {/* Workout Day Label */}
-            <h2 className="text-2xl font-semibold text-gray-600 mb-6">
+            <h2 className="text-xl sm:text-2xl font-semibold text-gray-600 mb-4 sm:mb-6">
               {workoutDay?.focus || "Rest Day"}
             </h2>
 
             {/* Exercises */}
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               {!workoutDay || workoutDay.focus === "Rest Day" ? (
                 <p className="text-gray-600">
                   No workout scheduled for this day.
@@ -421,7 +427,7 @@ export default function Workouts() {
                         ? exerciseOrGroup[0].id
                         : exerciseOrGroup.id
                     }
-                    className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-6"
+                    className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
                   >
                     {Array.isArray(exerciseOrGroup) ? (
                       <WorkoutCard
@@ -468,16 +474,19 @@ export default function Workouts() {
 
             {/* Submit Button */}
             {workoutDay && workoutDay.focus !== "Rest Day" && (
-              <div className="mt-6 flex justify-end">
+              <div className="mt-4 sm:mt-6 flex justify-end">
                 <Button
                   variant="primary"
-                  className="px-8 text-lg flex items-center gap-2"
+                  className="w-full sm:w-auto px-4 sm:px-8 text-base sm:text-lg flex items-center justify-center gap-2"
                   onClick={handleSubmitWorkouts}
                   disabled={isSubmitting}
                 >
                   {isSubmitting ? (
                     <>
-                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <svg
+                        className="animate-spin h-4 w-4 sm:h-5 sm:w-5"
+                        viewBox="0 0 24 24"
+                      >
                         <circle
                           className="opacity-25"
                           cx="12"
@@ -504,14 +513,14 @@ export default function Workouts() {
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           {/* Workout Plan Info */}
           <Card title={mockWorkout.name}>
-            <div className="text-sm text-gray-dark dark:text-gray-light mb-4">
+            <div className="text-xs sm:text-sm text-gray-dark dark:text-gray-light mb-3 sm:mb-4">
               {mockWorkout.currentWeek}
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5 sm:space-y-2">
               {mockWorkout.schedule.map((day, index) => (
                 <div
                   key={index}
@@ -523,7 +532,7 @@ export default function Workouts() {
                 >
                   <div className="flex justify-between items-center">
                     <span
-                      className={`font-medium ${
+                      className={`text-sm sm:text-base font-medium ${
                         day.day.toLowerCase() ===
                         dateDisplay.weekday.toLowerCase()
                           ? "text-secondary dark:text-alabaster"
@@ -533,7 +542,7 @@ export default function Workouts() {
                       {day.day}
                     </span>
                     <span
-                      className={`text-sm ${
+                      className={`text-xs sm:text-sm ${
                         day.day.toLowerCase() ===
                         dateDisplay.weekday.toLowerCase()
                           ? "text-gray-dark dark:text-gray-light"
@@ -550,17 +559,17 @@ export default function Workouts() {
 
           {/* Workout Calendar */}
           <Card title="Workout Compliance">
-            <div className="space-y-2">
+            <div className="space-y-1.5 sm:space-y-2">
               {calendarData.map((day, index) => (
                 <div
                   key={index}
-                  className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-gray-lightest dark:hover:bg-secondary-light/5"
+                  className="flex items-center justify-between text-xs sm:text-sm p-2 rounded-lg hover:bg-gray-lightest dark:hover:bg-secondary-light/5"
                 >
                   <div className="flex items-baseline">
                     <span className="text-secondary dark:text-alabaster">
                       {day.date}
                     </span>
-                    <span className="text-xs text-gray-dark dark:text-gray-light ml-2">
+                    <span className="text-[10px] sm:text-xs text-gray-dark dark:text-gray-light ml-1 sm:ml-2">
                       ({day.workout})
                     </span>
                   </div>

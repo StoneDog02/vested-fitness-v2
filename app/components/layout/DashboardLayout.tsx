@@ -2,6 +2,13 @@ import React, { useState } from "react";
 import { Link, useLocation } from "@remix-run/react";
 import { UserRole } from "~/lib/supabase";
 import AccountDrawer from "../ui/AccountDrawer";
+import MenuDrawer from "../ui/MenuDrawer";
+
+interface NavItem {
+  name: string;
+  path: string;
+  subItems?: NavItem[];
+}
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -14,11 +21,16 @@ export default function DashboardLayout({
 }: DashboardLayoutProps) {
   const location = useLocation();
   const [isAccountDrawerOpen, setIsAccountDrawerOpen] = useState(false);
+  const [isMenuDrawerOpen, setIsMenuDrawerOpen] = useState(false);
 
   const isActive = (path: string) => {
     // For dashboard path, only match exact
     if (path === "/dashboard") {
       return location.pathname === "/dashboard";
+    }
+    // For client subitems, only match exact
+    if (/^\/dashboard\/clients\/[\w-]+(\/\w+)?$/.test(path)) {
+      return location.pathname === path;
     }
     // For other paths match exact or subpaths
     return (
@@ -26,12 +38,12 @@ export default function DashboardLayout({
     );
   };
 
-  const coachNavItems = [
+  const coachNavItems: NavItem[] = [
     { name: "Dashboard", path: "/dashboard" },
     { name: "Clients", path: "/dashboard/clients" },
   ];
 
-  const clientNavItems = [
+  const clientNavItems: NavItem[] = [
     { name: "Dashboard", path: "/dashboard" },
     { name: "Coach Access", path: "/dashboard/coach-access" },
     { name: "Meals", path: "/dashboard/meals" },
@@ -41,24 +53,74 @@ export default function DashboardLayout({
 
   const navItems = userRole === "coach" ? coachNavItems : clientNavItems;
 
+  // Add client sub-items when on a client's page
+  const clientId = location.pathname.match(
+    /\/dashboard\/clients\/([^/]+)/
+  )?.[1];
+  if (clientId && userRole === "coach") {
+    const clientSubItems: NavItem[] = [
+      { name: "Overview", path: `/dashboard/clients/${clientId}` },
+      { name: "Meals", path: `/dashboard/clients/${clientId}/meals` },
+      { name: "Workouts", path: `/dashboard/clients/${clientId}/workouts` },
+      {
+        name: "Supplements",
+        path: `/dashboard/clients/${clientId}/supplements`,
+      },
+      { name: "Chat", path: `/dashboard/clients/${clientId}/chat` },
+    ];
+
+    // Find and update the Clients nav item
+    const clientsNavItem = navItems.find(
+      (item) => item.path === "/dashboard/clients"
+    );
+    if (clientsNavItem) {
+      clientsNavItem.subItems = clientSubItems;
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-alabaster dark:bg-davyGray transition-colors duration-200">
-      <header className="bg-white dark:bg-night border-b border-gray-light dark:border-secondary shadow-sm transition-colors duration-200">
-        <div className="px-4 py-3 mx-auto max-w-7xl sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-6">
+    <div className="min-h-screen flex flex-col bg-alabaster dark:bg-davyGray transition-colors duration-200">
+      <header className="sticky top-0 z-10 bg-white dark:bg-night border-b border-gray-light dark:border-secondary shadow-sm transition-colors duration-200">
+        <div className="px-4 py-2 sm:py-3 mx-auto max-w-7xl sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between gap-4">
+            {/* Mobile Menu Button */}
+            <button
+              type="button"
+              className="sm:hidden text-secondary dark:text-alabaster hover:text-primary dark:hover:text-primary"
+              onClick={() => setIsMenuDrawerOpen(true)}
+            >
+              <span className="sr-only">Open menu</span>
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth="1.5"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                />
+              </svg>
+            </button>
+
+            {/* Logo Container - Centered on Mobile */}
+            <div className="flex-1 flex justify-center sm:justify-start">
               <Link
                 to="/dashboard"
-                className="flex items-center hover:opacity-90 transition-opacity"
+                className="flex-shrink-0 flex items-center hover:opacity-90 transition-opacity"
               >
                 <img
                   src="/KAVA-TRAIN.png"
                   alt="KAVA TRAINING"
-                  className="h-48 w-auto dark:invert"
+                  className="h-20 sm:h-12 w-auto dark:invert"
                 />
               </Link>
-              <nav>
-                <div className="flex space-x-4 overflow-x-auto">
+
+              {/* Desktop Navigation */}
+              <nav className="hidden sm:flex flex-1 overflow-x-auto ml-6">
+                <div className="flex space-x-4">
                   {navItems.map((item) => (
                     <Link
                       key={item.name}
@@ -75,33 +137,39 @@ export default function DashboardLayout({
                 </div>
               </nav>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <button
-                  onClick={() => setIsAccountDrawerOpen(true)}
-                  className="flex items-center gap-2 text-sm rounded-full focus:outline-none hover:opacity-80 transition-opacity"
-                >
-                  <span className="sr-only">Open user menu</span>
-                  <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
-                    U
-                  </div>
-                  <span className="text-secondary dark:text-white transition-colors duration-200">
-                    Profile
-                  </span>
-                </button>
+
+            <button
+              onClick={() => setIsAccountDrawerOpen(true)}
+              className="flex items-center gap-2 text-sm rounded-full focus:outline-none hover:opacity-80 transition-opacity"
+            >
+              <span className="sr-only">Open user menu</span>
+              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
+                U
               </div>
-            </div>
+              <span className="hidden sm:inline text-secondary dark:text-white transition-colors duration-200">
+                Profile
+              </span>
+            </button>
           </div>
         </div>
       </header>
-      <main className="px-4 py-6 mx-auto max-w-7xl sm:px-6 lg:px-8 transition-colors duration-200">
-        {children}
+      <main className="flex-1 w-full">
+        <div className="px-4 py-6 mx-auto max-w-7xl sm:px-6 lg:px-8 transition-colors duration-200">
+          {children}
+        </div>
       </main>
 
       <AccountDrawer
         isOpen={isAccountDrawerOpen}
         onClose={() => setIsAccountDrawerOpen(false)}
         userRole={userRole}
+      />
+
+      <MenuDrawer
+        isOpen={isMenuDrawerOpen}
+        onClose={() => setIsMenuDrawerOpen(false)}
+        navItems={navItems}
+        isActive={isActive}
       />
     </div>
   );

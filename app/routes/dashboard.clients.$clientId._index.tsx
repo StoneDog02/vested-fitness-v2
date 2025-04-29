@@ -1,6 +1,5 @@
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
-import Button from "~/components/ui/Button";
 import ClientProfile from "~/components/coach/ClientProfile";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import AddMessageModal from "~/components/coach/AddMessageModal";
@@ -168,27 +167,30 @@ export default function ClientDetails() {
 
   return (
     <ClientDetailLayout>
-      <div className="p-6">
+      <div className="h-full p-4 sm:p-6 overflow-y-auto">
         <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <ClientProfile client={mockClient} mealPlan={mockMealPlan} />
-            <Button variant="outline">Message Client</Button>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex-1">
+              <ClientProfile client={mockClient} mealPlan={mockMealPlan} />
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left column with two stacked cards */}
           <div className="space-y-6">
             {/* Updates to Client */}
             <Card
-              title="Updates to Client"
-              action={
-                <button
-                  onClick={() => setShowAddMessage(true)}
-                  className="text-sm text-primary hover:underline"
-                >
-                  +Add Message
-                </button>
+              title={
+                <div className="flex items-center justify-between w-full">
+                  <span>Updates to Client</span>
+                  <button
+                    onClick={() => setShowAddMessage(true)}
+                    className="text-sm text-primary hover:underline"
+                  >
+                    +Add Message
+                  </button>
+                </div>
               }
             >
               <div className="space-y-4">
@@ -210,21 +212,23 @@ export default function ClientDetails() {
 
             {/* Check In Notes */}
             <Card
-              title="Check In Notes"
-              action={
-                <div className="flex flex-col items-end space-y-1">
-                  <button
-                    onClick={() => setShowAddCheckIn(true)}
-                    className="text-sm text-primary hover:underline"
-                  >
-                    +Add Check In
-                  </button>
-                  <button
-                    onClick={() => setShowHistory(true)}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    History
-                  </button>
+              title={
+                <div className="flex items-center justify-between w-full">
+                  <span>Check In Notes</span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowHistory(true)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      History
+                    </button>
+                    <button
+                      onClick={() => setShowAddCheckIn(true)}
+                      className="text-sm text-primary hover:underline"
+                    >
+                      +Add Check In
+                    </button>
+                  </div>
                 </div>
               }
             >
@@ -250,17 +254,16 @@ export default function ClientDetails() {
           </div>
 
           {/* Weight Chart */}
-          <div className="md:col-span-2">
+          <div className="lg:col-span-2">
             <Card title="Weight Progress">
               <div className="h-64 flex items-center justify-center">
-                {/* In a real app, you would render a chart here using Chart.js */}
-                <div className="text-center">
-                  <p className="text-gray-dark dark:text-gray-light mb-2">
+                <div className="text-center w-full max-w-sm">
+                  <p className="text-gray-dark dark:text-gray-light mb-4">
                     Weight Chart Would Display Here
                   </p>
-                  <div className="flex flex-col space-y-1">
+                  <div className="flex flex-col space-y-2">
                     <div className="flex justify-between">
-                      <span className="text-sm text-secondary dark:text-alabaster font-medium">
+                      <span className="text-sm text-secondary dark:text-alabaster">
                         Starting Weight:
                       </span>
                       <span className="text-sm text-secondary dark:text-alabaster">
@@ -268,7 +271,7 @@ export default function ClientDetails() {
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-sm text-secondary dark:text-alabaster font-medium">
+                      <span className="text-sm text-secondary dark:text-alabaster">
                         Current Weight:
                       </span>
                       <span className="text-sm text-secondary dark:text-alabaster">
@@ -276,7 +279,7 @@ export default function ClientDetails() {
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-sm text-secondary dark:text-alabaster font-medium">
+                      <span className="text-sm text-secondary dark:text-alabaster">
                         Total Change:
                       </span>
                       <span className="text-sm text-green-500">

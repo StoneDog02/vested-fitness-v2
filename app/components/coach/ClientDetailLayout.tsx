@@ -37,7 +37,7 @@ export default function ClientDetailLayout({
   ];
 
   return (
-    <div>
+    <div className="h-full flex flex-col">
       <TabLayout tabs={tabs}>{children}</TabLayout>
     </div>
   );

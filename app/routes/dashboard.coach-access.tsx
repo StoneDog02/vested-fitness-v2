@@ -242,23 +242,30 @@ export default function CoachAccess() {
                 </p>
               </div>
               {showAddWeight ? (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="number"
                     value={newWeight}
                     onChange={(e) => setNewWeight(e.target.value)}
                     placeholder="Enter weight in lbs"
-                    className="flex-1 px-3 py-2 border border-gray-light dark:border-davyGray rounded-md bg-white dark:bg-night text-secondary dark:text-alabaster"
+                    className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-md bg-white dark:bg-night text-secondary dark:text-alabaster"
                   />
-                  <Button onClick={handleAddWeight} variant="primary">
-                    Save
-                  </Button>
-                  <Button
-                    onClick={() => setShowAddWeight(false)}
-                    variant="secondary"
-                  >
-                    Cancel
-                  </Button>
+                  <div className="flex gap-2 sm:flex-shrink-0">
+                    <Button
+                      onClick={handleAddWeight}
+                      variant="primary"
+                      className="flex-1 sm:flex-initial"
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      onClick={() => setShowAddWeight(false)}
+                      variant="secondary"
+                      className="flex-1 sm:flex-initial"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <Button

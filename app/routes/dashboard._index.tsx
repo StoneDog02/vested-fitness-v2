@@ -216,7 +216,7 @@ export default function Dashboard() {
               onClick={() =>
                 window.open("https://kavabodybuilding.myshopify.com", "_blank")
               }
-              className="bg-green-500 hover:bg-green-600"
+              className="bg-green-500 hover:bg-green-600 whitespace-nowrap"
             >
               Shop KAVA
             </Button>
@@ -342,7 +342,7 @@ export default function Dashboard() {
               onClick={() =>
                 window.open("https://kavabodybuilding.myshopify.com", "_blank")
               }
-              className="bg-green-500 hover:bg-green-600"
+              className="bg-green-500 hover:bg-green-600 whitespace-nowrap"
             >
               Shop KAVA
             </Button>

@@ -16,9 +16,9 @@ export default function TabLayout({ tabs, children }: TabLayoutProps) {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <div>
-      <div className="border-b border-gray-light dark:border-davyGray transition-colors duration-200">
-        <nav className="-mb-px flex space-x-4">
+    <div className="h-full flex flex-col">
+      <div className="hidden sm:block border-b border-gray-light dark:border-davyGray transition-colors duration-200">
+        <nav className="overflow-x-auto -mb-px flex space-x-4">
           {tabs.map((tab) => (
             <Link
               key={tab.name}
@@ -37,7 +37,7 @@ export default function TabLayout({ tabs, children }: TabLayoutProps) {
           ))}
         </nav>
       </div>
-      <div className="py-6">{children}</div>
+      <div className="flex-1 overflow-y-auto">{children}</div>
     </div>
   );
 }

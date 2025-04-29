@@ -6,6 +6,7 @@ import CreateMealPlanModal from "~/components/coach/CreateMealPlanModal";
 import ViewMealPlanModal from "~/components/coach/ViewMealPlanModal";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import type { MealPlanFormData } from "~/components/coach/CreateMealPlanForm";
+import Modal from "~/components/ui/Modal";
 
 interface MealPlanData {
   id: string;
@@ -203,7 +204,15 @@ export default function ClientMeals() {
     data: MealPlanFormData;
     id: string;
   } | null>(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const activeMealPlan = mealPlans.find((plan) => plan.isActive);
+
+  // Sort meal plans by createdAt descending
+  const sortedMealPlans = [...mealPlans].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  );
+  const recentMealPlans = sortedMealPlans.slice(0, 3);
+  const historyMealPlans = sortedMealPlans.slice(3);
 
   const handleSetActive = (id: string) => {
     setMealPlans((prevPlans) =>
@@ -275,7 +284,7 @@ export default function ClientMeals() {
             <Card
               title="Meal Plan History"
               action={
-                <div className="flex gap-2">
+                <div className="flex flex-col items-start gap-1">
                   <Button
                     size="sm"
                     variant="primary"
@@ -283,11 +292,18 @@ export default function ClientMeals() {
                   >
                     Create Plan
                   </Button>
+                  <button
+                    className="text-primary text-xs font-medium hover:underline mt-1 px-1"
+                    onClick={() => setIsHistoryModalOpen(true)}
+                    style={{ background: "none", border: "none" }}
+                  >
+                    History
+                  </button>
                 </div>
               }
             >
               <div className="space-y-4">
-                {mealPlans.map((plan) => (
+                {recentMealPlans.map((plan) => (
                   <div
                     key={plan.id}
                     className={`p-4 border rounded-lg ${
@@ -313,6 +329,12 @@ export default function ClientMeals() {
                       Created: {plan.createdAt}
                     </div>
                     <div className="flex gap-2 mt-3">
+                      <button
+                        className="text-gray-dark dark:text-gray-light text-sm hover:underline"
+                        onClick={() => handleEditPlan(plan)}
+                      >
+                        Edit
+                      </button>
                       {!plan.isActive && (
                         <button
                           className="text-primary text-sm hover:underline"
@@ -321,17 +343,69 @@ export default function ClientMeals() {
                           Set Active
                         </button>
                       )}
-                      <button
-                        className="text-gray-dark dark:text-gray-light text-sm hover:underline"
-                        onClick={() => handleEditPlan(plan)}
-                      >
-                        Edit
-                      </button>
                     </div>
                   </div>
                 ))}
               </div>
             </Card>
+            {/* History Modal */}
+            <Modal
+              isOpen={isHistoryModalOpen}
+              onClose={() => setIsHistoryModalOpen(false)}
+              title="Meal Plan History"
+            >
+              <div className="space-y-4">
+                {historyMealPlans.length === 0 ? (
+                  <div className="text-center text-gray-dark dark:text-gray-light">
+                    No more meal plans in history.
+                  </div>
+                ) : (
+                  historyMealPlans.map((plan) => (
+                    <div
+                      key={plan.id}
+                      className={`p-4 border rounded-lg ${
+                        plan.isActive
+                          ? "border-primary bg-primary/5 dark:bg-primary/10"
+                          : "border-gray-light dark:border-davyGray dark:bg-night/50"
+                      }`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <h3 className="font-medium text-secondary dark:text-alabaster">
+                          {plan.title}
+                        </h3>
+                        {plan.isActive && (
+                          <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                        {plan.description}
+                      </p>
+                      <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
+                        Created: {plan.createdAt}
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          className="text-gray-dark dark:text-gray-light text-sm hover:underline"
+                          onClick={() => handleEditPlan(plan)}
+                        >
+                          Edit
+                        </button>
+                        {!plan.isActive && (
+                          <button
+                            className="text-primary text-sm hover:underline"
+                            onClick={() => handleSetActive(plan.id)}
+                          >
+                            Set Active
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Modal>
           </div>
 
           {/* Right side - Active Plan & Calendar */}

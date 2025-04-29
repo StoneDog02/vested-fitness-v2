@@ -5,6 +5,7 @@ import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import ViewWorkoutPlanModal from "~/components/coach/ViewWorkoutPlanModal";
 import CreateWorkoutModal from "~/components/coach/CreateWorkoutModal";
 import { useState } from "react";
+import Modal from "~/components/ui/Modal";
 
 interface Workout {
   id: string;
@@ -84,6 +85,14 @@ export default function ClientWorkouts() {
   const [editWorkoutData, setEditWorkoutData] =
     useState<WorkoutPlanForm | null>(null);
   const [viewWorkoutPlan, setViewWorkoutPlan] = useState<Workout | null>(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+
+  // Sort workouts by createdAt descending
+  const sortedWorkouts = [...workouts].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  );
+  const recentWorkouts = sortedWorkouts.slice(0, 3);
+  const historyWorkouts = sortedWorkouts.slice(3);
 
   const handleSetActive = (workoutId: string) => {
     setWorkouts((prevWorkouts) =>
@@ -154,7 +163,7 @@ export default function ClientWorkouts() {
             <Card
               title="Workout History"
               action={
-                <div className="flex gap-2">
+                <div className="flex flex-col items-start gap-1">
                   <Button
                     size="sm"
                     variant="primary"
@@ -162,11 +171,18 @@ export default function ClientWorkouts() {
                   >
                     Create Plan
                   </Button>
+                  <button
+                    className="text-primary text-xs font-medium hover:underline mt-1 px-1"
+                    onClick={() => setIsHistoryModalOpen(true)}
+                    style={{ background: "none", border: "none" }}
+                  >
+                    History
+                  </button>
                 </div>
               }
             >
               <div className="space-y-4">
-                {workouts.map((workout) => (
+                {recentWorkouts.map((workout) => (
                   <div
                     key={workout.id}
                     className={`p-4 border rounded-lg ${
@@ -211,6 +227,64 @@ export default function ClientWorkouts() {
                 ))}
               </div>
             </Card>
+            {/* History Modal */}
+            <Modal
+              isOpen={isHistoryModalOpen}
+              onClose={() => setIsHistoryModalOpen(false)}
+              title="Workout History"
+            >
+              <div className="space-y-4">
+                {historyWorkouts.length === 0 ? (
+                  <div className="text-center text-gray-dark dark:text-gray-light">
+                    No more workouts in history.
+                  </div>
+                ) : (
+                  historyWorkouts.map((workout) => (
+                    <div
+                      key={workout.id}
+                      className={`p-4 border rounded-lg ${
+                        workout.isActive
+                          ? "border-primary bg-primary/5 dark:bg-primary/10"
+                          : "border-gray-light dark:border-davyGray dark:bg-night/50"
+                      }`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <h3 className="font-medium text-secondary dark:text-alabaster">
+                          {workout.title}
+                        </h3>
+                        {workout.isActive && (
+                          <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                        {workout.description}
+                      </p>
+                      <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
+                        Created: {workout.createdAt}
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          className="text-gray-dark dark:text-gray-light text-sm hover:underline"
+                          onClick={() => handleEdit(workout)}
+                        >
+                          Edit
+                        </button>
+                        {!workout.isActive && (
+                          <button
+                            className="text-green-500 text-sm hover:underline"
+                            onClick={() => handleSetActive(workout.id)}
+                          >
+                            Set Active
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Modal>
           </div>
 
           {/* Right side - Active Plan & Calendar */}

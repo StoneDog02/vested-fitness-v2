@@ -37,52 +37,39 @@ export default function ClientCard({ client }: ClientCardProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-6 gap-4 mt-4 text-sm">
-        <div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 text-sm">
+        <div className="flex flex-col gap-2">
           <p className="text-gray-dark dark:text-gray-light font-medium">
-            Starting Weight
+            Weight
           </p>
-          <p className="text-secondary dark:text-alabaster">
-            {client.startingWeight} lbs
-          </p>
+          <div className="text-secondary dark:text-alabaster">
+            <span>{client.currentWeight} lbs</span>
+            <span className="text-sm text-gray-500 ml-2">
+              from {client.startingWeight} lbs
+            </span>
+          </div>
         </div>
-        <div>
-          <p className="text-gray-dark dark:text-gray-light font-medium">
-            Current Weight
-          </p>
-          <p className="text-secondary dark:text-alabaster">
-            {client.currentWeight} lbs
-          </p>
-        </div>
-        <div>
+
+        <div className="flex flex-col gap-2">
           <p className="text-gray-dark dark:text-gray-light font-medium">
             Macros
           </p>
-          <p className="text-secondary dark:text-alabaster">
-            P: {macros.protein}g | C: {macros.carbs}g | F: {macros.fat}g
-          </p>
+          <div className="flex flex-col gap-1 text-secondary dark:text-alabaster">
+            <p>Protein: {macros.protein}g</p>
+            <p>Carbs: {macros.carbs}g</p>
+            <p>Fat: {macros.fat}g</p>
+          </div>
         </div>
-        <div>
+
+        <div className="flex flex-col gap-2">
           <p className="text-gray-dark dark:text-gray-light font-medium">
-            Workout Split
+            Program
           </p>
-          <p className="text-secondary dark:text-alabaster">
-            {client.workoutSplit}
-          </p>
-        </div>
-        <div>
-          <p className="text-gray-dark dark:text-gray-light font-medium">
-            Supplements
-          </p>
-          <p className="text-secondary dark:text-alabaster">
-            {client.supplementCount}
-          </p>
-        </div>
-        <div>
-          <p className="text-gray-dark dark:text-gray-light font-medium">
-            Goal
-          </p>
-          <p className="text-secondary dark:text-alabaster">{client.goal}</p>
+          <div className="flex flex-col gap-1 text-secondary dark:text-alabaster">
+            <p>Split: {client.workoutSplit}</p>
+            <p>Supplements: {client.supplementCount}</p>
+            <p>Goal: {client.goal}</p>
+          </div>
         </div>
       </div>
     </Link>

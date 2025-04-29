@@ -423,20 +423,20 @@ export default function Meals() {
               </button>
             </div>
 
-            <div className="space-y-8">
+            <div className="space-y-4 sm:space-y-8">
               {mockMealPlan.meals.map((meal) => (
                 <div
                   key={meal.id}
-                  className="relative border border-gray-light dark:border-davyGray rounded-xl p-6 transition-all duration-200 hover:shadow-md"
+                  className="relative border border-gray-light dark:border-davyGray rounded-xl p-4 sm:p-6 transition-all duration-200 hover:shadow-md"
                 >
                   <div className="flex justify-between items-start mb-4">
                     <div>
-                      <h3 className="text-lg font-semibold text-secondary dark:text-alabaster mb-1">
+                      <h3 className="text-base sm:text-lg font-semibold text-secondary dark:text-alabaster mb-1">
                         {meal.name}
                       </h3>
-                      <div className="text-sm text-gray-dark dark:text-gray-light flex items-center gap-2">
+                      <div className="text-xs sm:text-sm text-gray-dark dark:text-gray-light flex items-center gap-2">
                         <svg
-                          className="w-4 h-4"
+                          className="w-3 h-3 sm:w-4 sm:h-4"
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
@@ -451,10 +451,10 @@ export default function Meals() {
                         {meal.time}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
                       <label
                         htmlFor={`meal-${meal.id}`}
-                        className={`text-sm ${
+                        className={`text-xs sm:text-sm ${
                           isDaySubmitted
                             ? "text-gray-dark dark:text-gray-light"
                             : "text-gray-dark dark:text-gray-light cursor-pointer"
@@ -480,7 +480,7 @@ export default function Meals() {
                           !isDaySubmitted && toggleMealCheck(meal.id)
                         }
                         disabled={isDaySubmitted}
-                        className={`w-5 h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
+                        className={`w-4 h-4 sm:w-5 sm:h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
                           isDaySubmitted
                             ? "cursor-not-allowed opacity-50"
                             : "cursor-pointer"
@@ -489,58 +489,32 @@ export default function Meals() {
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-full">
-                      <thead>
-                        <tr className="border-b border-gray-light dark:border-davyGray">
-                          <th className="text-left py-3 text-xs font-medium text-gray-dark dark:text-gray-light uppercase tracking-wider">
-                            Food
-                          </th>
-                          <th className="text-left py-3 text-xs font-medium text-gray-dark dark:text-gray-light uppercase tracking-wider">
-                            Portion
-                          </th>
-                          <th className="text-left py-3 text-xs font-medium text-gray-dark dark:text-gray-light uppercase tracking-wider">
-                            Calories
-                          </th>
-                          <th className="text-left py-3 text-xs font-medium text-gray-dark dark:text-gray-light uppercase tracking-wider">
-                            Protein
-                          </th>
-                          <th className="text-left py-3 text-xs font-medium text-gray-dark dark:text-gray-light uppercase tracking-wider">
-                            Carbs
-                          </th>
-                          <th className="text-left py-3 text-xs font-medium text-gray-dark dark:text-gray-light uppercase tracking-wider">
-                            Fat
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-light dark:divide-davyGray">
+                  <div className="overflow-x-auto -mx-4 sm:mx-0">
+                    <div className="min-w-full px-4 sm:px-0">
+                      <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-2 text-xs sm:text-sm font-medium text-gray-dark dark:text-gray-light uppercase tracking-wider">
+                        <div>Food</div>
+                        <div>Portion</div>
+                        <div>Calories</div>
+                      </div>
+                      <div className="space-y-2">
                         {meal.foods.map((food, index) => (
-                          <tr
+                          <div
                             key={index}
-                            className="hover:bg-gray-lightest dark:hover:bg-secondary-light/10 transition-colors duration-200"
+                            className="grid grid-cols-3 gap-2 sm:gap-4 py-2 text-xs sm:text-sm hover:bg-gray-lightest dark:hover:bg-secondary-light/10 rounded-lg transition-colors duration-200"
                           >
-                            <td className="py-4 text-sm font-medium text-secondary dark:text-alabaster">
+                            <div className="font-medium text-secondary dark:text-alabaster">
                               {food.name}
-                            </td>
-                            <td className="py-4 text-sm text-gray-dark dark:text-gray-light">
+                            </div>
+                            <div className="text-gray-dark dark:text-gray-light">
                               {food.portion}
-                            </td>
-                            <td className="py-4 text-sm text-gray-dark dark:text-gray-light">
+                            </div>
+                            <div className="text-gray-dark dark:text-gray-light">
                               {food.calories}
-                            </td>
-                            <td className="py-4 text-sm text-gray-dark dark:text-gray-light">
-                              {food.protein}g
-                            </td>
-                            <td className="py-4 text-sm text-gray-dark dark:text-gray-light">
-                              {food.carbs}g
-                            </td>
-                            <td className="py-4 text-sm text-gray-dark dark:text-gray-light">
-                              {food.fat}g
-                            </td>
-                          </tr>
+                            </div>
+                          </div>
                         ))}
-                      </tbody>
-                    </table>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}
