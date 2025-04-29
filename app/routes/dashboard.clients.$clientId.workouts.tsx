@@ -6,6 +6,7 @@ import ViewWorkoutPlanModal from "~/components/coach/ViewWorkoutPlanModal";
 import CreateWorkoutModal from "~/components/coach/CreateWorkoutModal";
 import { useState } from "react";
 import Modal from "~/components/ui/Modal";
+import { TrashIcon } from "@heroicons/react/24/outline";
 
 interface Workout {
   id: string;
@@ -13,6 +14,7 @@ interface Workout {
   description: string;
   createdAt: string;
   isActive: boolean;
+  isArchived?: boolean;
 }
 
 interface WorkoutSection {
@@ -42,6 +44,41 @@ const mockWorkouts: Workout[] = [
     title: "Lower Body Power",
     description: "Heavy compound movements",
     createdAt: "2024-02-15",
+    isActive: false,
+  },
+  {
+    id: "3",
+    title: "HIIT Cardio",
+    description: "High-intensity interval training",
+    createdAt: "2024-02-01",
+    isActive: false,
+  },
+  {
+    id: "4",
+    title: "Core & Stability",
+    description: "Focus on core strength and balance",
+    createdAt: "2024-01-15",
+    isActive: false,
+  },
+  {
+    id: "5",
+    title: "Full Body Circuit",
+    description: "Complete body workout with supersets",
+    createdAt: "2024-01-01",
+    isActive: false,
+  },
+  {
+    id: "6",
+    title: "Mobility & Recovery",
+    description: "Dynamic stretching and mobility work",
+    createdAt: "2023-12-15",
+    isActive: false,
+  },
+  {
+    id: "7",
+    title: "Power & Explosiveness",
+    description: "Plyometrics and explosive movements",
+    createdAt: "2023-12-01",
     isActive: false,
   },
 ];
@@ -87,20 +124,66 @@ export default function ClientWorkouts() {
   const [viewWorkoutPlan, setViewWorkoutPlan] = useState<Workout | null>(null);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
-  // Sort workouts by createdAt descending
+  // Filter workouts for the main container to only show non-archived ones
+  // AND only show workouts that were either:
+  // 1. Part of the initial 3 most recent
+  // 2. Explicitly activated by the coach
+  const initialWorkoutIds = mockWorkouts.slice(0, 3).map((w) => w.id);
+  const visibleWorkouts = workouts.filter(
+    (workout) =>
+      !workout.isArchived &&
+      (initialWorkoutIds.includes(workout.id) ||
+        workout.createdAt > mockWorkouts[0].createdAt) // This means it was activated after initial load
+  );
+
+  // Sort visible workouts by createdAt descending
+  const sortedVisibleWorkouts = [...visibleWorkouts].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  );
+  const recentWorkouts = sortedVisibleWorkouts;
+
+  // For the history modal, use all workouts
   const sortedWorkouts = [...workouts].sort((a, b) =>
     b.createdAt.localeCompare(a.createdAt)
   );
-  const recentWorkouts = sortedWorkouts.slice(0, 3);
-  const historyWorkouts = sortedWorkouts.slice(3);
 
   const handleSetActive = (workoutId: string) => {
-    setWorkouts((prevWorkouts) =>
-      prevWorkouts.map((workout) => ({
-        ...workout,
-        isActive: workout.id === workoutId,
-      }))
-    );
+    setWorkouts((prevWorkouts) => {
+      // Find the workout being activated
+      const workoutToActivate = prevWorkouts.find(
+        (workout) => workout.id === workoutId
+      );
+      if (!workoutToActivate) return prevWorkouts;
+
+      // Get all workouts except the one being activated
+      const otherWorkouts = prevWorkouts.filter(
+        (workout) => workout.id !== workoutId
+      );
+
+      // Sort remaining workouts by date (newest first)
+      const sortedOtherWorkouts = [...otherWorkouts].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt)
+      );
+
+      // Create new array with activated workout at the start, and unarchive it
+      const reorderedWorkouts = [
+        {
+          ...workoutToActivate,
+          isActive: true,
+          isArchived: false, // Unarchive when activating
+          createdAt: new Date().toISOString().split("T")[0],
+        },
+        ...sortedOtherWorkouts.map((workout) => ({
+          ...workout,
+          isActive: false,
+        })),
+      ];
+
+      return reorderedWorkouts;
+    });
+
+    // Close the history modal
+    setIsHistoryModalOpen(false);
   };
 
   const handleEdit = (workout: Workout) => {
@@ -148,6 +231,42 @@ export default function ClientWorkouts() {
     setIsCreateModalOpen(false);
   };
 
+  const handleRemoveWorkout = (workoutId: string) => {
+    setWorkouts((prevWorkouts) => {
+      const workoutToArchive = prevWorkouts.find((w) => w.id === workoutId);
+
+      // Mark the workout as archived instead of removing it
+      const updatedWorkouts = prevWorkouts.map((workout) =>
+        workout.id === workoutId
+          ? { ...workout, isArchived: true, isActive: false }
+          : workout
+      );
+
+      // If we're archiving the active workout, make the next visible one active
+      if (workoutToArchive?.isActive) {
+        const remainingVisible = updatedWorkouts.filter(
+          (w) =>
+            !w.isArchived &&
+            (initialWorkoutIds.includes(w.id) ||
+              w.createdAt > mockWorkouts[0].createdAt)
+        );
+        if (remainingVisible.length > 0) {
+          // Sort by creation date (newest first)
+          const sortedVisible = [...remainingVisible].sort((a, b) =>
+            b.createdAt.localeCompare(a.createdAt)
+          );
+          // Set the first remaining workout as active
+          return updatedWorkouts.map((workout) => ({
+            ...workout,
+            isActive: !workout.isArchived && workout.id === sortedVisible[0].id,
+          }));
+        }
+      }
+
+      return updatedWorkouts;
+    });
+  };
+
   return (
     <ClientDetailLayout>
       <div className="p-6">
@@ -182,49 +301,67 @@ export default function ClientWorkouts() {
               }
             >
               <div className="space-y-4">
-                {recentWorkouts.map((workout) => (
-                  <div
-                    key={workout.id}
-                    className={`p-4 border rounded-lg ${
-                      workout.isActive
-                        ? "border-primary bg-primary/5 dark:bg-primary/10"
-                        : "border-gray-light dark:border-davyGray dark:bg-night/50"
-                    }`}
-                  >
-                    <div className="flex justify-between items-center">
-                      <h3 className="font-medium text-secondary dark:text-alabaster">
-                        {workout.title}
-                      </h3>
-                      {workout.isActive ? (
-                        <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
-                          Active
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                      {workout.description}
+                {recentWorkouts.length === 0 ? (
+                  <div className="text-center py-6">
+                    <p className="text-gray-dark dark:text-gray-light">
+                      Create workouts to be shown here
                     </p>
-                    <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
-                      Created: {workout.createdAt}
-                    </div>
-                    <div className="flex gap-2 mt-3">
-                      <button
-                        className="text-gray-dark dark:text-gray-light text-sm hover:underline"
-                        onClick={() => handleEdit(workout)}
-                      >
-                        Edit
-                      </button>
-                      {!workout.isActive && (
-                        <button
-                          className="text-green-500 text-sm hover:underline"
-                          onClick={() => handleSetActive(workout.id)}
-                        >
-                          Set Active
-                        </button>
-                      )}
-                    </div>
                   </div>
-                ))}
+                ) : (
+                  recentWorkouts.map((workout) => (
+                    <div
+                      key={workout.id}
+                      className={`p-4 border rounded-lg ${
+                        workout.isActive
+                          ? "border-primary bg-primary/5 dark:bg-primary/10"
+                          : "border-gray-light dark:border-davyGray dark:bg-night/50"
+                      }`}
+                    >
+                      <div className="flex-1">
+                        <div className="flex justify-between items-center">
+                          <h3 className="font-medium text-secondary dark:text-alabaster">
+                            {workout.title}
+                          </h3>
+                          {workout.isActive ? (
+                            <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
+                              Active
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                          {workout.description}
+                        </p>
+                        <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
+                          Created: {workout.createdAt}
+                        </div>
+                        <div className="flex justify-between items-center mt-3">
+                          <div className="flex gap-2">
+                            <button
+                              className="text-gray-dark dark:text-gray-light text-sm hover:underline"
+                              onClick={() => handleEdit(workout)}
+                            >
+                              Edit
+                            </button>
+                            {!workout.isActive && (
+                              <button
+                                className="text-green-500 text-sm hover:underline"
+                                onClick={() => handleSetActive(workout.id)}
+                              >
+                                Set Active
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            className="text-red-500 hover:text-red-600"
+                            onClick={() => handleRemoveWorkout(workout.id)}
+                          >
+                            <TrashIcon className="h-5 w-5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </Card>
             {/* History Modal */}
@@ -234,12 +371,12 @@ export default function ClientWorkouts() {
               title="Workout History"
             >
               <div className="space-y-4">
-                {historyWorkouts.length === 0 ? (
+                {sortedWorkouts.length === 0 ? (
                   <div className="text-center text-gray-dark dark:text-gray-light">
-                    No more workouts in history.
+                    No workouts in history.
                   </div>
                 ) : (
-                  historyWorkouts.map((workout) => (
+                  sortedWorkouts.map((workout) => (
                     <div
                       key={workout.id}
                       className={`p-4 border rounded-lg ${
@@ -248,37 +385,47 @@ export default function ClientWorkouts() {
                           : "border-gray-light dark:border-davyGray dark:bg-night/50"
                       }`}
                     >
-                      <div className="flex justify-between items-center">
-                        <h3 className="font-medium text-secondary dark:text-alabaster">
-                          {workout.title}
-                        </h3>
-                        {workout.isActive && (
-                          <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                        {workout.description}
-                      </p>
-                      <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
-                        Created: {workout.createdAt}
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        <button
-                          className="text-gray-dark dark:text-gray-light text-sm hover:underline"
-                          onClick={() => handleEdit(workout)}
-                        >
-                          Edit
-                        </button>
-                        {!workout.isActive && (
+                      <div className="flex-1">
+                        <div className="flex justify-between items-center">
+                          <h3 className="font-medium text-secondary dark:text-alabaster">
+                            {workout.title}
+                          </h3>
+                          {workout.isActive && (
+                            <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                          {workout.description}
+                        </p>
+                        <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
+                          Created: {workout.createdAt}
+                        </div>
+                        <div className="flex justify-between items-center mt-3">
+                          <div className="flex gap-2">
+                            <button
+                              className="text-gray-dark dark:text-gray-light text-sm hover:underline"
+                              onClick={() => handleEdit(workout)}
+                            >
+                              Edit
+                            </button>
+                            {!workout.isActive && (
+                              <button
+                                className="text-green-500 text-sm hover:underline"
+                                onClick={() => handleSetActive(workout.id)}
+                              >
+                                Set Active
+                              </button>
+                            )}
+                          </div>
                           <button
-                            className="text-green-500 text-sm hover:underline"
-                            onClick={() => handleSetActive(workout.id)}
+                            className="text-red-500 hover:text-red-600"
+                            onClick={() => handleRemoveWorkout(workout.id)}
                           >
-                            Set Active
+                            <TrashIcon className="h-5 w-5" />
                           </button>
-                        )}
+                        </div>
                       </div>
                     </div>
                   ))
@@ -315,7 +462,6 @@ export default function ClientWorkouts() {
                   <p className="text-gray-dark dark:text-gray-light mb-4">
                     No active workout plan
                   </p>
-                  <Button variant="primary">Create Workout Plan</Button>
                 </div>
               )}
             </Card>

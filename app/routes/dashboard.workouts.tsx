@@ -409,14 +409,14 @@ export default function Workouts() {
             </div>
 
             {/* Workout Day Label */}
-            <h2 className="text-xl sm:text-2xl font-semibold text-gray-600 mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl font-semibold text-secondary dark:text-alabaster mb-4 sm:mb-6">
               {workoutDay?.focus || "Rest Day"}
             </h2>
 
             {/* Exercises */}
             <div className="space-y-4 sm:space-y-6">
               {!workoutDay || workoutDay.focus === "Rest Day" ? (
-                <p className="text-gray-600">
+                <p className="text-secondary dark:text-alabaster">
                   No workout scheduled for this day.
                 </p>
               ) : (
@@ -581,7 +581,7 @@ export default function Workouts() {
                         ? "text-yellow-500"
                         : day.completion > 0
                         ? "text-red-500"
-                        : "text-gray-dark dark:text-gray-light"
+                        : "text-secondary dark:text-alabaster/70"
                     }`}
                   >
                     {day.completion > 0 ? `${day.completion}%` : "Pending"}

@@ -103,50 +103,64 @@ export default function ClientSupplements() {
         <div className="flex flex-col gap-6 md:flex-row">
           {/* Supplements List */}
           <div className="flex-1 space-y-6">
-            {supplements.map((supplement) => (
-              <Card key={supplement.id}>
-                <div className="p-6">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="text-xl font-semibold text-secondary dark:text-alabaster mb-2">
-                        {supplement.name}
-                      </h3>
-                      <div className="space-y-2">
-                        <p className="text-sm text-gray-dark dark:text-gray-light">
-                          <span className="font-medium">Dosage:</span>{" "}
-                          {supplement.dosage}
-                        </p>
-                        <p className="text-sm text-gray-dark dark:text-gray-light">
-                          <span className="font-medium">Frequency:</span>{" "}
-                          {supplement.frequency}
-                        </p>
-                        <p className="text-sm text-gray-dark dark:text-gray-light">
-                          <span className="font-medium">Instructions:</span>{" "}
-                          {supplement.instructions}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEditClick(supplement)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
-                        onClick={() => handleRemoveSupplement(supplement.id)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
+            {supplements.length === 0 ? (
+              <Card>
+                <div className="p-6 text-center">
+                  <h3 className="text-xl font-semibold text-secondary dark:text-alabaster mb-2">
+                    Add Supplements Here
+                  </h3>
+                  <p className="text-gray-dark dark:text-gray-light">
+                    Click the &quot;Add Supplement&quot; button above to start
+                    adding supplements to your client&apos;s protocol.
+                  </p>
                 </div>
               </Card>
-            ))}
+            ) : (
+              supplements.map((supplement) => (
+                <Card key={supplement.id}>
+                  <div className="p-6">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="text-xl font-semibold text-secondary dark:text-alabaster mb-2">
+                          {supplement.name}
+                        </h3>
+                        <div className="space-y-2">
+                          <p className="text-sm text-gray-dark dark:text-gray-light">
+                            <span className="font-medium">Dosage:</span>{" "}
+                            {supplement.dosage}
+                          </p>
+                          <p className="text-sm text-gray-dark dark:text-gray-light">
+                            <span className="font-medium">Frequency:</span>{" "}
+                            {supplement.frequency}
+                          </p>
+                          <p className="text-sm text-gray-dark dark:text-gray-light">
+                            <span className="font-medium">Instructions:</span>{" "}
+                            {supplement.instructions}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEditClick(supplement)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
+                          onClick={() => handleRemoveSupplement(supplement.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))
+            )}
           </div>
 
           {/* Supplement Compliance Card */}

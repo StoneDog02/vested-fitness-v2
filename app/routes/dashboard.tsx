@@ -9,7 +9,7 @@ type LoaderData = {
 export const loader = async () => {
   // In a real app, we would fetch this from an API/database or auth session
   return json<LoaderData>({
-    role: "coach",
+    role: "client",
   });
 };
 

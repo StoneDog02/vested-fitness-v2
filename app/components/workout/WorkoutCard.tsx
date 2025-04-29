@@ -102,7 +102,7 @@ export default function WorkoutCard({
               {exercises.map((ex) => ex.name).join(" + ")}
             </h3>
           </div>
-          <p className="text-xs xs:text-sm text-gray-600">
+          <p className="text-xs xs:text-sm text-secondary dark:text-alabaster/90">
             {exercises[0].description}
           </p>
         </div>
@@ -112,11 +112,13 @@ export default function WorkoutCard({
             checked={isCompleted}
             onChange={(e) => handleCompletionChange(e.target.checked)}
             disabled={isSubmitted}
-            className={`w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-primary-light ${
+            className={`w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary dark:border-gray-600 dark:bg-gray-700 dark:checked:bg-primary dark:focus:ring-primary-light ${
               isSubmitted ? "cursor-not-allowed opacity-50" : ""
             }`}
           />
-          <span className="text-xs xs:text-sm text-gray-600">Complete</span>
+          <span className="text-xs xs:text-sm text-secondary dark:text-alabaster/90">
+            Complete
+          </span>
         </div>
       </div>
 
@@ -126,14 +128,14 @@ export default function WorkoutCard({
         <div className="overflow-x-auto pr-4">
           <table className="w-[95%]">
             <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-2 px-4 font-medium text-gray-600">
+              <tr className="border-b border-gray-200 dark:border-gray-700">
+                <th className="text-left py-2 px-4 font-medium text-secondary dark:text-alabaster">
                   SET
                 </th>
                 {exercises.map((exercise) => (
                   <th
                     key={exercise.id}
-                    className="text-left py-2 px-4 font-medium text-gray-600"
+                    className="text-left py-2 px-4 font-medium text-secondary dark:text-alabaster"
                   >
                     {exercise.name} (LBS)
                   </th>
@@ -142,8 +144,11 @@ export default function WorkoutCard({
             </thead>
             <tbody>
               {exercises[0].sets.map((set) => (
-                <tr key={set.setNumber} className="border-b border-gray-100">
-                  <td className="py-2 px-4">
+                <tr
+                  key={set.setNumber}
+                  className="border-b border-gray-100 dark:border-gray-700/50"
+                >
+                  <td className="py-2 px-4 text-secondary dark:text-alabaster/90">
                     {getSetLabel(type, set.setNumber)}
                   </td>
                   {exercises.map((exercise) => (
@@ -162,7 +167,7 @@ export default function WorkoutCard({
                           )
                         }
                         disabled={isSubmitted}
-                        className={`w-20 px-2 py-1 border rounded bg-white dark:bg-transparent ${
+                        className={`w-20 px-2 py-1 border rounded bg-white dark:bg-gray-700 dark:border-gray-600 text-secondary dark:text-alabaster focus:ring-1 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light ${
                           isSubmitted ? "cursor-not-allowed opacity-50" : ""
                         }`}
                         placeholder="0"
@@ -181,10 +186,10 @@ export default function WorkoutCard({
             exercise.videoUrl ? (
               <div
                 key={exercise.id}
-                className="relative bg-gray-100 rounded-lg flex items-center justify-center h-[160px] sm:h-[220px] overflow-hidden"
+                className="relative bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center h-[160px] sm:h-[220px] overflow-hidden"
               >
                 <div className="absolute top-2 left-2 z-10">
-                  <span className="text-xs sm:text-sm font-medium text-gray-600">
+                  <span className="text-xs sm:text-sm font-medium text-secondary dark:text-alabaster">
                     {exercise.name}
                   </span>
                 </div>
@@ -193,10 +198,10 @@ export default function WorkoutCard({
             ) : (
               <div
                 key={exercise.id}
-                className="relative aspect-video bg-gray-100 rounded-lg flex items-center justify-center h-[120px] sm:h-[180px]"
+                className="relative aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center h-[120px] sm:h-[180px]"
               >
                 <div className="absolute top-2 left-2">
-                  <span className="text-xs sm:text-sm font-medium text-gray-600">
+                  <span className="text-xs sm:text-sm font-medium text-secondary dark:text-alabaster">
                     {exercise.name}
                   </span>
                 </div>
@@ -231,7 +236,7 @@ export default function WorkoutCard({
       <div>
         <label
           htmlFor={`notes-${exercises[0].id}`}
-          className="block text-sm font-medium text-gray-600 mb-1"
+          className="block text-sm font-medium text-secondary dark:text-alabaster mb-1"
         >
           Notes
         </label>
@@ -240,7 +245,7 @@ export default function WorkoutCard({
           value={notes}
           onChange={(e) => !isSubmitted && setNotes(e.target.value)}
           disabled={isSubmitted}
-          className={`w-full px-3 py-2 border rounded-md bg-white dark:bg-transparent ${
+          className={`w-full px-3 py-2 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600 text-secondary dark:text-alabaster placeholder-gray-400 dark:placeholder-gray-400 focus:ring-1 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light ${
             isSubmitted ? "cursor-not-allowed opacity-50" : ""
           }`}
           rows={2}
