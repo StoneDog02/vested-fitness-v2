@@ -133,10 +133,10 @@ export default function PaymentSettings() {
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-secondary">
+                    <p className="text-sm font-medium text-secondary dark:text-alabaster">
                       {formatCardBrand(method.brand)} ending in {method.last4}
                     </p>
-                    <p className="text-xs text-gray-dark">
+                    <p className="text-xs text-gray-dark dark:text-gray-300">
                       Expires {method.expMonth}/{method.expYear}
                     </p>
                   </div>
@@ -147,7 +147,7 @@ export default function PaymentSettings() {
                       Default
                     </span>
                   )}
-                  <button className="text-sm text-gray-dark hover:text-primary">
+                  <button className="text-sm text-gray-dark dark:text-gray-300 hover:text-primary dark:hover:text-primary">
                     {method.isDefault ? "Edit" : "Set Default"}
                   </button>
                 </div>
@@ -253,10 +253,10 @@ export default function PaymentSettings() {
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <div>
-                <h3 className="text-sm font-medium text-secondary">
+                <h3 className="text-sm font-medium text-secondary dark:text-alabaster">
                   {mockSubscription.plan}
                 </h3>
-                <p className="text-sm text-gray-dark">
+                <p className="text-sm text-gray-dark dark:text-gray-300">
                   ${mockSubscription.amount}/{mockSubscription.interval}
                 </p>
               </div>
@@ -266,16 +266,16 @@ export default function PaymentSettings() {
             </div>
 
             <div className="border-t border-gray-light pt-4">
-              <h3 className="text-sm font-medium text-secondary mb-2">
+              <h3 className="text-sm font-medium text-secondary dark:text-alabaster mb-2">
                 Next Billing Date
               </h3>
-              <p className="text-sm text-gray-dark">
+              <p className="text-sm text-gray-dark dark:text-gray-300">
                 {formatDate(mockSubscription.nextBillingDate)}
               </p>
             </div>
 
             <div className="border-t border-gray-light pt-4">
-              <h3 className="text-sm font-medium text-secondary mb-2">
+              <h3 className="text-sm font-medium text-secondary dark:text-alabaster mb-2">
                 Billing History
               </h3>
               <div className="space-y-2">
@@ -285,13 +285,17 @@ export default function PaymentSettings() {
                     className="flex justify-between items-center text-sm"
                   >
                     <div>
-                      <p className="text-gray-dark">{invoice.description}</p>
-                      <p className="text-xs text-gray-dark">
+                      <p className="text-gray-dark dark:text-alabaster">
+                        {invoice.description}
+                      </p>
+                      <p className="text-xs text-gray-dark dark:text-gray-300">
                         {formatDate(invoice.date)}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-gray-dark">${invoice.amount}</p>
+                      <p className="text-gray-dark dark:text-alabaster">
+                        ${invoice.amount}
+                      </p>
                       <p className="text-xs text-green-600">{invoice.status}</p>
                     </div>
                   </div>

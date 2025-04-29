@@ -81,7 +81,7 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen flex flex-col bg-alabaster dark:bg-davyGray transition-colors duration-200">
       <header className="sticky top-0 z-10 bg-white dark:bg-night border-b border-gray-light dark:border-secondary shadow-sm transition-colors duration-200">
-        <div className="px-4 py-2 sm:py-3 mx-auto max-w-7xl sm:px-6 lg:px-8">
+        <div className="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4">
             {/* Mobile Menu Button */}
             <button
@@ -105,8 +105,9 @@ export default function DashboardLayout({
               </svg>
             </button>
 
-            {/* Logo Container - Centered on Mobile */}
-            <div className="flex-1 flex justify-center sm:justify-start">
+            {/* Logo and Navigation Container */}
+            <div className="flex-1 flex items-end">
+              {/* Logo */}
               <Link
                 to="/dashboard"
                 className="flex-shrink-0 flex items-center hover:opacity-90 transition-opacity"
@@ -114,13 +115,13 @@ export default function DashboardLayout({
                 <img
                   src="/KAVA-TRAIN.png"
                   alt="KAVA TRAINING"
-                  className="h-20 sm:h-12 w-auto dark:invert"
+                  className="h-48 sm:h-32 w-auto dark:invert"
                 />
               </Link>
 
               {/* Desktop Navigation */}
-              <nav className="hidden sm:flex flex-1 overflow-x-auto ml-6">
-                <div className="flex space-x-4">
+              <nav className="hidden sm:flex overflow-x-auto ml-6">
+                <div className="flex space-x-4 pb-3">
                   {navItems.map((item) => (
                     <Link
                       key={item.name}
