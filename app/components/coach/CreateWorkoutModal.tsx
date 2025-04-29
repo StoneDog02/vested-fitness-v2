@@ -7,9 +7,15 @@ type WorkoutType = "Single" | "Super Set" | "Giant Set";
 interface WorkoutSection {
   name: string;
   videoUrl?: string;
+  videoFile?: File;
   sets: number;
   reps: number;
   notes?: string;
+}
+
+interface WorkoutGroup {
+  type: WorkoutType;
+  exercises: WorkoutSection[];
 }
 
 interface CreateWorkoutModalProps {
@@ -38,80 +44,128 @@ export default function CreateWorkoutModal({
   submitLabel = "Create Workout",
 }: CreateWorkoutModalProps) {
   const [planName, setPlanName] = useState("");
-  const [type, setType] = useState<WorkoutType>("Single");
-  const [exercises, setExercises] = useState<WorkoutSection[]>([
-    { name: "", sets: 3, reps: 10 },
+  const [groups, setGroups] = useState<WorkoutGroup[]>([
+    { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
   ]);
 
   // Populate form with initial values when editing
   useEffect(() => {
     if (initialValues) {
       setPlanName(initialValues.planName);
-      setType(initialValues.type);
-      setExercises(
-        initialValues.exercises.length > 0
-          ? initialValues.exercises
-          : [{ name: "", sets: 3, reps: 10 }]
-      );
+      // For backward compatibility, treat all as one group if not grouped
+      setGroups([
+        {
+          type: initialValues.type,
+          exercises:
+            initialValues.exercises.length > 0
+              ? initialValues.exercises
+              : [{ name: "", sets: 3, reps: 10 }],
+        },
+      ]);
     } else if (isOpen) {
-      // Reset form when opening for create
       setPlanName("");
-      setType("Single");
-      setExercises([{ name: "", sets: 3, reps: 10 }]);
+      setGroups([
+        { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+      ]);
     }
   }, [initialValues, isOpen]);
 
-  const handleTypeChange = (newType: WorkoutType) => {
-    setType(newType);
-    // Reset exercises based on new type
-    if (newType === "Single") {
-      setExercises([{ name: "", sets: 3, reps: 10 }]);
-    } else if (newType === "Super Set") {
-      setExercises([
-        { name: "", sets: 3, reps: 10 },
-        { name: "", sets: 3, reps: 10 },
-      ]);
-    } else {
-      setExercises([
-        { name: "", sets: 3, reps: 10 },
-        { name: "", sets: 3, reps: 10 },
-        { name: "", sets: 3, reps: 10 },
-      ]);
-    }
-  };
-
-  const handleExerciseChange = (
-    index: number,
-    field: keyof WorkoutSection,
-    value: string | number
-  ) => {
-    setExercises((prev) =>
-      prev.map((exercise, i) =>
-        i === index ? { ...exercise, [field]: value } : exercise
+  const handleGroupTypeChange = (groupIdx: number, newType: WorkoutType) => {
+    setGroups((prev) =>
+      prev.map((group, idx) =>
+        idx === groupIdx
+          ? {
+              ...group,
+              type: newType,
+              exercises:
+                newType === "Single"
+                  ? [{ name: "", sets: 3, reps: 10 }]
+                  : newType === "Super Set"
+                  ? [
+                      { name: "", sets: 3, reps: 10 },
+                      { name: "", sets: 3, reps: 10 },
+                    ]
+                  : [
+                      { name: "", sets: 3, reps: 10 },
+                      { name: "", sets: 3, reps: 10 },
+                      { name: "", sets: 3, reps: 10 },
+                    ],
+            }
+          : group
       )
     );
   };
 
-  const addExercise = () => {
-    setExercises((prev) => [...prev, { name: "", sets: 3, reps: 10 }]);
+  const handleExerciseChange = (
+    groupIdx: number,
+    exIdx: number,
+    field: keyof WorkoutSection,
+    value: string | number | File | undefined
+  ) => {
+    setGroups((prev) =>
+      prev.map((group, idx) =>
+        idx === groupIdx
+          ? {
+              ...group,
+              exercises: group.exercises.map((ex, i) =>
+                i === exIdx ? { ...ex, [field]: value } : ex
+              ),
+            }
+          : group
+      )
+    );
   };
 
-  const removeExercise = (index: number) => {
-    setExercises((prev) => prev.filter((_, i) => i !== index));
+  const addExerciseToGroup = (groupIdx: number) => {
+    setGroups((prev) =>
+      prev.map((group, idx) =>
+        idx === groupIdx
+          ? {
+              ...group,
+              exercises: [...group.exercises, { name: "", sets: 3, reps: 10 }],
+            }
+          : group
+      )
+    );
+  };
+
+  const removeExerciseFromGroup = (groupIdx: number, exIdx: number) => {
+    setGroups((prev) =>
+      prev.map((group, idx) =>
+        idx === groupIdx
+          ? {
+              ...group,
+              exercises: group.exercises.filter((_, i) => i !== exIdx),
+            }
+          : group
+      )
+    );
+  };
+
+  const addGroup = () => {
+    setGroups((prev) => [
+      ...prev,
+      { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+    ]);
+  };
+
+  const removeGroup = (groupIdx: number) => {
+    setGroups((prev) => prev.filter((_, idx) => idx !== groupIdx));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Flatten all exercises for backward compatibility, but keep type of first group
     onSubmit({
       planName,
-      type,
-      exercises,
+      type: groups[0].type,
+      exercises: groups.flatMap((g) => g.exercises),
     });
-    // Only reset if not editing
     if (!initialValues) {
       setPlanName("");
-      setType("Single");
-      setExercises([{ name: "", sets: 3, reps: 10 }]);
+      setGroups([
+        { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+      ]);
     }
   };
 
@@ -137,183 +191,231 @@ export default function CreateWorkoutModal({
           />
         </div>
 
-        {/* Workout Type Selector */}
-        <div>
-          <label
-            htmlFor="workoutType"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-          >
-            Workout Type
-          </label>
-          <select
-            id="workoutType"
-            value={type}
-            onChange={(e) => handleTypeChange(e.target.value as WorkoutType)}
-            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-          >
-            <option value="Single">Single</option>
-            <option value="Super Set">Super Set</option>
-            <option value="Giant Set">Giant Set</option>
-          </select>
-        </div>
-
-        {/* Exercise Sections */}
-        <div className="space-y-6">
-          {exercises.map((exercise, index) => (
+        {/* Workout Groups */}
+        <div className="space-y-8">
+          {groups.map((group, groupIdx) => (
             <div
-              key={index}
-              className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+              key={groupIdx}
+              className="border border-primary/40 rounded-lg p-4 bg-primary/5 dark:bg-primary/10"
             >
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                  Exercise {index + 1}
-                </h3>
-                {type === "Giant Set" && index >= 3 && (
+              <div className="flex items-center gap-4 mb-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Type:
+                  <select
+                    value={group.type}
+                    onChange={(e) =>
+                      handleGroupTypeChange(
+                        groupIdx,
+                        e.target.value as WorkoutType
+                      )
+                    }
+                    className="ml-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="Single">Single</option>
+                    <option value="Super Set">Super Set</option>
+                    <option value="Giant Set">Giant Set</option>
+                  </select>
+                </label>
+                {groups.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-500 ml-auto"
+                    onClick={() => removeGroup(groupIdx)}
+                  >
+                    Remove Group
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-6">
+                {group.exercises.map((exercise, exIdx) => (
+                  <div
+                    key={exIdx}
+                    className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+                  >
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                        Exercise {exIdx + 1}
+                      </h3>
+                      {group.type === "Giant Set" &&
+                        group.exercises.length > 3 &&
+                        exIdx >= 3 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              removeExerciseFromGroup(groupIdx, exIdx)
+                            }
+                            className="!text-red-500 !border-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/20"
+                          >
+                            Remove Exercise
+                          </Button>
+                        )}
+                    </div>
+                    <div className="space-y-4">
+                      {/* Exercise Name */}
+                      <div>
+                        <label
+                          htmlFor={`exerciseName-${groupIdx}-${exIdx}`}
+                          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                        >
+                          Exercise Name
+                        </label>
+                        <input
+                          id={`exerciseName-${groupIdx}-${exIdx}`}
+                          type="text"
+                          value={exercise.name}
+                          onChange={(e) =>
+                            handleExerciseChange(
+                              groupIdx,
+                              exIdx,
+                              "name",
+                              e.target.value
+                            )
+                          }
+                          placeholder="e.g., Bench Press, Lateral Raises"
+                          className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                          required
+                        />
+                      </div>
+                      {/* Sets and Reps */}
+                      <div className="flex gap-4">
+                        <div className="flex-1">
+                          <label
+                            htmlFor={`sets-${groupIdx}-${exIdx}`}
+                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                          >
+                            Sets
+                          </label>
+                          <input
+                            id={`sets-${groupIdx}-${exIdx}`}
+                            type="number"
+                            min={1}
+                            value={exercise.sets}
+                            onChange={(e) =>
+                              handleExerciseChange(
+                                groupIdx,
+                                exIdx,
+                                "sets",
+                                Number(e.target.value)
+                              )
+                            }
+                            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                            required
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label
+                            htmlFor={`reps-${groupIdx}-${exIdx}`}
+                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                          >
+                            Reps
+                          </label>
+                          <input
+                            id={`reps-${groupIdx}-${exIdx}`}
+                            type="number"
+                            min={1}
+                            value={exercise.reps}
+                            onChange={(e) =>
+                              handleExerciseChange(
+                                groupIdx,
+                                exIdx,
+                                "reps",
+                                Number(e.target.value)
+                              )
+                            }
+                            className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                            required
+                          />
+                        </div>
+                      </div>
+                      {/* Notes */}
+                      <div>
+                        <label
+                          htmlFor={`notes-${groupIdx}-${exIdx}`}
+                          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                        >
+                          Notes (optional)
+                        </label>
+                        <input
+                          id={`notes-${groupIdx}-${exIdx}`}
+                          type="text"
+                          value={exercise.notes || ""}
+                          onChange={(e) =>
+                            handleExerciseChange(
+                              groupIdx,
+                              exIdx,
+                              "notes",
+                              e.target.value
+                            )
+                          }
+                          className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                      </div>
+                      {/* Upload Video */}
+                      <div>
+                        <label
+                          htmlFor={`videoFile-${groupIdx}-${exIdx}`}
+                          className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                        >
+                          Upload Video (optional)
+                        </label>
+                        <input
+                          id={`videoFile-${groupIdx}-${exIdx}`}
+                          type="file"
+                          accept="video/*"
+                          onChange={(e) => {
+                            const file =
+                              e.target.files && e.target.files[0]
+                                ? e.target.files[0]
+                                : undefined;
+                            handleExerciseChange(
+                              groupIdx,
+                              exIdx,
+                              "videoFile",
+                              file
+                            );
+                          }}
+                          className="w-full text-gray-900 dark:text-gray-100"
+                        />
+                        {exercise.videoFile && (
+                          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Selected: {exercise.videoFile.name}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {/* Add Exercise Button for Giant Set only */}
+                {group.type === "Giant Set" && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => removeExercise(index)}
-                    className="!text-red-500 !border-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/20"
+                    onClick={() => addExerciseToGroup(groupIdx)}
                   >
-                    Remove Exercise
+                    Add Exercise to Giant Set
                   </Button>
                 )}
               </div>
-
-              <div className="space-y-4">
-                {/* Exercise Name */}
-                <div>
-                  <label
-                    htmlFor={`exerciseName-${index}`}
-                    className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                  >
-                    Exercise Name
-                  </label>
-                  <input
-                    id={`exerciseName-${index}`}
-                    type="text"
-                    value={exercise.name}
-                    onChange={(e) =>
-                      handleExerciseChange(index, "name", e.target.value)
-                    }
-                    placeholder="e.g., Bench Press, Lateral Raises"
-                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                    required
-                  />
-                </div>
-
-                {/* Video URL */}
-                <div>
-                  <label
-                    htmlFor={`videoUrl-${index}`}
-                    className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                  >
-                    Video URL (Optional)
-                  </label>
-                  <input
-                    id={`videoUrl-${index}`}
-                    type="url"
-                    value={exercise.videoUrl || ""}
-                    onChange={(e) =>
-                      handleExerciseChange(index, "videoUrl", e.target.value)
-                    }
-                    placeholder="https://example.com/workout-video"
-                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-
-                {/* Sets and Reps */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label
-                      htmlFor={`sets-${index}`}
-                      className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                    >
-                      Number of Sets
-                    </label>
-                    <input
-                      id={`sets-${index}`}
-                      type="number"
-                      min="1"
-                      max="9"
-                      value={exercise.sets}
-                      onChange={(e) =>
-                        handleExerciseChange(
-                          index,
-                          "sets",
-                          Number(e.target.value)
-                        )
-                      }
-                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor={`reps-${index}`}
-                      className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                    >
-                      Number of Reps
-                    </label>
-                    <input
-                      id={`reps-${index}`}
-                      type="number"
-                      min="1"
-                      value={exercise.reps}
-                      onChange={(e) =>
-                        handleExerciseChange(
-                          index,
-                          "reps",
-                          Number(e.target.value)
-                        )
-                      }
-                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <label
-                    htmlFor={`notes-${index}`}
-                    className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                  >
-                    Notes (Optional)
-                  </label>
-                  <textarea
-                    id={`notes-${index}`}
-                    value={exercise.notes || ""}
-                    onChange={(e) =>
-                      handleExerciseChange(index, "notes", e.target.value)
-                    }
-                    placeholder="e.g., Negative sets, rest time between sets, form cues, etc."
-                    rows={3}
-                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                  />
-                </div>
-              </div>
             </div>
           ))}
-
-          {type === "Giant Set" && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={addExercise}
-              className="w-full"
-            >
-              + Add Exercise
-            </Button>
-          )}
         </div>
-
-        {/* Form Actions */}
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
+        {/* Add Workout Group Button */}
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={addGroup}
+            className="text-primary text-sm font-medium hover:underline px-2 py-1 bg-transparent border-none focus:outline-none"
+            style={{ background: "none" }}
+          >
+            Add Workout
+          </button>
+        </div>
+        <div className="flex justify-end">
           <Button type="submit" variant="primary">
             {submitLabel}
           </Button>
