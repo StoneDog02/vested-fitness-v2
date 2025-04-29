@@ -19,10 +19,10 @@ export default function Button({
   ...props
 }: ButtonProps) {
   const variantClasses = {
-    primary: "bg-primary hover:bg-primary-dark text-white",
+    primary: "bg-primary hover:bg-primary text-white hover:text-black",
     secondary: "bg-secondary hover:bg-secondary-light text-white",
     outline:
-      "border border-primary text-primary hover:bg-primary hover:text-white dark:border-primary dark:text-primary",
+      "border border-primary text-primary hover:bg-primary hover:!text-black dark:border-primary dark:text-primary",
     ghost: "text-primary hover:bg-gray-light dark:hover:bg-secondary-light",
   };
 

@@ -16,6 +16,94 @@ export interface User {
   created_by?: string;
   last_login?: string;
   auth_id: string;
+  goal?: string;
+}
+
+// Define the database schema
+export interface Database {
+  public: {
+    Tables: {
+      users: {
+        Row: {
+          id: string;
+          auth_id: string;
+          email: string;
+          name: string;
+          role: UserRole;
+          coach_id?: string;
+          starting_weight?: number;
+          current_weight?: number;
+          workout_split?: string;
+          avatar_url?: string;
+          created_at: string;
+          created_by?: string;
+          last_login?: string;
+          updated_at: string;
+          goal?: string;
+        };
+        Insert: {
+          id?: string;
+          auth_id: string;
+          email: string;
+          name: string;
+          role: UserRole;
+          coach_id?: string;
+          starting_weight?: number;
+          current_weight?: number;
+          workout_split?: string;
+          avatar_url?: string;
+          created_at?: string;
+          created_by?: string;
+          last_login?: string;
+          updated_at?: string;
+          goal?: string;
+        };
+        Update: {
+          id?: string;
+          auth_id?: string;
+          email?: string;
+          name?: string;
+          role?: UserRole;
+          coach_id?: string;
+          starting_weight?: number;
+          current_weight?: number;
+          workout_split?: string;
+          avatar_url?: string;
+          created_at?: string;
+          created_by?: string;
+          last_login?: string;
+          updated_at?: string;
+          goal?: string;
+        };
+      };
+      coach_updates: {
+        Row: {
+          id: string;
+          coach_id: string;
+          client_id: string;
+          message: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id: string;
+          client_id: string;
+          message: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string;
+          client_id?: string;
+          message?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+    };
+  };
 }
 
 // Mock user data for testing

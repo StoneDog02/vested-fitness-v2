@@ -1,5 +1,5 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useMatches } from "@remix-run/react";
+import { useLoaderData, useMatches, Link } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import type { DailyWorkout } from "~/types/workout";
@@ -224,33 +224,47 @@ export default function Dashboard() {
 
           {/* Metrics Grid */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Total Clients</h3>
-              <p className="text-4xl font-bold">24</p>
-              <p className="text-sm text-muted-foreground mt-2">
-                +3 this month
-              </p>
-            </Card>
+            <Link to="/dashboard/clients" className="group">
+              <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
+                <h3 className="font-semibold text-lg mb-2">Total Clients</h3>
+                <p className="text-4xl font-bold">24</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  +3 this month
+                </p>
+              </Card>
+            </Link>
 
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Active Clients</h3>
-              <p className="text-4xl font-bold">18</p>
-              <p className="text-sm text-muted-foreground mt-2">75% of total</p>
-            </Card>
+            <Link to="/dashboard/clients/active" className="group">
+              <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
+                <h3 className="font-semibold text-lg mb-2">Active Clients</h3>
+                <p className="text-4xl font-bold">18</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  75% of total
+                </p>
+              </Card>
+            </Link>
 
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Inactive Clients</h3>
-              <p className="text-4xl font-bold text-red-500">6</p>
-              <p className="text-sm text-muted-foreground mt-2">25% of total</p>
-            </Card>
+            <Link to="/dashboard/clients/inactive" className="group">
+              <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
+                <h3 className="font-semibold text-lg mb-2">Inactive Clients</h3>
+                <p className="text-4xl font-bold text-red-500">6</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  25% of total
+                </p>
+              </Card>
+            </Link>
 
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Client Compliance</h3>
-              <p className="text-4xl font-bold">87%</p>
-              <p className="text-sm text-muted-foreground mt-2">
-                +5% from last week
-              </p>
-            </Card>
+            <Link to="/dashboard/clients/compliance" className="group">
+              <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
+                <h3 className="font-semibold text-lg mb-2">
+                  Client Compliance
+                </h3>
+                <p className="text-4xl font-bold">87%</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  +5% from last week
+                </p>
+              </Card>
+            </Link>
           </div>
 
           {/* Recent Clients and Activity Grid */}

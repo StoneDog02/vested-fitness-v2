@@ -66,41 +66,67 @@ export default function ClientChat() {
           {/* Left side - Chat Messages */}
           <div>
             <Card title="Messages">
-              <div className="h-[600px] overflow-y-auto space-y-4">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${
-                      message.sender === "coach"
-                        ? "justify-end"
-                        : "justify-start"
-                    }`}
-                  >
+              <div className="flex flex-col h-[600px]">
+                {/* Messages container */}
+                <div className="flex-1 overflow-y-auto space-y-4 p-2">
+                  {messages.map((message) => (
                     <div
-                      className={`max-w-[80%] rounded-lg p-3 ${
+                      key={message.id}
+                      className={`flex ${
                         message.sender === "coach"
-                          ? "bg-primary text-white"
-                          : "bg-gray-light dark:bg-davyGray text-secondary dark:text-alabaster"
+                          ? "justify-end"
+                          : "justify-start"
                       }`}
                     >
-                      <p className="text-sm">{message.content}</p>
-                      <span
-                        className={`text-xs mt-1 block ${
+                      <div
+                        className={`max-w-[80%] rounded-2xl p-3 shadow-sm ${
                           message.sender === "coach"
-                            ? "text-white/80"
-                            : "text-gray-dark dark:text-gray-light"
+                            ? "bg-primary text-white rounded-tr-md"
+                            : "bg-gray-light dark:bg-davyGray text-secondary dark:text-alabaster rounded-tl-md"
                         }`}
                       >
-                        {new Date(message.timestamp).toLocaleTimeString()}
-                      </span>
+                        <p className="text-sm">{message.content}</p>
+                        <span
+                          className={`text-xs mt-1 block ${
+                            message.sender === "coach"
+                              ? "text-white/80"
+                              : "text-gray-dark dark:text-gray-light"
+                          }`}
+                        >
+                          {new Date(message.timestamp).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+                {/* Message input */}
+                <form
+                  onSubmit={handleSendMessage}
+                  className="flex items-center gap-2 border-t border-gray-light dark:border-davyGray p-3 bg-white dark:bg-night"
+                  style={{
+                    borderBottomLeftRadius: "0.75rem",
+                    borderBottomRightRadius: "0.75rem",
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder="Type your message..."
+                    className="flex-1 border border-gray-light dark:border-davyGray rounded-lg py-2 px-3 bg-white dark:bg-night text-secondary dark:text-alabaster focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
+                  />
+                  <Button type="submit" variant="primary">
+                    Send
+                  </Button>
+                </form>
               </div>
             </Card>
           </div>
 
-          {/* Right side - Client Info & Notes */}
+          {/* Right side - Client Info */}
           <div className="space-y-6">
             {/* Client Info */}
             <Card title="Client Information">
@@ -115,23 +141,6 @@ export default function ClientChat() {
                   <span className="font-medium">Start Date:</span> Jan 15, 2024
                 </p>
               </div>
-            </Card>
-
-            {/* Quick Notes */}
-            <Card title="Quick Notes">
-              <form onSubmit={handleSendMessage} className="space-y-4">
-                <textarea
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Type your message..."
-                  className="w-full h-32 p-2 border border-gray-light dark:border-davyGray rounded-lg bg-white dark:bg-night text-secondary dark:text-alabaster"
-                />
-                <div className="flex justify-end">
-                  <Button type="submit" variant="primary">
-                    Send Message
-                  </Button>
-                </div>
-              </form>
             </Card>
           </div>
         </div>

@@ -2,6 +2,8 @@ import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
+import ViewWorkoutPlanModal from "~/components/coach/ViewWorkoutPlanModal";
+import CreateWorkoutModal from "~/components/coach/CreateWorkoutModal";
 import { useState } from "react";
 
 interface Workout {
@@ -10,6 +12,20 @@ interface Workout {
   description: string;
   createdAt: string;
   isActive: boolean;
+}
+
+interface WorkoutSection {
+  name: string;
+  videoUrl?: string;
+  sets: number;
+  reps: number;
+  notes?: string;
+}
+
+interface WorkoutPlanForm {
+  planName: string;
+  type: "Single" | "Super Set" | "Giant Set";
+  exercises: WorkoutSection[];
 }
 
 const mockWorkouts: Workout[] = [
@@ -29,6 +45,30 @@ const mockWorkouts: Workout[] = [
   },
 ];
 
+const mockExercises = [
+  {
+    id: "ex1",
+    name: "Bench Press",
+    description: "4 sets x 6-10 reps",
+    sets: [
+      { setNumber: 1, reps: 10, weight: 135 },
+      { setNumber: 2, reps: 8, weight: 185 },
+      { setNumber: 3, reps: 6, weight: 205 },
+      { setNumber: 4, reps: 6, weight: 205 },
+    ],
+  },
+  {
+    id: "ex2",
+    name: "Incline Dumbbell Press",
+    description: "3 sets x 8-10 reps",
+    sets: [
+      { setNumber: 1, reps: 10, weight: 60 },
+      { setNumber: 2, reps: 10, weight: 65 },
+      { setNumber: 3, reps: 8, weight: 70 },
+    ],
+  },
+];
+
 export const meta: MetaFunction = () => {
   return [
     { title: "Client Workouts | Vested Fitness" },
@@ -37,8 +77,67 @@ export const meta: MetaFunction = () => {
 };
 
 export default function ClientWorkouts() {
-  const [workouts] = useState<Workout[]>(mockWorkouts);
+  const [workouts, setWorkouts] = useState<Workout[]>(mockWorkouts);
   const activeWorkout = workouts.find((workout) => workout.isActive);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editWorkoutData, setEditWorkoutData] =
+    useState<WorkoutPlanForm | null>(null);
+  const [viewWorkoutPlan, setViewWorkoutPlan] = useState<Workout | null>(null);
+
+  const handleSetActive = (workoutId: string) => {
+    setWorkouts((prevWorkouts) =>
+      prevWorkouts.map((workout) => ({
+        ...workout,
+        isActive: workout.id === workoutId,
+      }))
+    );
+  };
+
+  const handleEdit = (workout: Workout) => {
+    setEditWorkoutData({
+      planName: workout.title,
+      type: "Single", // You may want to store type in your data model
+      exercises: mockExercises.map((ex) => ({
+        name: ex.name,
+        videoUrl: undefined,
+        sets: ex.sets[0]?.setNumber || 3,
+        reps: ex.sets[0]?.reps || 10,
+        notes: undefined,
+      })),
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateWorkout = (updated: WorkoutPlanForm) => {
+    setWorkouts((prev) =>
+      prev.map((w) =>
+        w.title === (editWorkoutData ? editWorkoutData.planName : "")
+          ? {
+              ...w,
+              title: updated.planName,
+              description: updated.exercises.map((ex) => ex.name).join(", "),
+            }
+          : w
+      )
+    );
+    setIsEditModalOpen(false);
+    setEditWorkoutData(null);
+  };
+
+  const handleCreateWorkout = (workoutData: WorkoutPlanForm) => {
+    setWorkouts((prev) => [
+      ...prev,
+      {
+        id: (prev.length + 1).toString(),
+        title: workoutData.planName,
+        description: workoutData.exercises.map((ex) => ex.name).join(", "),
+        createdAt: new Date().toISOString().slice(0, 10),
+        isActive: false,
+      },
+    ]);
+    setIsCreateModalOpen(false);
+  };
 
   return (
     <ClientDetailLayout>
@@ -56,7 +155,11 @@ export default function ClientWorkouts() {
               title="Workout History"
               action={
                 <div className="flex gap-2">
-                  <Button size="sm" variant="primary">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => setIsCreateModalOpen(true)}
+                  >
                     Create Plan
                   </Button>
                 </div>
@@ -76,11 +179,11 @@ export default function ClientWorkouts() {
                       <h3 className="font-medium text-secondary dark:text-alabaster">
                         {workout.title}
                       </h3>
-                      {workout.isActive && (
+                      {workout.isActive ? (
                         <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
                           Active
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
                       {workout.description}
@@ -89,12 +192,20 @@ export default function ClientWorkouts() {
                       Created: {workout.createdAt}
                     </div>
                     <div className="flex gap-2 mt-3">
-                      <button className="text-primary text-sm hover:underline">
-                        View
-                      </button>
-                      <button className="text-gray-dark dark:text-gray-light text-sm hover:underline">
+                      <button
+                        className="text-gray-dark dark:text-gray-light text-sm hover:underline"
+                        onClick={() => handleEdit(workout)}
+                      >
                         Edit
                       </button>
+                      {!workout.isActive && (
+                        <button
+                          className="text-green-500 text-sm hover:underline"
+                          onClick={() => handleSetActive(workout.id)}
+                        >
+                          Set Active
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -117,7 +228,11 @@ export default function ClientWorkouts() {
                   <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                     Created: {activeWorkout.createdAt}
                   </div>
-                  <Button variant="outline" className="mt-4">
+                  <Button
+                    variant="outline"
+                    className="mt-4"
+                    onClick={() => setViewWorkoutPlan(activeWorkout)}
+                  >
                     View Full Plan
                   </Button>
                 </div>
@@ -141,6 +256,36 @@ export default function ClientWorkouts() {
             </Card>
           </div>
         </div>
+        {viewWorkoutPlan && (
+          <ViewWorkoutPlanModal
+            isOpen={!!viewWorkoutPlan}
+            onClose={() => setViewWorkoutPlan(null)}
+            workoutPlan={{
+              ...viewWorkoutPlan,
+              exercises: mockExercises,
+            }}
+          />
+        )}
+
+        <CreateWorkoutModal
+          isOpen={isCreateModalOpen}
+          onClose={() => setIsCreateModalOpen(false)}
+          onSubmit={handleCreateWorkout}
+        />
+
+        {isEditModalOpen && editWorkoutData && (
+          <CreateWorkoutModal
+            isOpen={isEditModalOpen}
+            onClose={() => {
+              setIsEditModalOpen(false);
+              setEditWorkoutData(null);
+            }}
+            onSubmit={handleUpdateWorkout}
+            initialValues={editWorkoutData}
+            title="Edit Workout Plan"
+            submitLabel="Save Changes"
+          />
+        )}
       </div>
     </ClientDetailLayout>
   );

@@ -362,13 +362,23 @@ export default function Workouts() {
                 Previous
               </button>
 
-              <div className="absolute left-1/2 -translate-x-1/2 text-center">
+              <div className="absolute left-1/2 -translate-x-1/2 text-center pt-[0.75rem]">
                 <h2 className="text-xl font-semibold text-secondary dark:text-alabaster">
                   {dateDisplay.title}
                 </h2>
                 <div className="text-sm text-gray-dark dark:text-gray-light mt-1">
                   {dateDisplay.subtitle}
                 </div>
+                {dayOffset !== 0 ? (
+                  <button
+                    onClick={() => setDayOffset(0)}
+                    className="text-xs text-primary hover:text-primary-dark transition-colors duration-200 mt-1"
+                  >
+                    Go to today
+                  </button>
+                ) : (
+                  <div className="h-[1.5rem]"></div>
+                )}
               </div>
 
               <button
@@ -536,10 +546,6 @@ export default function Workouts() {
                 </div>
               ))}
             </div>
-
-            <Button variant="outline" className="w-full mt-4">
-              View Full Program
-            </Button>
           </Card>
 
           {/* Workout Calendar */}

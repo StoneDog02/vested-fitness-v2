@@ -28,7 +28,7 @@ export default function TabLayout({ tabs, children }: TabLayoutProps) {
                 ${
                   isActive(tab.href)
                     ? "border-primary text-primary dark:text-primary dark:border-primary"
-                    : "border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:text-primary dark:hover:border-primary/50"
+                    : "border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:text-primary dark:hover:border-primary/50 hover:!text-primary"
                 }
               `}
             >

@@ -1,7 +1,6 @@
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
-import AddMessageModal from "~/components/coach/AddMessageModal";
 import {
   LineChart,
   Line,
@@ -12,7 +11,10 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useState } from "react";
-import { useLocation } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
+import { json } from "@remix-run/node";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "~/lib/supabase";
 
 export const meta: MetaFunction = () => {
   return [
@@ -23,37 +25,6 @@ export const meta: MetaFunction = () => {
     },
   ];
 };
-
-interface CoachUpdate {
-  id: number;
-  date: string;
-  message: string;
-}
-
-// Mock updates from coach
-const initialCoachUpdates: CoachUpdate[] = [
-  {
-    id: 1,
-    date: "2024-04-10",
-    message: "Great progress this week! Keep up the good work on your meals.",
-  },
-  {
-    id: 2,
-    date: "2024-04-03",
-    message: "Remember to increase your water intake before workouts.",
-  },
-  {
-    id: 3,
-    date: "2024-03-27",
-    message: "Let's focus on increasing your protein intake this week.",
-  },
-  {
-    id: 4,
-    date: "2024-03-20",
-    message:
-      "Your check-in photos show great progress in your upper body. Keep it up!",
-  },
-];
 
 // Mock check-in notes
 const mockCheckInNotes = {
@@ -74,14 +45,87 @@ const initialWeightData = [
   { date: "2024-04-12", weight: 175 },
 ];
 
+// Mock client data
+const mockClientData = {
+  goal: "Build muscle and increase strength",
+};
+
+// Function to determine if the goal is weight loss oriented
+const isWeightLossGoal = (goal: string) => {
+  const weightLossKeywords = ["lose", "cut", "lean", "reduce", "drop"];
+  return weightLossKeywords.some((keyword) =>
+    goal.toLowerCase().includes(keyword)
+  );
+};
+
+// Function to determine the change color based on goal and value
+const getChangeColor = (change: number, goal: string) => {
+  const isLossGoal = isWeightLossGoal(goal);
+
+  if (isLossGoal) {
+    return change < 0
+      ? "text-green-500"
+      : change > 0
+      ? "text-red-500"
+      : "text-secondary dark:text-alabaster";
+  } else {
+    // For muscle gain/bulk goals
+    return change > 0
+      ? "text-green-500"
+      : change < 0
+      ? "text-secondary dark:text-alabaster"
+      : "text-secondary dark:text-alabaster";
+  }
+};
+
+export const loader = async () => {
+  const supabase = createClient<Database>(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+  );
+
+  // Get the current user's ID
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return json({ updates: [], goal: mockClientData.goal });
+  }
+
+  // Get the client's user record
+  const { data: clientUser } = await supabase
+    .from("users")
+    .select("id, goal")
+    .eq("auth_id", user.id)
+    .single();
+
+  if (!clientUser) {
+    return json({ updates: [], goal: mockClientData.goal });
+  }
+
+  // Get the updates
+  const { data: updates, error } = await supabase
+    .from("coach_updates")
+    .select("*")
+    .eq("client_id", clientUser.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching updates:", error);
+    return json({ updates: [], goal: mockClientData.goal });
+  }
+
+  return json({
+    updates,
+    goal: clientUser.goal || mockClientData.goal,
+  });
+};
+
 export default function CoachAccess() {
+  const { updates, goal } = useLoaderData<typeof loader>();
   const [showAddWeight, setShowAddWeight] = useState(false);
-  const [showAddMessage, setShowAddMessage] = useState(false);
   const [newWeight, setNewWeight] = useState("");
   const [mockWeightData, setMockWeightData] = useState(initialWeightData);
-  const [coachUpdates, setCoachUpdates] =
-    useState<CoachUpdate[]>(initialCoachUpdates);
-  const location = useLocation();
 
   const handleAddWeight = () => {
     if (!newWeight) return;
@@ -95,16 +139,6 @@ export default function CoachAccess() {
     setMockWeightData((prevData) => [...prevData, newWeightEntry]);
     setShowAddWeight(false);
     setNewWeight("");
-  };
-
-  const handleAddMessage = (message: string) => {
-    const today = new Date().toISOString().split("T")[0];
-    const newUpdate: CoachUpdate = {
-      id: coachUpdates.length + 1,
-      date: today,
-      message,
-    };
-    setCoachUpdates((prevUpdates) => [newUpdate, ...prevUpdates]);
   };
 
   const startWeight = mockWeightData[0].weight;
@@ -121,25 +155,15 @@ export default function CoachAccess() {
         {/* Left column with three stacked cards */}
         <div className="space-y-6">
           {/* Updates from Coach */}
-          <Card
-            title="Updates from Coach"
-            action={
-              <button
-                onClick={() => setShowAddMessage(true)}
-                className="text-sm text-primary hover:underline"
-              >
-                +Add Message
-              </button>
-            }
-          >
+          <Card title="Updates from Coach">
             <div className="space-y-4">
-              {coachUpdates.map((update) => (
+              {updates.map((update) => (
                 <div
                   key={update.id}
                   className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
                 >
                   <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
-                    {update.date}
+                    {new Date(update.created_at).toLocaleDateString()}
                   </div>
                   <p className="text-secondary dark:text-alabaster">
                     {update.message}
@@ -174,131 +198,81 @@ export default function CoachAccess() {
 
         {/* Weight Chart */}
         <div className="md:col-span-2">
-          <Card title="Weight Progress">
-            <div className="h-[400px] flex flex-col">
-              <div className="flex-1">
-                <ResponsiveContainer
-                  key={location.pathname}
-                  width="100%"
-                  height="100%"
+          <Card
+            title={
+              <div className="flex items-baseline gap-2">
+                <span>Weight Progress</span>
+                <span className="text-sm text-gray-dark dark:text-gray-light">
+                  ({goal})
+                </span>
+              </div>
+            }
+          >
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={mockWeightData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis domain={["dataMin - 5", "dataMax + 5"]} />
+                  <Tooltip />
+                  <Line
+                    type="monotone"
+                    dataKey="weight"
+                    stroke="#8884d8"
+                    activeDot={{ r: 8 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-4">
+              <div className="flex justify-between items-center mb-4">
+                <p className="text-sm text-gray-dark dark:text-gray-light text-center flex-1">
+                  Starting Weight: {startWeight} lbs
+                </p>
+                <p className="text-sm text-gray-dark dark:text-gray-light text-center flex-1">
+                  Current Weight: {currentWeight} lbs
+                </p>
+                <p
+                  className={`text-sm text-center flex-1 ${getChangeColor(
+                    totalChange,
+                    goal
+                  )}`}
                 >
-                  <LineChart
-                    data={mockWeightData}
-                    margin={{
-                      top: 5,
-                      right: 30,
-                      left: 20,
-                      bottom: 5,
-                    }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={(date) =>
-                        new Date(date).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })
-                      }
-                    />
-                    <YAxis
-                      domain={["dataMin - 5", "dataMax + 5"]}
-                      tickFormatter={(value) => `${value} lbs`}
-                    />
-                    <Tooltip
-                      formatter={(value) => [`${value} lbs`, "Weight"]}
-                      labelFormatter={(date) =>
-                        new Date(date).toLocaleDateString("en-US", {
-                          month: "long",
-                          day: "numeric",
-                          year: "numeric",
-                        })
-                      }
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="weight"
-                      stroke="#10B981"
-                      strokeWidth={2}
-                      dot={{ fill: "#10B981", r: 4 }}
-                      activeDot={{ r: 6 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                  Total Change: {totalChange} lbs
+                </p>
               </div>
-
-              <div className="mt-4 flex flex-col space-y-4">
-                <div className="flex justify-between text-sm">
-                  <div>
-                    <span className="text-secondary dark:text-alabaster font-medium">
-                      Starting Weight:{" "}
-                    </span>
-                    <span className="text-secondary dark:text-alabaster">
-                      {startWeight} lbs
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-secondary dark:text-alabaster font-medium">
-                      Current Weight:{" "}
-                    </span>
-                    <span className="text-secondary dark:text-alabaster">
-                      {currentWeight} lbs
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-secondary dark:text-alabaster font-medium">
-                      Total Change:{" "}
-                    </span>
-                    <span
-                      className={
-                        totalChange <= 0 ? "text-green-500" : "text-red-500"
-                      }
-                    >
-                      {totalChange <= 0 ? "" : "+"}
-                      {totalChange} lbs
-                    </span>
-                  </div>
-                </div>
-
-                {showAddWeight ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={newWeight}
-                      onChange={(e) => setNewWeight(e.target.value)}
-                      placeholder="Enter weight in lbs"
-                      className="flex-1 px-3 py-2 border border-gray-light dark:border-davyGray rounded-md bg-white dark:bg-night text-secondary dark:text-alabaster"
-                    />
-                    <Button onClick={handleAddWeight} variant="primary">
-                      Save
-                    </Button>
-                    <Button
-                      onClick={() => setShowAddWeight(false)}
-                      variant="secondary"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    onClick={() => setShowAddWeight(true)}
-                    variant="primary"
-                    className="w-full"
-                  >
-                    + Add Weight
+              {showAddWeight ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={newWeight}
+                    onChange={(e) => setNewWeight(e.target.value)}
+                    placeholder="Enter weight in lbs"
+                    className="flex-1 px-3 py-2 border border-gray-light dark:border-davyGray rounded-md bg-white dark:bg-night text-secondary dark:text-alabaster"
+                  />
+                  <Button onClick={handleAddWeight} variant="primary">
+                    Save
                   </Button>
-                )}
-              </div>
+                  <Button
+                    onClick={() => setShowAddWeight(false)}
+                    variant="secondary"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  onClick={() => setShowAddWeight(true)}
+                  variant="primary"
+                  className="w-full"
+                >
+                  + Add Weight
+                </Button>
+              )}
             </div>
           </Card>
         </div>
       </div>
-
-      <AddMessageModal
-        isOpen={showAddMessage}
-        onClose={() => setShowAddMessage(false)}
-        onSubmit={handleAddMessage}
-      />
     </div>
   );
 }

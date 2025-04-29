@@ -199,6 +199,10 @@ export default function ClientMeals() {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<MealPlanData | null>(null);
   const [mealPlans, setMealPlans] = useState<MealPlanData[]>(mockMealPlans);
+  const [editingPlan, setEditingPlan] = useState<{
+    data: MealPlanFormData;
+    id: string;
+  } | null>(null);
   const activeMealPlan = mealPlans.find((plan) => plan.isActive);
 
   const handleSetActive = (id: string) => {
@@ -215,19 +219,45 @@ export default function ClientMeals() {
     setIsViewModalOpen(true);
   };
 
-  const handleSaveMealPlan = (mealPlanData: MealPlanFormData) => {
-    // In a real app, we'd call an API to save the meal plan
-    // For now, just add it to our local state
-    const newPlan: MealPlanData = {
-      id: (mealPlans.length + 1).toString(),
-      title: mealPlanData.title,
-      description: mealPlanData.description,
-      createdAt: new Date().toISOString().split("T")[0],
-      isActive: false,
-      meals: mealPlanData.meals,
+  const handleEditPlan = (plan: MealPlanData) => {
+    // Convert MealPlanData to MealPlanFormData
+    const formData: MealPlanFormData = {
+      title: plan.title,
+      description: plan.description,
+      meals: plan.meals,
     };
+    setEditingPlan({ data: formData, id: plan.id });
+    setIsCreateModalOpen(true);
+  };
 
-    setMealPlans([...mealPlans, newPlan]);
+  const handleSaveMealPlan = (mealPlanData: MealPlanFormData) => {
+    if (editingPlan) {
+      // Update existing plan
+      setMealPlans((prevPlans) =>
+        prevPlans.map((plan) =>
+          plan.id === editingPlan.id
+            ? {
+                ...plan,
+                title: mealPlanData.title,
+                description: mealPlanData.description,
+                meals: mealPlanData.meals,
+              }
+            : plan
+        )
+      );
+      setEditingPlan(null);
+    } else {
+      // Create new plan
+      const newPlan: MealPlanData = {
+        id: (mealPlans.length + 1).toString(),
+        title: mealPlanData.title,
+        description: mealPlanData.description,
+        createdAt: new Date().toISOString().split("T")[0],
+        isActive: false,
+        meals: mealPlanData.meals,
+      };
+      setMealPlans([...mealPlans, newPlan]);
+    }
   };
 
   return (
@@ -283,12 +313,6 @@ export default function ClientMeals() {
                       Created: {plan.createdAt}
                     </div>
                     <div className="flex gap-2 mt-3">
-                      <button
-                        className="text-primary text-sm hover:underline"
-                        onClick={() => handleViewPlan(plan)}
-                      >
-                        View
-                      </button>
                       {!plan.isActive && (
                         <button
                           className="text-primary text-sm hover:underline"
@@ -297,7 +321,10 @@ export default function ClientMeals() {
                           Set Active
                         </button>
                       )}
-                      <button className="text-gray-dark dark:text-gray-light text-sm hover:underline">
+                      <button
+                        className="text-gray-dark dark:text-gray-light text-sm hover:underline"
+                        onClick={() => handleEditPlan(plan)}
+                      >
                         Edit
                       </button>
                     </div>
@@ -359,8 +386,12 @@ export default function ClientMeals() {
 
       <CreateMealPlanModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        onClose={() => {
+          setIsCreateModalOpen(false);
+          setEditingPlan(null);
+        }}
         onSave={handleSaveMealPlan}
+        existingPlan={editingPlan?.data}
       />
 
       {selectedPlan && (

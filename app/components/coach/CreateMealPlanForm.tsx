@@ -26,33 +26,37 @@ export interface MealPlanFormData {
 interface CreateMealPlanFormProps {
   onSubmit: (data: MealPlanFormData) => void;
   onCancel: () => void;
+  initialData?: MealPlanFormData;
 }
 
 export default function CreateMealPlanForm({
   onSubmit,
   onCancel,
+  initialData,
 }: CreateMealPlanFormProps) {
-  const [formData, setFormData] = useState<MealPlanFormData>({
-    title: "",
-    description: "",
-    meals: [
-      {
-        id: 1,
-        name: "Breakfast",
-        time: "7:00 AM",
-        foods: [
-          {
-            name: "",
-            portion: "",
-            calories: 0,
-            protein: 0,
-            carbs: 0,
-            fat: 0,
-          },
-        ],
-      },
-    ],
-  });
+  const [formData, setFormData] = useState<MealPlanFormData>(
+    initialData || {
+      title: "",
+      description: "",
+      meals: [
+        {
+          id: 1,
+          name: "",
+          time: "",
+          foods: [
+            {
+              name: "",
+              portion: "",
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+          ],
+        },
+      ],
+    }
+  );
 
   const [activeMealIndex, setActiveMealIndex] = useState(0);
 

@@ -73,6 +73,13 @@ const mockClients = [
 
 export default function ClientsIndex() {
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const filteredClients = mockClients.filter(
+    (client) =>
+      client.name.toLowerCase().includes(search.toLowerCase()) ||
+      client.email.toLowerCase().includes(search.toLowerCase()) ||
+      client.goal.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div className="p-6">
@@ -106,12 +113,14 @@ export default function ClientsIndex() {
             type="text"
             className="block w-full pl-10 pr-3 py-2 border border-gray-light dark:border-davyGray rounded-md leading-5 bg-white dark:bg-night placeholder-gray dark:placeholder-gray-light focus:outline-none focus:ring-primary focus:border-primary sm:text-sm dark:text-alabaster"
             placeholder="Search clients..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
       </div>
 
       <div className="space-y-4">
-        {mockClients.map((client) => (
+        {filteredClients.map((client) => (
           <ClientCard key={client.id} client={client} />
         ))}
       </div>

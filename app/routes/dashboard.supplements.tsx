@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
-import Button from "~/components/ui/Button";
 
 export const meta: MetaFunction = () => {
   return [
@@ -43,6 +42,24 @@ const mockSupplements = [
 
 // Mock compliance data
 const mockComplianceData = [
+  {
+    date: "Apr 5",
+    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
+    taken: true,
+    compliance: 100,
+  },
+  {
+    date: "Apr 6",
+    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
+    taken: true,
+    compliance: 100,
+  },
+  {
+    date: "Apr 7",
+    supplements: ["Multivitamin", "Protein Powder"],
+    taken: true,
+    compliance: 67,
+  },
   {
     date: "Apr 8",
     supplements: ["Multivitamin", "Protein Powder", "Creatine"],
@@ -251,17 +268,31 @@ export default function Supplements() {
                   <span className="text-gray-dark dark:text-gray-light">
                     {day.date}
                   </span>
-                  <span
-                    className={`${
-                      day.compliance >= 80
-                        ? "text-green-500"
-                        : day.compliance >= 50
-                        ? "text-yellow-500"
-                        : "text-red-500"
-                    }`}
-                  >
-                    {day.compliance}%
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-20 bg-gray-lightest dark:bg-night rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full ${
+                          day.compliance >= 80
+                            ? "bg-green-500"
+                            : day.compliance >= 50
+                            ? "bg-yellow-500"
+                            : "bg-red-500"
+                        }`}
+                        style={{ width: `${day.compliance}%` }}
+                      />
+                    </div>
+                    <span
+                      className={`${
+                        day.compliance >= 80
+                          ? "text-green-500"
+                          : day.compliance >= 50
+                          ? "text-yellow-500"
+                          : "text-red-500"
+                      } w-8 text-right`}
+                    >
+                      {day.compliance}%
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>

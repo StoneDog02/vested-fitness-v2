@@ -3,6 +3,14 @@ import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import ClientProfile from "~/components/coach/ClientProfile";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
+import AddMessageModal from "~/components/coach/AddMessageModal";
+import AddCheckInModal from "~/components/coach/AddCheckInModal";
+import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
+import { useState, useEffect } from "react";
+import { json } from "@remix-run/node";
+import { useLoaderData, useFetcher } from "@remix-run/react";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "~/lib/supabase";
 
 // Mock client data - in a real app, this would come from Supabase
 const mockClient = {
@@ -49,32 +57,11 @@ const mockMealPlan = {
   ],
 };
 
-// Mock updates from coach
-const mockUpdates = [
-  {
-    id: 1,
-    date: "2024-04-10",
-    message: "Great progress this week! Keep up the good work on your meals.",
-  },
-  {
-    id: 2,
-    date: "2024-04-03",
-    message: "Remember to increase your water intake before workouts.",
-  },
-  {
-    id: 3,
-    date: "2024-03-27",
-    message: "Let's focus on getting more protein this week.",
-  },
-];
-
-// Mock check-in notes
-const mockCheckInNotes = {
-  lastWeek:
-    "Completed all workouts, followed meal plan at 90% adherence. Feeling stronger, especially during pull days.",
-  thisWeek:
-    "Slight hip pain during squats. Adjusted form and it's better. Need help with sleep quality - averaging 6 hours.",
-};
+interface CheckInNote {
+  id: string;
+  date: string;
+  notes: string;
+}
 
 export const meta: MetaFunction = () => {
   return [
@@ -83,7 +70,102 @@ export const meta: MetaFunction = () => {
   ];
 };
 
+export const loader = async ({ params }: { params: { clientId: string } }) => {
+  const supabase = createClient<Database>(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+  );
+
+  const { data: updates, error } = await supabase
+    .from("coach_updates")
+    .select("*")
+    .eq("client_id", params.clientId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching updates:", error);
+    return json({ updates: [] });
+  }
+
+  return json({ updates });
+};
+
 export default function ClientDetails() {
+  const { updates } = useLoaderData<typeof loader>();
+  const [showAddMessage, setShowAddMessage] = useState(false);
+  const [showAddCheckIn, setShowAddCheckIn] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [checkInHistory, setCheckInHistory] = useState<CheckInNote[]>([
+    {
+      id: "1",
+      date: "2024-03-01",
+      notes:
+        "Client reported feeling stronger in workouts. Sleep has improved to 7-8 hours per night. Compliance with meal plan at 90%.",
+    },
+    {
+      id: "2",
+      date: "2024-02-24",
+      notes:
+        "Client is making good progress with form. Sleep quality needs improvement. Meal plan compliance at 85%.",
+    },
+    {
+      id: "3",
+      date: "2024-02-17",
+      notes:
+        "Initial check-in. Client is motivated and ready to start the program. Set baseline measurements and goals.",
+    },
+  ]);
+  const [displayedHistory, setDisplayedHistory] = useState<CheckInNote[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [currentCheckIn, setCurrentCheckIn] = useState({
+    lastWeek:
+      "Client reported feeling stronger in workouts. Sleep has improved to 7-8 hours per night. Compliance with meal plan at 90%.",
+    thisWeek:
+      "Client is continuing to make progress. Weight down by 1 lb. Requested some modifications to the leg day workout.",
+  });
+  const fetcher = useFetcher();
+
+  // Initialize displayed history
+  useEffect(() => {
+    setDisplayedHistory(checkInHistory.slice(0, 10));
+  }, [checkInHistory]);
+
+  const handleAddMessage = (message: string) => {
+    fetcher.submit(
+      { message },
+      { method: "post", action: `/api/coach-updates/${mockClient.id}` }
+    );
+    setShowAddMessage(false);
+  };
+
+  const handleAddCheckIn = (thisWeek: string) => {
+    // Move current thisWeek to lastWeek
+    const newLastWeek = currentCheckIn.thisWeek;
+
+    // Add the current lastWeek to history
+    const newHistoryEntry: CheckInNote = {
+      id: Date.now().toString(),
+      date: new Date().toISOString(),
+      notes: currentCheckIn.lastWeek,
+    };
+
+    setCheckInHistory((prev) => [newHistoryEntry, ...prev]);
+    setCurrentCheckIn({
+      lastWeek: newLastWeek,
+      thisWeek,
+    });
+  };
+
+  const handleLoadMore = () => {
+    const nextPage = currentPage + 1;
+    const startIndex = nextPage * 10;
+    const newCheckIns = checkInHistory.slice(startIndex, startIndex + 10);
+    setDisplayedHistory((prev) => [...prev, ...newCheckIns]);
+    setCurrentPage(nextPage);
+  };
+
+  const hasMore = displayedHistory.length < checkInHistory.length;
+
   return (
     <ClientDetailLayout>
       <div className="p-6">
@@ -101,19 +183,22 @@ export default function ClientDetails() {
             <Card
               title="Updates to Client"
               action={
-                <button className="text-sm text-primary hover:underline">
+                <button
+                  onClick={() => setShowAddMessage(true)}
+                  className="text-sm text-primary hover:underline"
+                >
                   +Add Message
                 </button>
               }
             >
               <div className="space-y-4">
-                {mockUpdates.map((update) => (
+                {updates.map((update) => (
                   <div
                     key={update.id}
                     className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
                   >
                     <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
-                      {update.date}
+                      {new Date(update.created_at).toLocaleDateString()}
                     </div>
                     <p className="text-secondary dark:text-alabaster">
                       {update.message}
@@ -124,14 +209,32 @@ export default function ClientDetails() {
             </Card>
 
             {/* Check In Notes */}
-            <Card title="Check In Notes">
+            <Card
+              title="Check In Notes"
+              action={
+                <div className="flex flex-col items-end space-y-1">
+                  <button
+                    onClick={() => setShowAddCheckIn(true)}
+                    className="text-sm text-primary hover:underline"
+                  >
+                    +Add Check In
+                  </button>
+                  <button
+                    onClick={() => setShowHistory(true)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    History
+                  </button>
+                </div>
+              }
+            >
               <div className="space-y-4">
                 <div>
                   <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
                     Last Week
                   </h4>
                   <p className="text-sm text-gray-dark dark:text-gray-light">
-                    {mockCheckInNotes.lastWeek}
+                    {currentCheckIn.lastWeek}
                   </p>
                 </div>
                 <div>
@@ -139,7 +242,7 @@ export default function ClientDetails() {
                     This Week
                   </h4>
                   <p className="text-sm text-gray-dark dark:text-gray-light">
-                    {mockCheckInNotes.thisWeek}
+                    {currentCheckIn.thisWeek}
                   </p>
                 </div>
               </div>
@@ -187,6 +290,27 @@ export default function ClientDetails() {
             </Card>
           </div>
         </div>
+
+        <AddMessageModal
+          isOpen={showAddMessage}
+          onClose={() => setShowAddMessage(false)}
+          onSubmit={handleAddMessage}
+        />
+
+        <AddCheckInModal
+          isOpen={showAddCheckIn}
+          onClose={() => setShowAddCheckIn(false)}
+          onSubmit={handleAddCheckIn}
+          lastWeekNotes={currentCheckIn.lastWeek}
+        />
+
+        <CheckInHistoryModal
+          isOpen={showHistory}
+          onClose={() => setShowHistory(false)}
+          checkIns={displayedHistory}
+          onLoadMore={handleLoadMore}
+          hasMore={hasMore}
+        />
       </div>
     </ClientDetailLayout>
   );

@@ -7,12 +7,14 @@ interface CreateMealPlanModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (mealPlan: MealPlanFormData) => void;
+  existingPlan?: MealPlanFormData;
 }
 
 export default function CreateMealPlanModal({
   isOpen,
   onClose,
   onSave,
+  existingPlan,
 }: CreateMealPlanModalProps) {
   const handleSubmit = (data: MealPlanFormData) => {
     onSave(data);
@@ -23,10 +25,14 @@ export default function CreateMealPlanModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Create New Meal Plan"
+      title={existingPlan ? "Edit Meal Plan" : "Create New Meal Plan"}
       size="xl"
     >
-      <CreateMealPlanForm onSubmit={handleSubmit} onCancel={onClose} />
+      <CreateMealPlanForm
+        onSubmit={handleSubmit}
+        onCancel={onClose}
+        initialData={existingPlan}
+      />
     </Modal>
   );
 }

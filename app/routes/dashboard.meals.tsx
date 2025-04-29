@@ -387,6 +387,17 @@ export default function Meals() {
                     year: "numeric",
                   })}
                 </div>
+                {dayOffset !== 0 && (
+                  <button
+                    onClick={() => {
+                      setDayOffset(0);
+                      setCheckedMeals([]);
+                    }}
+                    className="text-xs text-primary hover:text-primary-dark transition-colors duration-200 mt-1"
+                  >
+                    Go to today
+                  </button>
+                )}
               </div>
               <button
                 onClick={() => {
@@ -705,10 +716,6 @@ export default function Meals() {
                 />
               </div>
             </div>
-
-            <Button variant="outline" className="w-full mt-6">
-              View Full Meal Plan
-            </Button>
           </Card>
 
           {/* Compliance Calendar */}
