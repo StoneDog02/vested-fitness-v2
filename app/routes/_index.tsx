@@ -18,11 +18,13 @@ export default function Index() {
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="flex items-center">
-            <span className="text-xl font-bold text-primary">
-              Vested Fitness
-            </span>
+            <img
+              src="/KAVA-TRAIN.png"
+              alt="KAVA TRAINING"
+              className="h-36 w-auto dark:invert"
+            />
           </div>
-          <div className="flex gap-4">
+          <div className="flex items-center gap-3">
             <Link
               to="/auth/login"
               className="text-secondary hover:text-primary"
@@ -40,42 +42,42 @@ export default function Index() {
       </header>
 
       <main>
-        {/* Hero Section */}
+        {/* Hero Section - Coach Focused */}
         <section className="bg-white">
           <div className="max-w-7xl mx-auto py-20 px-4 sm:px-6 lg:px-8 text-center">
             <h1 className="text-4xl font-bold text-secondary mb-4">
-              Personalized Fitness Coaching Made Simple
+              Grow Your Coaching Business with Vested Fitness
             </h1>
             <p className="text-xl text-gray-dark max-w-3xl mx-auto mb-8">
-              Connect directly with your personal coach, track your progress,
-              and achieve your fitness goals.
+              Manage your clients, deliver personalized plans, and scale your
+              impact—all in one modern platform built for coaches.
             </p>
             <div className="flex justify-center gap-4">
               <Link
-                to="/auth/register"
-                className="bg-primary hover:bg-primary-dark text-white px-6 py-3 rounded-lg font-medium text-lg"
+                to="/auth/register?role=coach"
+                className="bg-secondary hover:bg-secondary-dark text-white px-8 py-4 rounded-lg font-semibold text-xl border-2 border-secondary shadow-md transition-all duration-150"
               >
-                Start Your Journey
+                Sign up as Coach
               </Link>
               <Link
                 to="/auth/login"
-                className="border border-primary text-primary hover:bg-primary hover:text-white px-6 py-3 rounded-lg font-medium text-lg"
+                className="border border-primary text-primary hover:bg-primary hover:text-white px-8 py-4 rounded-lg font-semibold text-xl"
               >
-                Sign In
+                Login
               </Link>
             </div>
           </div>
         </section>
 
-        {/* Features Section */}
+        {/* Features Section - Coach Benefits */}
         <section className="py-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
           <h2 className="text-3xl font-bold text-secondary text-center mb-12">
-            Everything You Need In One Place
+            Everything Coaches Need In One Place
           </h2>
-
           <div className="grid md:grid-cols-3 gap-8">
             <div className="bg-white p-6 rounded-xl shadow-sm">
               <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
+                {/* Meal Plan Icon */}
                 <svg
                   className="w-6 h-6 text-primary"
                   fill="none"
@@ -92,16 +94,16 @@ export default function Index() {
                 </svg>
               </div>
               <h3 className="text-xl font-semibold text-secondary mb-2">
-                Custom Meal Plans
+                Custom Meal & Workout Plans
               </h3>
               <p className="text-gray-dark">
-                Get personalized meal plans from your coach and track your
-                nutrition progress.
+                Easily create and deliver personalized meal and workout plans to
+                each client.
               </p>
             </div>
-
             <div className="bg-white p-6 rounded-xl shadow-sm">
               <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
+                {/* Progress Tracking Icon */}
                 <svg
                   className="w-6 h-6 text-primary"
                   fill="none"
@@ -118,16 +120,16 @@ export default function Index() {
                 </svg>
               </div>
               <h3 className="text-xl font-semibold text-secondary mb-2">
-                Workout Tracking
+                Progress & Compliance Tracking
               </h3>
               <p className="text-gray-dark">
-                Access your workout plans and track your progress with your
-                coach&apos;s guidance.
+                Monitor client progress, check-ins, and compliance at a glance
+                with powerful dashboards.
               </p>
             </div>
-
             <div className="bg-white p-6 rounded-xl shadow-sm">
               <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
+                {/* Communication Icon */}
                 <svg
                   className="w-6 h-6 text-primary"
                   fill="none"
@@ -144,12 +146,30 @@ export default function Index() {
                 </svg>
               </div>
               <h3 className="text-xl font-semibold text-secondary mb-2">
-                Direct Communication
+                Direct Client Communication
               </h3>
               <p className="text-gray-dark">
-                Chat directly with your coach for feedback, questions, and
-                motivation.
+                Chat directly with your clients for feedback, questions, and
+                motivation—all in one place.
               </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Client Info Section */}
+        <section className="bg-gray-100 py-10 px-4 sm:px-6 lg:px-8 mt-12">
+          <div className="max-w-2xl mx-auto text-center">
+            <h3 className="text-2xl font-bold text-secondary mb-2">
+              Are you a client invited by your coach?
+            </h3>
+            <p className="text-gray-dark mb-4">
+              If you received an invitation email from your coach, just follow
+              the link to set up your account. Your coach will handle everything
+              else!
+            </p>
+            <div className="text-sm text-gray-500">
+              No need to sign up here—your coach will send you a personalized
+              invite link.
             </div>
           </div>
         </section>

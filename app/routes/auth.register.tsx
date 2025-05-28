@@ -76,7 +76,6 @@ export default function Register() {
   const inviteCode = searchParams.get("invite") || "";
   const invitedEmail = searchParams.get("email") || "";
   const invitedName = searchParams.get("name") || "";
-  const userType = searchParams.get("type") || "client";
 
   // Determine if this is an invitation-based registration
   const isInvited = !!inviteCode;
@@ -119,6 +118,13 @@ export default function Register() {
             {inviteCode && (
               <input type="hidden" name="inviteCode" value={inviteCode} />
             )}
+
+            {/* Always set userType to 'coach' unless it's an invite (then 'client') */}
+            <input
+              type="hidden"
+              name="userType"
+              value={isInvited ? "client" : "coach"}
+            />
 
             <div>
               <label
@@ -185,56 +191,6 @@ export default function Register() {
                   required
                   className="appearance-none block w-full px-3 py-2 border border-gray-light rounded-md shadow-sm placeholder-gray focus:outline-none focus:ring-primary focus:border-primary"
                 />
-              </div>
-            </div>
-
-            <div>
-              <label
-                htmlFor="userType"
-                className="block text-sm font-medium text-secondary"
-              >
-                Account Type
-              </label>
-              <div className="mt-2 space-y-2">
-                <div className="flex items-center">
-                  <input
-                    id="client"
-                    name="userType"
-                    type="radio"
-                    defaultChecked={userType === "client"}
-                    value="client"
-                    disabled={isInvited}
-                    className="h-4 w-4 text-primary focus:ring-primary border-gray-light"
-                  />
-                  <label
-                    htmlFor="client"
-                    className="ml-2 block text-sm text-gray-dark"
-                  >
-                    I am a client looking for coaching
-                  </label>
-                </div>
-                <div className="flex items-center">
-                  <input
-                    id="coach"
-                    name="userType"
-                    type="radio"
-                    value="coach"
-                    defaultChecked={userType === "coach"}
-                    disabled={isInvited}
-                    className="h-4 w-4 text-primary focus:ring-primary border-gray-light"
-                  />
-                  <label
-                    htmlFor="coach"
-                    className="ml-2 block text-sm text-gray-dark"
-                  >
-                    I am a coach providing services
-                  </label>
-                </div>
-                {isInvited && (
-                  <p className="text-xs text-gray-dark mt-1">
-                    Account type is determined by your invitation
-                  </p>
-                )}
               </div>
             </div>
 
