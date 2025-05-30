@@ -19,11 +19,20 @@ type ActionData = {
     userType: string;
     inviteCode?: string;
     goal?: string;
-    tierLevel?: string;
   };
   success?: boolean;
   message?: string;
 };
+
+// Utility to generate a slug from a name
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 export const action: ActionFunction = async ({ request }) => {
   const formData = await request.formData();
@@ -31,7 +40,6 @@ export const action: ActionFunction = async ({ request }) => {
   const email = formData.get("email")?.toString();
   const password = formData.get("password")?.toString();
   const goal = formData.get("goal")?.toString();
-  const tierLevel = formData.get("tierLevel")?.toString();
   const inviteCodeRaw =
     formData.get("invite")?.toString() ||
     new URL(request.url).searchParams.get("invite");
@@ -113,6 +121,9 @@ export const action: ActionFunction = async ({ request }) => {
     });
   }
 
+  // Generate slug from name
+  const slug = slugify(name);
+
   const { error: insertError } = await supabase.from("users").insert({
     auth_id,
     email,
@@ -120,7 +131,7 @@ export const action: ActionFunction = async ({ request }) => {
     role,
     ...(coach_id ? { coach_id } : {}),
     ...(goal ? { goal } : {}),
-    ...(tierLevel ? { tier_level: tierLevel } : {}),
+    slug,
   });
 
   if (insertError) {
@@ -158,7 +169,6 @@ export default function Register() {
   const type = searchParams.get("type");
   const emailParam = searchParams.get("email") || "";
   const nameParam = searchParams.get("name") || "";
-  const tierLevelParam = searchParams.get("tierLevel") || "";
 
   const isClientInvite = invite && type === "client";
 
@@ -247,31 +257,6 @@ export default function Register() {
                 />
               </div>
             </div>
-            {isClientInvite && tierLevelParam && (
-              <div>
-                <label
-                  htmlFor="tierLevel"
-                  className="block text-sm font-medium text-secondary"
-                >
-                  Tier
-                </label>
-                <div className="mt-1">
-                  <input
-                    id="tierLevel"
-                    name="tierLevel"
-                    type="text"
-                    value={tierLevelParam}
-                    readOnly
-                    className="appearance-none block w-full px-3 py-2 border border-gray-light rounded-md shadow-sm placeholder-gray focus:outline-none focus:ring-primary focus:border-primary bg-gray-100"
-                  />
-                  <input
-                    type="hidden"
-                    name="tierLevel"
-                    value={tierLevelParam}
-                  />
-                </div>
-              </div>
-            )}
             {isClientInvite && (
               <div>
                 <label

@@ -24,7 +24,6 @@ export default function ClientInviteModal({
   const fetcher = useFetcher<InviteClientResponse>();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [tierLevel, setTierLevel] = useState("");
 
   console.log("ClientInviteModal coachId:", coachId);
 
@@ -110,39 +109,12 @@ export default function ClientInviteModal({
               </p>
             </div>
 
-            <div>
-              <label
-                htmlFor="tierLevel"
-                className="block text-sm font-medium text-secondary dark:text-alabaster mb-1"
-              >
-                Select Tier Level
-              </label>
-              <select
-                id="tierLevel"
-                name="tierLevel"
-                required
-                className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary bg-white dark:bg-night text-secondary dark:text-alabaster"
-                value={tierLevel}
-                onChange={(e) => setTierLevel(e.target.value)}
-                disabled={isSubmitting}
-              >
-                <option value="" disabled>
-                  Select a tier...
-                </option>
-                <option value="BASIC">BASIC</option>
-                <option value="STARTER KIT">STARTER KIT</option>
-                <option value="PREMIUM">PREMIUM</option>
-              </select>
-            </div>
-
             <div className="pt-2">
               <Button
                 type="submit"
                 variant="primary"
                 className="w-full"
-                disabled={
-                  isSubmitting || !email || !name || !coachId || !tierLevel
-                }
+                disabled={isSubmitting || !email || !name || !coachId}
               >
                 {isSubmitting ? "Sending..." : "Send Invitation"}
               </Button>

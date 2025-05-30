@@ -20,7 +20,6 @@ export async function action({ request }: ActionFunctionArgs) {
   const email = formData.get("email")?.toString();
   const name = formData.get("name")?.toString();
   const coach_id = formData.get("coach_id")?.toString();
-  const tierLevel = formData.get("tierLevel")?.toString();
 
   // Validate the form data
   if (!email || !name || !coach_id) {
@@ -51,7 +50,6 @@ export async function action({ request }: ActionFunctionArgs) {
         token: inviteCode,
         accepted: false,
         created_at: new Date().toISOString(),
-        ...(tierLevel ? { tier_level: tierLevel } : {}),
       });
     if (dbError) {
       console.error("Error storing invite in DB:", dbError);
@@ -70,9 +68,6 @@ export async function action({ request }: ActionFunctionArgs) {
     signupUrl.searchParams.append("email", email);
     signupUrl.searchParams.append("name", name);
     signupUrl.searchParams.append("type", "client");
-    if (tierLevel) {
-      signupUrl.searchParams.append("tierLevel", tierLevel);
-    }
 
     // Send the invitation email
     const { error } = await resend.emails.send({

@@ -11,21 +11,6 @@ import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 
-// Mock client data - in a real app, this would come from Supabase
-const mockClient = {
-  id: "1",
-  name: "John Smith",
-  email: "john@example.com",
-  role: "client",
-  createdAt: "2024-01-15",
-  coachId: "coach-1",
-  startingWeight: 185,
-  currentWeight: 175,
-  currentMacros: { protein: 180, carbs: 200, fat: 60 },
-  workoutSplit: "Push/Pull/Legs",
-  supplementCount: 3,
-};
-
 // Mock meal plan for client
 const mockMealPlan = {
   meals: [
@@ -72,25 +57,65 @@ export const meta: MetaFunction = () => {
 export const loader = async ({ params }: { params: { clientId: string } }) => {
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!
+    process.env.SUPABASE_SERVICE_KEY!
   );
 
-  const { data: updates, error } = await supabase
-    .from("coach_updates")
-    .select("*")
-    .eq("client_id", params.clientId)
-    .order("created_at", { ascending: false });
+  // Try to find client by slug first
+  let { data: client, error } = await supabase
+    .from("users")
+    .select(
+      "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
+    )
+    .eq("slug", params.clientId)
+    .single();
 
-  if (error) {
-    console.error("Error fetching updates:", error);
-    return json({ updates: [] });
+  // If not found by slug, try by id
+  if (error || !client) {
+    const { data: clientById, error: errorById } = await supabase
+      .from("users")
+      .select(
+        "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
+      )
+      .eq("id", params.clientId)
+      .single();
+    client = clientById;
+    error = errorById;
   }
 
-  return json({ updates });
+  if (error || !client) {
+    // Return safe defaults if not found
+    return json({
+      client: {
+        id: params.clientId,
+        name: "Unknown Client",
+        email: "",
+        goal: "",
+        starting_weight: null,
+        current_weight: null,
+        workout_split: "",
+        role: "client",
+        coach_id: "",
+        slug: "",
+      },
+      updates: [],
+    });
+  }
+
+  // Fetch updates (optional, can be empty)
+  const { data: updates } = await supabase
+    .from("coach_updates")
+    .select("*")
+    .eq("client_id", client.id)
+    .order("created_at", { ascending: false });
+
+  return json({
+    client,
+    updates: updates || [],
+  });
 };
 
 export default function ClientDetails() {
-  const { updates } = useLoaderData<typeof loader>();
+  const { client, updates } = useLoaderData<typeof loader>();
   const [showAddMessage, setShowAddMessage] = useState(false);
   const [showAddCheckIn, setShowAddCheckIn] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -132,7 +157,7 @@ export default function ClientDetails() {
   const handleAddMessage = (message: string) => {
     fetcher.submit(
       { message },
-      { method: "post", action: `/api/coach-updates/${mockClient.id}` }
+      { method: "post", action: `/api/coach-updates/${client.id}` }
     );
     setShowAddMessage(false);
   };
@@ -171,7 +196,7 @@ export default function ClientDetails() {
         <div className="mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="flex-1">
-              <ClientProfile client={mockClient} mealPlan={mockMealPlan} />
+              <ClientProfile client={client} mealPlan={mockMealPlan} />
             </div>
           </div>
         </div>
@@ -267,7 +292,7 @@ export default function ClientDetails() {
                         Starting Weight:
                       </span>
                       <span className="text-sm text-secondary dark:text-alabaster">
-                        {mockClient.startingWeight} lbs
+                        {client.starting_weight} lbs
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -275,7 +300,7 @@ export default function ClientDetails() {
                         Current Weight:
                       </span>
                       <span className="text-sm text-secondary dark:text-alabaster">
-                        {mockClient.currentWeight} lbs
+                        {client.current_weight} lbs
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -283,8 +308,7 @@ export default function ClientDetails() {
                         Total Change:
                       </span>
                       <span className="text-sm text-green-500">
-                        -{mockClient.startingWeight - mockClient.currentWeight}{" "}
-                        lbs
+                        -{client.starting_weight - client.current_weight} lbs
                       </span>
                     </div>
                   </div>

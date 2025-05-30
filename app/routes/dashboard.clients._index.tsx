@@ -78,26 +78,30 @@ export const loader: LoaderFunction = async ({ request }) => {
   let clients: {
     id: string;
     name: string;
+    email?: string;
     goal?: string;
     starting_weight?: number;
     current_weight?: number;
     workout_split?: string;
-    current_macros?: { protein: number; carbs: number; fat: number };
-    supplement_count?: number;
+    role?: string;
+    coach_id?: string;
+    slug?: string;
   }[] = [];
   if (coachId) {
     const supabase = createClient<Database>(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
     );
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("users")
       .select(
-        "id, name, goal, starting_weight, current_weight, workout_split, current_macros, supplement_count, role"
+        "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
       )
-      .eq("coach_id", coachId);
+      .eq("coach_id", coachId)
+      .eq("role", "client");
+    if (error) console.log("[LOADER] Supabase error:", error);
     if (data) clients = data;
-    console.log("[LOADER] clients from Supabase (no role filter):", clients);
+    console.log("[LOADER] Filtered client users from Supabase:", clients);
   }
 
   return json({ coachId, clients });
@@ -109,12 +113,14 @@ export default function ClientsIndex() {
     clients: {
       id: string;
       name: string;
+      email?: string;
       goal?: string;
       starting_weight?: number;
       current_weight?: number;
       workout_split?: string;
-      current_macros?: { protein: number; carbs: number; fat: number };
-      supplement_count?: number;
+      role?: string;
+      coach_id?: string;
+      slug?: string;
     }[];
   }>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -177,52 +183,55 @@ export default function ClientsIndex() {
           (client: {
             id: string;
             name: string;
+            email?: string;
             goal?: string;
             starting_weight?: number;
             current_weight?: number;
             workout_split?: string;
-            current_macros?: { protein: number; carbs: number; fat: number };
-            supplement_count?: number;
+            role?: string;
+            coach_id?: string;
+            slug?: string;
           }) => (
-            <div
+            <Link
               key={client.id}
-              className="p-4 border rounded bg-white dark:bg-night"
+              to={`/dashboard/clients/${client.slug || client.id}`}
+              className="block p-4 border rounded bg-white dark:bg-night shadow hover:shadow-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer"
+              style={{ textDecoration: "none", color: "inherit" }}
             >
-              <div className="font-bold text-lg">
+              <div className="font-extrabold text-2xl mb-2">
                 {client.name || "Unnamed"}
               </div>
-              <div className="text-sm text-primary">
-                Goal: {client.goal || "N/A"}
+              <div className="text-xs text-gray-500 mb-1">
+                {client.email || ""}
               </div>
-              <div className="text-sm">
-                Workout Split: {client.workout_split || "N/A"}
+              <div className="grid grid-cols-5 gap-4 text-xs mb-1 mt-3 pt-4">
+                <div className="font-semibold text-left text-green-500">
+                  Goal
+                </div>
+                <div className="font-semibold text-left">Workout Split</div>
+                <div className="font-semibold text-left">Macros</div>
+                <div className="font-semibold text-left">Supplements</div>
+                <div className="font-semibold text-left">Weight</div>
               </div>
-              <div className="text-sm">
-                Macros:{" "}
-                {client.current_macros
-                  ? `P: ${client.current_macros.protein ?? "-"}, C: ${
-                      client.current_macros.carbs ?? "-"
-                    }, F: ${client.current_macros.fat ?? "-"}`
-                  : "N/A"}
+              <div className="grid grid-cols-5 gap-4 text-xs">
+                <div className="text-left text-green-500">
+                  {client.goal || "N/A"}
+                </div>
+                <div className="text-left">{client.workout_split || "N/A"}</div>
+                <div className="flex flex-col items-left">
+                  <span>Protein: N/A</span>
+                  <span>Carbs: N/A</span>
+                  <span>Fats: N/A</span>
+                </div>
+                <div className="text-left">N/A</div>
+                <div className="text-left">
+                  {client.starting_weight != null &&
+                  client.current_weight != null
+                    ? `${client.starting_weight} → ${client.current_weight}`
+                    : "N/A"}
+                </div>
               </div>
-              <div className="text-sm">
-                Supplements:{" "}
-                {client.supplement_count != null
-                  ? client.supplement_count
-                  : "N/A"}
-              </div>
-              <div className="text-sm">
-                Weight:{" "}
-                {client.starting_weight != null ? client.starting_weight : "-"}{" "}
-                → {client.current_weight != null ? client.current_weight : "-"}
-              </div>
-              <Link
-                to={`/dashboard/clients/${client.id}`}
-                className="text-primary hover:underline text-sm mt-2 inline-block"
-              >
-                View Details
-              </Link>
-            </div>
+            </Link>
           )
         )}
       </div>
