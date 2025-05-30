@@ -1,5 +1,7 @@
 import { json, ActionFunctionArgs } from "@remix-run/node";
 import { Resend } from "resend";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "~/lib/supabase";
 
 // Create a Resend instance
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -17,12 +19,14 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const email = formData.get("email")?.toString();
   const name = formData.get("name")?.toString();
+  const coach_id = formData.get("coach_id")?.toString();
+  const tierLevel = formData.get("tierLevel")?.toString();
 
   // Validate the form data
-  if (!email || !name) {
+  if (!email || !name || !coach_id) {
     return json(
       {
-        error: "Email and name are required",
+        error: "Email, name, and coach_id are required",
         success: false,
       },
       { status: 400 }
@@ -33,16 +37,32 @@ export async function action({ request }: ActionFunctionArgs) {
     // Generate a unique invitation code
     const inviteCode = generateInviteCode();
 
-    // In a production app, you would store this in Supabase
-    // For example:
-    // await supabase.from("client_invitations").insert({
-    //   email,
-    //   name,
-    //   inviteCode,
-    //   coachId: "current-coach-id",
-    //   createdAt: new Date().toISOString(),
-    //   status: "pending"
-    // });
+    // Store the invite in Supabase
+    const supabase = createClient<Database>(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+    const { error: dbError } = await supabase
+      .from("client_invitations")
+      .insert({
+        email,
+        name,
+        coach_id,
+        token: inviteCode,
+        accepted: false,
+        created_at: new Date().toISOString(),
+        ...(tierLevel ? { tier_level: tierLevel } : {}),
+      });
+    if (dbError) {
+      console.error("Error storing invite in DB:", dbError);
+      return json(
+        {
+          error: "Failed to store invitation in database",
+          success: false,
+        },
+        { status: 500 }
+      );
+    }
 
     // Create the signup URL with the invitation code
     const signupUrl = new URL("/auth/register", request.url);
@@ -50,10 +70,13 @@ export async function action({ request }: ActionFunctionArgs) {
     signupUrl.searchParams.append("email", email);
     signupUrl.searchParams.append("name", name);
     signupUrl.searchParams.append("type", "client");
+    if (tierLevel) {
+      signupUrl.searchParams.append("tierLevel", tierLevel);
+    }
 
     // Send the invitation email
     const { error } = await resend.emails.send({
-      from: "Vested Fitness <onboarding@vestedfitness.com>",
+      from: "Vested Fitness <onboarding@resend.dev>",
       to: email,
       subject: `${name}, you've been invited to Vested Fitness`,
       html: `

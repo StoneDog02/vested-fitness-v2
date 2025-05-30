@@ -6,6 +6,7 @@ import { useFetcher } from "@remix-run/react";
 interface ClientInviteModalProps {
   isOpen: boolean;
   onClose: () => void;
+  coachId?: string | null;
 }
 
 // Define the shape of the response data
@@ -18,23 +19,29 @@ interface InviteClientResponse {
 export default function ClientInviteModal({
   isOpen,
   onClose,
+  coachId,
 }: ClientInviteModalProps) {
   const fetcher = useFetcher<InviteClientResponse>();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [tierLevel, setTierLevel] = useState("");
 
-  const isSubmitting = fetcher.state !== "idle";
-  const success = fetcher.data?.success;
+  console.log("ClientInviteModal coachId:", coachId);
 
-  // Reset form after successful submission
+  // Close modal and reload route on successful invite
   React.useEffect(() => {
-    if (success) {
+    if (fetcher.data?.success) {
       setTimeout(() => {
         setEmail("");
         setName("");
-      }, 3000);
+        onClose();
+        // Reload the route to refresh loader data
+        window.location.reload();
+      }, 1500);
     }
-  }, [success]);
+  }, [fetcher.data?.success, onClose]);
+
+  const isSubmitting = fetcher.state !== "idle";
 
   return (
     <Modal
@@ -44,6 +51,7 @@ export default function ClientInviteModal({
       size="md"
     >
       <div className="space-y-6">
+        <div style={{ color: "red" }}>DEBUG coachId: {coachId}</div>
         {fetcher.data?.success ? (
           <div className="bg-green-500/10 text-green-600 dark:text-green-400 p-4 rounded-lg mb-4">
             Invitation sent successfully to {fetcher.data.email}!
@@ -55,6 +63,9 @@ export default function ClientInviteModal({
         ) : null}
 
         <fetcher.Form method="post" action="/api/invite-client">
+          {coachId && (
+            <input type="hidden" name="coach_id" value={coachId} required />
+          )}
           <div className="space-y-4">
             <div>
               <label
@@ -99,12 +110,39 @@ export default function ClientInviteModal({
               </p>
             </div>
 
+            <div>
+              <label
+                htmlFor="tierLevel"
+                className="block text-sm font-medium text-secondary dark:text-alabaster mb-1"
+              >
+                Select Tier Level
+              </label>
+              <select
+                id="tierLevel"
+                name="tierLevel"
+                required
+                className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary bg-white dark:bg-night text-secondary dark:text-alabaster"
+                value={tierLevel}
+                onChange={(e) => setTierLevel(e.target.value)}
+                disabled={isSubmitting}
+              >
+                <option value="" disabled>
+                  Select a tier...
+                </option>
+                <option value="BASIC">BASIC</option>
+                <option value="STARTER KIT">STARTER KIT</option>
+                <option value="PREMIUM">PREMIUM</option>
+              </select>
+            </div>
+
             <div className="pt-2">
               <Button
                 type="submit"
                 variant="primary"
                 className="w-full"
-                disabled={isSubmitting || !email || !name}
+                disabled={
+                  isSubmitting || !email || !name || !coachId || !tierLevel
+                }
               >
                 {isSubmitting ? "Sending..." : "Send Invitation"}
               </Button>

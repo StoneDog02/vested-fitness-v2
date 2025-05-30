@@ -3,9 +3,18 @@ import { useLoaderData, useMatches, Link } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import type { DailyWorkout } from "~/types/workout";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "~/lib/supabase";
+import ClientInviteModal from "~/components/coach/ClientInviteModal";
+import { useState } from "react";
+import { parse } from "cookie";
+import type { LoaderFunction } from "@remix-run/node";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
 
 type LoaderData = {
   clientData?: ClientDashboardData;
+  coachId: string | null;
 };
 
 // Types for client dashboard data
@@ -191,19 +200,84 @@ const mockActivity = [
   },
 ];
 
-export const loader = async () => {
-  // In a real app, we would fetch this data from an API/database
-  return json<LoaderData>({
+export const loader: LoaderFunction = async ({ request }) => {
+  const cookies = parse(request.headers.get("cookie") || "");
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  let accessToken, refreshToken;
+  if (supabaseAuthCookieKey) {
+    try {
+      // Decode from base64 before parsing
+      const decoded = Buffer.from(
+        cookies[supabaseAuthCookieKey],
+        "base64"
+      ).toString("utf-8");
+      console.log("[LOADER] decoded cookie value:", decoded);
+      // Parse twice: first to get the string, then to get the array
+      const [access, refresh] = JSON.parse(JSON.parse(decoded));
+      accessToken = access;
+      refreshToken = refresh;
+    } catch (e) {
+      accessToken = undefined;
+      refreshToken = undefined;
+    }
+  }
+  console.log("[LOADER] accessToken:", accessToken);
+  console.log("[LOADER] refreshToken:", refreshToken);
+
+  let coachId = null;
+  let authId: string | undefined;
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+      authId =
+        decoded && typeof decoded === "object" && "sub" in decoded
+          ? (decoded.sub as string)
+          : undefined;
+      console.log("[LOADER] decoded authId:", authId);
+    } catch (e) {
+      console.log("[LOADER] JWT decode error:", e);
+    }
+  }
+
+  if (authId) {
+    const supabase = createClient<Database>(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+    // Fetch full user record including role and coach_id
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .select("id, role, coach_id")
+      .eq("auth_id", authId)
+      .single();
+    console.log("[LOADER] user:", user, userError);
+    if (user) {
+      // If coach, use their own id; if client, use their coach_id
+      coachId = user.role === "coach" ? user.id : user.coach_id;
+    }
+  }
+  return json<LoaderData & { coachId: string | null }>({
     clientData: mockClientData,
+    coachId,
   });
 };
 
 export default function Dashboard() {
-  const { clientData } = useLoaderData<LoaderData>();
+  console.log("Dashboard component rendered");
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const data = useLoaderData<LoaderData>();
+  const { clientData } = data;
   const matches = useMatches();
   const parentData = matches.find((match) => match.id === "routes/dashboard")
     ?.data as { role: "coach" | "client" };
   const role = parentData?.role;
+  const coachId = data.coachId;
+
+  // Debug logs
+  console.log("Dashboard loader data:", data);
+  console.log("Dashboard coachId prop to modal:", coachId);
 
   return (
     <>
@@ -496,6 +570,11 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      <ClientInviteModal
+        isOpen={isInviteModalOpen}
+        onClose={() => setIsInviteModalOpen(false)}
+        coachId={coachId}
+      />
     </>
   );
 }

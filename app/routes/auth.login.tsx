@@ -1,5 +1,13 @@
 import { Form, Link, useActionData } from "@remix-run/react";
-import { json, type ActionFunction, type MetaFunction } from "@remix-run/node";
+import {
+  json,
+  type ActionFunction,
+  type MetaFunction,
+  redirect,
+  createCookie,
+} from "@remix-run/node";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "~/lib/supabase";
 
 export const meta: MetaFunction = () => {
   return [
@@ -16,6 +24,16 @@ type ActionData = {
   };
 };
 
+// Create a cookie instance for the Supabase session
+declare const process: { env: { NODE_ENV: string } };
+const supabaseSession = createCookie("sb-ckwcxmxbfffkknrnkdtk-auth-token", {
+  path: "/",
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 60 * 60 * 24 * 7, // 1 week
+});
+
 export const action: ActionFunction = async ({ request }) => {
   const formData = await request.formData();
   const email = formData.get("email")?.toString();
@@ -28,19 +46,61 @@ export const action: ActionFunction = async ({ request }) => {
     });
   }
 
-  // This would typically call Supabase auth signIn
-  // For demo purposes, we'll just return a success
-  // const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const supabase = createClient<Database>(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
 
-  // if (error) {
-  //   return json<ActionData>({
-  //     error: error.message,
-  //     fields: { email, password },
-  //   });
-  // }
+  // Sign in with Supabase Auth
+  const { data: signInData, error: signInError } =
+    await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-  // For demo, redirect to dashboard
-  return json<ActionData>({ fields: { email, password } });
+  if (signInError || !signInData.user) {
+    return json<ActionData>({
+      error: signInError?.message || "Invalid email or password.",
+      fields: { email, password },
+    });
+  }
+
+  // Get user from users table by auth_id
+  const { data: userRow, error: userError } = await supabase
+    .from("users")
+    .select("role")
+    .eq("auth_id", signInData.user.id)
+    .single();
+
+  if (userError || !userRow) {
+    return json<ActionData>({
+      error: userError?.message || "User not found.",
+      fields: { email, password },
+    });
+  }
+
+  // Set the Supabase session cookie
+  if (signInData.session) {
+    const setCookie = await supabaseSession.serialize(
+      JSON.stringify([
+        signInData.session.access_token,
+        signInData.session.refresh_token,
+      ])
+    );
+    // Redirect based on role with Set-Cookie header
+    if (userRow.role === "coach") {
+      return redirect("/dashboard", { headers: { "Set-Cookie": setCookie } });
+    } else if (userRow.role === "client") {
+      return redirect("/dashboard/coach-access", {
+        headers: { "Set-Cookie": setCookie },
+      });
+    }
+  }
+
+  return json<ActionData>({
+    error: "Unknown user role or missing session.",
+    fields: { email, password },
+  });
 };
 
 export default function Login() {
