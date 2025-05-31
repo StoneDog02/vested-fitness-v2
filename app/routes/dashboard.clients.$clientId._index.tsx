@@ -11,42 +11,6 @@ import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 
-// Mock meal plan for client
-const mockMealPlan = {
-  meals: [
-    {
-      id: 1,
-      foods: [
-        { calories: 350, protein: 25, carbs: 40, fat: 8 },
-        { calories: 40, protein: 0, carbs: 10, fat: 0 },
-        { calories: 100, protein: 3, carbs: 3, fat: 9 },
-      ],
-    },
-    {
-      id: 2,
-      foods: [
-        { calories: 130, protein: 22, carbs: 8, fat: 0 },
-        { calories: 160, protein: 6, carbs: 6, fat: 14 },
-      ],
-    },
-    {
-      id: 3,
-      foods: [
-        { calories: 180, protein: 36, carbs: 0, fat: 4 },
-        { calories: 220, protein: 5, carbs: 45, fat: 2 },
-        { calories: 50, protein: 2, carbs: 10, fat: 0 },
-        { calories: 40, protein: 0, carbs: 0, fat: 4.5 },
-      ],
-    },
-  ],
-};
-
-interface CheckInNote {
-  id: string;
-  date: string;
-  notes: string;
-}
-
 export const meta: MetaFunction = () => {
   return [
     { title: "Client Details | Vested Fitness" },
@@ -98,6 +62,9 @@ export const loader = async ({ params }: { params: { clientId: string } }) => {
         slug: "",
       },
       updates: [],
+      checkIns: [],
+      mealPlans: [],
+      supplements: [],
     });
   }
 
@@ -108,87 +75,108 @@ export const loader = async ({ params }: { params: { clientId: string } }) => {
     .eq("client_id", client.id)
     .order("created_at", { ascending: false });
 
+  // Fetch check-ins
+  const { data: checkIns } = await supabase
+    .from("check_ins")
+    .select("id, notes, created_at")
+    .eq("client_id", client.id)
+    .order("created_at", { ascending: false });
+
+  // Fetch meal plans (with meals and foods)
+  const { data: mealPlansRaw } = await supabase
+    .from("meal_plans")
+    .select("id, title, description, is_active, created_at")
+    .eq("user_id", client.id)
+    .order("created_at", { ascending: false });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mealPlans: any[] = [];
+  if (mealPlansRaw && mealPlansRaw.length > 0) {
+    // For each meal plan, fetch meals and foods
+    mealPlans = await Promise.all(
+      mealPlansRaw.map(async (plan) => {
+        const { data: mealsRaw } = await supabase
+          .from("meals")
+          .select("id, name, time, sequence_order")
+          .eq("meal_plan_id", plan.id)
+          .order("sequence_order", { ascending: true });
+        const meals = await Promise.all(
+          (mealsRaw || []).map(async (meal) => {
+            const { data: foods } = await supabase
+              .from("foods")
+              .select("id, name, portion, calories, protein, carbs, fat")
+              .eq("meal_id", meal.id);
+            return { ...meal, foods: foods || [] };
+          })
+        );
+        return { ...plan, meals };
+      })
+    );
+  }
+
+  // Fetch supplements
+  const { data: supplements } = await supabase
+    .from("supplements")
+    .select("id, name, dosage, frequency, timing, notes, start_date")
+    .eq("user_id", client.id)
+    .order("created_at", { ascending: false });
+
   return json({
     client,
     updates: updates || [],
+    checkIns: checkIns || [],
+    mealPlans: mealPlans || [],
+    supplements: supplements || [],
   });
 };
 
 export default function ClientDetails() {
-  const { client, updates } = useLoaderData<typeof loader>();
+  const {
+    client,
+    updates,
+    mealPlans,
+    checkIns: rawCheckIns,
+  } = useLoaderData<typeof loader>();
   const [showAddMessage, setShowAddMessage] = useState(false);
   const [showAddCheckIn, setShowAddCheckIn] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [checkInHistory, setCheckInHistory] = useState<CheckInNote[]>([
-    {
-      id: "1",
-      date: "2024-03-01",
-      notes:
-        "Client reported feeling stronger in workouts. Sleep has improved to 7-8 hours per night. Compliance with meal plan at 90%.",
-    },
-    {
-      id: "2",
-      date: "2024-02-24",
-      notes:
-        "Client is making good progress with form. Sleep quality needs improvement. Meal plan compliance at 85%.",
-    },
-    {
-      id: "3",
-      date: "2024-02-17",
-      notes:
-        "Initial check-in. Client is motivated and ready to start the program. Set baseline measurements and goals.",
-    },
-  ]);
-  const [displayedHistory, setDisplayedHistory] = useState<CheckInNote[]>([]);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [currentCheckIn, setCurrentCheckIn] = useState({
-    lastWeek:
-      "Client reported feeling stronger in workouts. Sleep has improved to 7-8 hours per night. Compliance with meal plan at 90%.",
-    thisWeek:
-      "Client is continuing to make progress. Weight down by 1 lb. Requested some modifications to the leg day workout.",
-  });
   const fetcher = useFetcher();
 
-  // Initialize displayed history
-  useEffect(() => {
-    setDisplayedHistory(checkInHistory.slice(0, 10));
-  }, [checkInHistory]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const checkIns = (rawCheckIns || []).map((c: any) => ({
+    ...c,
+    date: c.created_at,
+  }));
 
-  const handleAddMessage = (message: string) => {
+  // Sort checkIns by created_at descending (should already be from loader)
+  const sortedCheckIns = [...checkIns];
+  // Most recent is 'This Week', previous is 'Last Week', rest is history
+  const thisWeekCheckIn = sortedCheckIns[0] || null;
+  const lastWeekCheckIn = sortedCheckIns[1] || null;
+  const historyCheckIns = sortedCheckIns.slice(2);
+
+  // Add check-in handler (submits to API, then reloads page)
+  const handleAddCheckIn = (notes: string) => {
     fetcher.submit(
-      { message },
-      { method: "post", action: `/api/coach-updates/${client.id}` }
+      { notes },
+      { method: "post", action: `/api/check-ins/${client.id}` }
     );
-    setShowAddMessage(false);
+    setShowAddCheckIn(false);
   };
 
-  const handleAddCheckIn = (thisWeek: string) => {
-    // Move current thisWeek to lastWeek
-    const newLastWeek = currentCheckIn.thisWeek;
+  // History modal pagination (if needed)
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+  const displayedHistory = historyCheckIns.slice(0, currentPage * pageSize);
+  const hasMore = displayedHistory.length < historyCheckIns.length;
+  const handleLoadMore = () => setCurrentPage((p) => p + 1);
 
-    // Add the current lastWeek to history
-    const newHistoryEntry: CheckInNote = {
-      id: Date.now().toString(),
-      date: new Date().toISOString(),
-      notes: currentCheckIn.lastWeek,
-    };
-
-    setCheckInHistory((prev) => [newHistoryEntry, ...prev]);
-    setCurrentCheckIn({
-      lastWeek: newLastWeek,
-      thisWeek,
-    });
-  };
-
-  const handleLoadMore = () => {
-    const nextPage = currentPage + 1;
-    const startIndex = nextPage * 10;
-    const newCheckIns = checkInHistory.slice(startIndex, startIndex + 10);
-    setDisplayedHistory((prev) => [...prev, ...newCheckIns]);
-    setCurrentPage(nextPage);
-  };
-
-  const hasMore = displayedHistory.length < checkInHistory.length;
+  // Reload data after adding a check-in
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      window.location.reload();
+    }
+  }, [fetcher.state, fetcher.data]);
 
   return (
     <ClientDetailLayout>
@@ -196,7 +184,7 @@ export default function ClientDetails() {
         <div className="mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="flex-1">
-              <ClientProfile client={client} mealPlan={mockMealPlan} />
+              <ClientProfile client={client} mealPlan={mealPlans[0] || {}} />
             </div>
           </div>
         </div>
@@ -219,19 +207,23 @@ export default function ClientDetails() {
               }
             >
               <div className="space-y-4">
-                {updates.map((update) => (
-                  <div
-                    key={update.id}
-                    className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
-                  >
-                    <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
-                      {new Date(update.created_at).toLocaleDateString()}
+                {updates.length === 0 ? (
+                  <div className="text-gray-500 text-sm">No updates yet.</div>
+                ) : (
+                  updates.map((update) => (
+                    <div
+                      key={update.id}
+                      className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
+                    >
+                      <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
+                        {new Date(update.created_at).toLocaleDateString()}
+                      </div>
+                      <p className="text-secondary dark:text-alabaster">
+                        {update.message}
+                      </p>
                     </div>
-                    <p className="text-secondary dark:text-alabaster">
-                      {update.message}
-                    </p>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </Card>
 
@@ -257,24 +249,40 @@ export default function ClientDetails() {
                 </div>
               }
             >
-              <div className="space-y-4">
-                <div>
-                  <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
-                    Last Week
-                  </h4>
-                  <p className="text-sm text-gray-dark dark:text-gray-light">
-                    {currentCheckIn.lastWeek}
-                  </p>
+              {thisWeekCheckIn || lastWeekCheckIn ? (
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
+                      Last Week
+                    </h4>
+                    <p className="text-sm text-gray-dark dark:text-gray-light">
+                      {lastWeekCheckIn ? (
+                        lastWeekCheckIn.notes
+                      ) : (
+                        <span className="italic text-gray-400">
+                          No check-in yet.
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
+                      This Week
+                    </h4>
+                    <p className="text-sm text-gray-dark dark:text-gray-light">
+                      {thisWeekCheckIn ? (
+                        thisWeekCheckIn.notes
+                      ) : (
+                        <span className="italic text-gray-400">
+                          No check-in yet.
+                        </span>
+                      )}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
-                    This Week
-                  </h4>
-                  <p className="text-sm text-gray-dark dark:text-gray-light">
-                    {currentCheckIn.thisWeek}
-                  </p>
-                </div>
-              </div>
+              ) : (
+                <div className="text-gray-500 text-sm">No check-ins yet.</div>
+              )}
             </Card>
           </div>
 
@@ -321,14 +329,20 @@ export default function ClientDetails() {
         <AddMessageModal
           isOpen={showAddMessage}
           onClose={() => setShowAddMessage(false)}
-          onSubmit={handleAddMessage}
+          onSubmit={(message) => {
+            fetcher.submit(
+              { message },
+              { method: "post", action: `/api/coach-updates/${client.id}` }
+            );
+            setShowAddMessage(false);
+          }}
         />
 
         <AddCheckInModal
           isOpen={showAddCheckIn}
           onClose={() => setShowAddCheckIn(false)}
           onSubmit={handleAddCheckIn}
-          lastWeekNotes={currentCheckIn.lastWeek}
+          lastWeekNotes={thisWeekCheckIn ? thisWeekCheckIn.notes : ""}
         />
 
         <CheckInHistoryModal
@@ -337,6 +351,7 @@ export default function ClientDetails() {
           checkIns={displayedHistory}
           onLoadMore={handleLoadMore}
           hasMore={hasMore}
+          emptyMessage="No history yet."
         />
       </div>
     </ClientDetailLayout>
