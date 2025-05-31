@@ -1,13 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Button from "~/components/ui/Button";
 
 interface Food {
   name: string;
   portion: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
+  calories: number | string;
+  protein: number | string;
+  carbs: number | string;
+  fat: number | string;
 }
 
 interface Meal {
@@ -135,21 +135,39 @@ export default function CreateMealPlanForm({
     mealIndex: number,
     foodIndex: number,
     field: keyof Food,
-    value: string | number
+    value: string | number,
+    isBlur?: boolean
   ) => {
     const updatedMeals = [...formData.meals];
-
-    if (
-      field === "calories" ||
-      field === "protein" ||
-      field === "carbs" ||
-      field === "fat"
-    ) {
-      updatedMeals[mealIndex].foods[foodIndex][field] = Number(value);
+    if (field === "protein" || field === "carbs" || field === "fat") {
+      if (isBlur) {
+        updatedMeals[mealIndex].foods[foodIndex][field] =
+          value === "" ? 0 : Number(value);
+      } else {
+        updatedMeals[mealIndex].foods[foodIndex][field] = value as string;
+      }
+      // Always recalculate calories
+      const protein =
+        Number(
+          field === "protein"
+            ? value
+            : updatedMeals[mealIndex].foods[foodIndex].protein
+        ) || 0;
+      const carbs =
+        Number(
+          field === "carbs"
+            ? value
+            : updatedMeals[mealIndex].foods[foodIndex].carbs
+        ) || 0;
+      const fat =
+        Number(
+          field === "fat" ? value : updatedMeals[mealIndex].foods[foodIndex].fat
+        ) || 0;
+      updatedMeals[mealIndex].foods[foodIndex].calories =
+        protein * 4 + carbs * 4 + fat * 9;
     } else {
       updatedMeals[mealIndex].foods[foodIndex][field] = value as string;
     }
-
     setFormData((prev) => ({
       ...prev,
       meals: updatedMeals,
@@ -211,10 +229,10 @@ export default function CreateMealPlanForm({
 
     formData.meals.forEach((meal) => {
       meal.foods.forEach((food) => {
-        totalCalories += food.calories;
-        totalProtein += food.protein;
-        totalCarbs += food.carbs;
-        totalFat += food.fat;
+        totalCalories += Number(food.calories);
+        totalProtein += Number(food.protein);
+        totalCarbs += Number(food.carbs);
+        totalFat += Number(food.fat);
       });
     });
 
@@ -227,6 +245,28 @@ export default function CreateMealPlanForm({
   };
 
   const macros = calculateTotalMacros();
+
+  useEffect(() => {
+    if (!formData) return;
+    let changed = false;
+    const updatedMeals = formData.meals.map((meal) => {
+      const updatedFoods = meal.foods.map((food) => {
+        const protein = Number(food.protein) || 0;
+        const carbs = Number(food.carbs) || 0;
+        const fat = Number(food.fat) || 0;
+        const calcCalories = protein * 4 + carbs * 4 + fat * 9;
+        if (Number(food.calories) !== calcCalories) {
+          changed = true;
+          return { ...food, calories: calcCalories };
+        }
+        return food;
+      });
+      return { ...meal, foods: updatedFoods };
+    });
+    if (changed) {
+      setFormData((prev) => ({ ...prev, meals: updatedMeals }));
+    }
+  }, [initialData]);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -469,27 +509,19 @@ export default function CreateMealPlanForm({
 
                 <div className="grid grid-cols-4 gap-2">
                   <div>
-                    <label
-                      htmlFor={`food-calories-${activeMealIndex}-${foodIndex}`}
+                    <span
                       className="block text-xs font-medium text-secondary dark:text-alabaster mb-1"
+                      id={`food-calories-label-${activeMealIndex}-${foodIndex}`}
                     >
                       Calories
-                    </label>
-                    <input
-                      type="number"
-                      id={`food-calories-${activeMealIndex}-${foodIndex}`}
-                      value={food.calories}
-                      onChange={(e) =>
-                        updateFood(
-                          activeMealIndex,
-                          foodIndex,
-                          "calories",
-                          parseInt(e.target.value) || 0
-                        )
-                      }
-                      className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-night text-secondary dark:text-alabaster text-sm"
-                      placeholder="0"
-                    />
+                    </span>
+                    <div
+                      className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg bg-gray-50 dark:bg-night text-secondary dark:text-alabaster text-sm flex items-center min-h-[38px]"
+                      role="status"
+                      aria-labelledby={`food-calories-label-${activeMealIndex}-${foodIndex}`}
+                    >
+                      {Number(food.calories) || 0}
+                    </div>
                   </div>
                   <div>
                     <label
@@ -501,13 +533,22 @@ export default function CreateMealPlanForm({
                     <input
                       type="number"
                       id={`food-protein-${activeMealIndex}-${foodIndex}`}
-                      value={food.protein}
+                      value={food.protein === 0 ? "" : food.protein}
                       onChange={(e) =>
                         updateFood(
                           activeMealIndex,
                           foodIndex,
                           "protein",
-                          parseInt(e.target.value) || 0
+                          e.target.value
+                        )
+                      }
+                      onBlur={(e) =>
+                        updateFood(
+                          activeMealIndex,
+                          foodIndex,
+                          "protein",
+                          e.target.value,
+                          true
                         )
                       }
                       className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-night text-secondary dark:text-alabaster text-sm"
@@ -524,13 +565,22 @@ export default function CreateMealPlanForm({
                     <input
                       type="number"
                       id={`food-carbs-${activeMealIndex}-${foodIndex}`}
-                      value={food.carbs}
+                      value={food.carbs === 0 ? "" : food.carbs}
                       onChange={(e) =>
                         updateFood(
                           activeMealIndex,
                           foodIndex,
                           "carbs",
-                          parseInt(e.target.value) || 0
+                          e.target.value
+                        )
+                      }
+                      onBlur={(e) =>
+                        updateFood(
+                          activeMealIndex,
+                          foodIndex,
+                          "carbs",
+                          e.target.value,
+                          true
                         )
                       }
                       className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-night text-secondary dark:text-alabaster text-sm"
@@ -547,13 +597,22 @@ export default function CreateMealPlanForm({
                     <input
                       type="number"
                       id={`food-fat-${activeMealIndex}-${foodIndex}`}
-                      value={food.fat}
+                      value={food.fat === 0 ? "" : food.fat}
                       onChange={(e) =>
                         updateFood(
                           activeMealIndex,
                           foodIndex,
                           "fat",
-                          parseInt(e.target.value) || 0
+                          e.target.value
+                        )
+                      }
+                      onBlur={(e) =>
+                        updateFood(
+                          activeMealIndex,
+                          foodIndex,
+                          "fat",
+                          e.target.value,
+                          true
                         )
                       }
                       className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-night text-secondary dark:text-alabaster text-sm"
