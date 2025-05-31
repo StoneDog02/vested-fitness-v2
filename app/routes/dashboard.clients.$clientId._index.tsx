@@ -10,6 +10,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import LineChart from "~/components/ui/LineChart";
 
 export const meta: MetaFunction = () => {
   return [
@@ -121,12 +122,21 @@ export const loader = async ({ params }: { params: { clientId: string } }) => {
     .eq("user_id", client.id)
     .order("created_at", { ascending: false });
 
+  // Fetch weight logs for the client
+  const { data: weightLogsRaw, error: weightLogsError } = await supabase
+    .from("weight_logs")
+    .select("id, weight, logged_at")
+    .eq("user_id", client.id)
+    .order("logged_at", { ascending: true });
+  const weightLogs = weightLogsRaw || [];
+
   return json({
     client,
     updates: updates || [],
     checkIns: checkIns || [],
     mealPlans: mealPlans || [],
     supplements: supplements || [],
+    weightLogs,
   });
 };
 
@@ -136,6 +146,7 @@ export default function ClientDetails() {
     updates,
     mealPlans,
     checkIns: rawCheckIns,
+    weightLogs,
   } = useLoaderData<typeof loader>();
   const [showAddMessage, setShowAddMessage] = useState(false);
   const [showAddCheckIn, setShowAddCheckIn] = useState(false);
@@ -177,6 +188,22 @@ export default function ClientDetails() {
       window.location.reload();
     }
   }, [fetcher.state, fetcher.data]);
+
+  // Weight chart data
+  const hasWeightLogs = weightLogs && weightLogs.length > 0;
+  const chartData = hasWeightLogs
+    ? weightLogs.map((w: any) => ({
+        date: w.logged_at,
+        weight: Number(w.weight),
+      }))
+    : [];
+  const startWeight = hasWeightLogs
+    ? chartData[0].weight
+    : client.starting_weight;
+  const currentWeight = hasWeightLogs
+    ? chartData[chartData.length - 1].weight
+    : client.current_weight;
+  const totalChange = currentWeight - startWeight;
 
   return (
     <ClientDetailLayout>
@@ -291,16 +318,22 @@ export default function ClientDetails() {
             <Card title="Weight Progress">
               <div className="h-64 flex items-center justify-center">
                 <div className="text-center w-full max-w-sm">
-                  <p className="text-gray-dark dark:text-gray-light mb-4">
-                    Weight Chart Would Display Here
-                  </p>
-                  <div className="flex flex-col space-y-2">
+                  {hasWeightLogs ? (
+                    <LineChart data={chartData} height={200}>
+                      {/* Configure axes and lines as needed */}
+                    </LineChart>
+                  ) : (
+                    <p className="text-gray-dark dark:text-gray-light mb-4">
+                      No weight history yet.
+                    </p>
+                  )}
+                  <div className="flex flex-col space-y-2 mt-4">
                     <div className="flex justify-between">
                       <span className="text-sm text-secondary dark:text-alabaster">
                         Starting Weight:
                       </span>
                       <span className="text-sm text-secondary dark:text-alabaster">
-                        {client.starting_weight} lbs
+                        {startWeight} lbs
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -308,15 +341,20 @@ export default function ClientDetails() {
                         Current Weight:
                       </span>
                       <span className="text-sm text-secondary dark:text-alabaster">
-                        {client.current_weight} lbs
+                        {currentWeight} lbs
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm text-secondary dark:text-alabaster">
                         Total Change:
                       </span>
-                      <span className="text-sm text-green-500">
-                        -{client.starting_weight - client.current_weight} lbs
+                      <span
+                        className={
+                          totalChange < 0 ? "text-green-500" : "text-red-500"
+                        }
+                      >
+                        {totalChange > 0 ? "+" : ""}
+                        {totalChange} lbs
                       </span>
                     </div>
                   </div>
