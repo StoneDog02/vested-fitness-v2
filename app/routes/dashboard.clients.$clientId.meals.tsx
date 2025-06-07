@@ -31,20 +31,24 @@ export const loader = async ({
   // Try to find client by slug first
   const { data: initialClient, error } = await supabase
     .from("users")
-    .select("id")
+    .select("id, name")
     .eq("slug", params.clientId)
     .single();
   let client = initialClient;
   if (error || !client) {
     const { data: clientById } = await supabase
       .from("users")
-      .select("id")
+      .select("id, name")
       .eq("id", params.clientId)
       .single();
     client = clientById;
   }
   if (!client)
-    return json({ mealPlans: [], complianceData: [0, 0, 0, 0, 0, 0, 0] });
+    return json({
+      mealPlans: [],
+      complianceData: [0, 0, 0, 0, 0, 0, 0],
+      client: null,
+    });
 
   // Get week start from query param, default to current week
   const url = new URL(request.url);
@@ -140,7 +144,7 @@ export const loader = async ({
     complianceData.push(percent);
   }
 
-  return json({ mealPlans, complianceData });
+  return json({ mealPlans, complianceData, client });
 };
 
 export const meta: MetaFunction = () => {
@@ -291,8 +295,29 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   return redirect(request.url);
 };
 
+type Food = {
+  name: string;
+  portion: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+};
+type Meal = { id: string | number; name: string; time: string; foods: Food[] };
+type MealPlan = {
+  id: string;
+  title: string;
+  description: string;
+  createdAt: string;
+  isActive: boolean;
+  meals: Meal[];
+};
 export default function ClientMeals() {
-  const { mealPlans, complianceData } = useLoaderData<typeof loader>();
+  const { mealPlans, complianceData, client } = useLoaderData<{
+    mealPlans: MealPlan[];
+    complianceData: number[];
+    client: { name: string } | null;
+  }>();
   const fetcher = useFetcher();
 
   // Sort meal plans by createdAt descending
@@ -360,7 +385,9 @@ export default function ClientMeals() {
     <ClientDetailLayout>
       <div className="h-full p-4 sm:p-6 overflow-y-auto">
         <div className="mb-6">
-          <h2 className="text-2xl font-bold mb-4">Meal Plans</h2>
+          <h1 className="text-2xl font-bold text-secondary dark:text-alabaster mb-4">
+            {client ? `${client.name}'s Meals` : "Client's Meals"}
+          </h1>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
             {/* Left: Meal Plan History */}
             <Card
@@ -447,8 +474,11 @@ export default function ClientMeals() {
                               className="text-green-600 hover:text-green-700 text-sm hover:underline flex items-center gap-1"
                               onClick={() => {
                                 setSelectedPlan({
+                                  id: plan.id,
                                   title: plan.title,
                                   description: plan.description,
+                                  createdAt: plan.createdAt,
+                                  isActive: plan.isActive,
                                   meals: plan.meals,
                                 });
                                 setIsCreateModalOpen(true);
@@ -588,21 +618,23 @@ export default function ClientMeals() {
               ? {
                   title: selectedPlan.title ?? "",
                   description: selectedPlan.description ?? "",
-                  meals: (selectedPlan.meals ?? []).map((meal, idx) => ({
-                    id: typeof meal.id === "number" ? meal.id : idx + 1,
-                    name: meal.name ?? "",
-                    time: meal.time ?? "",
-                    foods: (meal.foods ?? []).map((food) => ({
-                      name: food.name ?? "",
-                      portion: food.portion ?? "",
-                      calories:
-                        typeof food.calories === "number" ? food.calories : 0,
-                      protein:
-                        typeof food.protein === "number" ? food.protein : 0,
-                      carbs: typeof food.carbs === "number" ? food.carbs : 0,
-                      fat: typeof food.fat === "number" ? food.fat : 0,
-                    })),
-                  })),
+                  meals: (selectedPlan.meals ?? []).map(
+                    (meal: Meal, idx: number) => ({
+                      id: typeof meal.id === "number" ? meal.id : idx + 1,
+                      name: meal.name ?? "",
+                      time: meal.time ?? "",
+                      foods: (meal.foods ?? []).map((food: Food) => ({
+                        name: food.name ?? "",
+                        portion: food.portion ?? "",
+                        calories:
+                          typeof food.calories === "number" ? food.calories : 0,
+                        protein:
+                          typeof food.protein === "number" ? food.protein : 0,
+                        carbs: typeof food.carbs === "number" ? food.carbs : 0,
+                        fat: typeof food.fat === "number" ? food.fat : 0,
+                      })),
+                    })
+                  ),
                 }
               : undefined
           }
@@ -708,8 +740,11 @@ export default function ClientMeals() {
                               className="text-green-600 hover:text-green-700 text-sm hover:underline flex items-center gap-1"
                               onClick={() => {
                                 setSelectedPlan({
+                                  id: plan.id,
                                   title: plan.title,
                                   description: plan.description,
+                                  createdAt: plan.createdAt,
+                                  isActive: plan.isActive,
                                   meals: plan.meals,
                                 });
                                 setIsCreateModalOpen(true);

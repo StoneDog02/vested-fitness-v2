@@ -156,22 +156,34 @@ export default function WorkoutCard({
                       key={`${exercise.id}-${set.setNumber}`}
                       className="py-2 px-4"
                     >
-                      <input
-                        type="number"
-                        value={weights[`${exercise.id}-${set.setNumber}`]}
-                        onChange={(e) =>
-                          handleWeightChange(
-                            exercise.id,
-                            set.setNumber,
-                            e.target.value
-                          )
-                        }
-                        disabled={isSubmitted}
-                        className={`w-20 px-2 py-1 border rounded bg-white dark:bg-gray-700 dark:border-gray-600 text-secondary dark:text-alabaster focus:ring-1 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light ${
-                          isSubmitted ? "cursor-not-allowed opacity-50" : ""
-                        }`}
-                        placeholder="0"
-                      />
+                      {set.setNumber === 1 ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={weights[`${exercise.id}-${set.setNumber}`]}
+                            onChange={(e) =>
+                              handleWeightChange(
+                                exercise.id,
+                                set.setNumber,
+                                e.target.value
+                              )
+                            }
+                            disabled={isSubmitted}
+                            className={`w-20 px-2 py-1 border rounded bg-white dark:bg-gray-700 dark:border-gray-600 text-secondary dark:text-alabaster focus:ring-1 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light ${
+                              isSubmitted ? "cursor-not-allowed opacity-50" : ""
+                            }`}
+                            placeholder="0"
+                          />
+                          {/* Personal Best mock display */}
+                          <span className="ml-2 text-xs text-green-600 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded">
+                            PB: 185 lbs
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-600">
+                          -
+                        </span>
+                      )}
                     </td>
                   ))}
                 </tr>
