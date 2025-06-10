@@ -15,6 +15,13 @@ import { Buffer } from "buffer";
 type LoaderData = {
   clientData?: ClientDashboardData;
   coachId: string | null;
+  totalClients: number;
+  activeClients: number;
+  inactiveClients: number;
+  compliance: number;
+  clients: Client[];
+  recentClients: Client[];
+  recentActivity: Activity[];
 };
 
 // Types for client dashboard data
@@ -43,188 +50,39 @@ type ClientDashboardData = {
   supplements: Supplement[];
 };
 
-// Mock data for the client dashboard
-const mockClientData: ClientDashboardData = {
-  updates: [
-    {
-      message:
-        "Your coach has adjusted your macros for the week. Check your meal plan for updates.",
-      timestamp: "2 hours ago",
-    },
-    {
-      message:
-        "New workout plan added for next week focusing on strength training.",
-      timestamp: "5 hours ago",
-    },
-    {
-      message: "Great progress on your morning cardio sessions!",
-      timestamp: "1 day ago",
-    },
-  ],
-  meals: [
-    {
-      name: "Breakfast",
-      description: "Oatmeal with protein powder and berries",
-      time: "7:00 AM",
-      completed: true,
-    },
-    {
-      name: "Morning Snack",
-      description: "Greek yogurt with almonds",
-      time: "10:00 AM",
-      completed: true,
-    },
-    {
-      name: "Lunch",
-      description: "Grilled chicken salad with avocado",
-      time: "1:00 PM",
-      completed: false,
-    },
-    {
-      name: "Afternoon Snack",
-      description: "Protein shake and banana",
-      time: "4:00 PM",
-      completed: false,
-    },
-    {
-      name: "Dinner",
-      description: "Salmon with sweet potato and broccoli",
-      time: "7:00 PM",
-      completed: false,
-    },
-  ],
-  workouts: [
-    {
-      id: "1",
-      name: "Pull Day",
-      date: new Date().toISOString(),
-      completed: false,
-      exercises: [
-        {
-          id: "1",
-          name: "Bench Press",
-          description: "4 sets x 6-10 reps",
-          type: "Single",
-          videoUrl: "https://example.com/bench-press-tutorial",
-          sets: [
-            {
-              setNumber: 1,
-              weight: 135,
-              reps: 10,
-              completed: true,
-              notes: "Warm-up",
-            },
-            { setNumber: 2, weight: 185, reps: 8, completed: true },
-            { setNumber: 3, weight: 205, reps: 6, completed: true },
-            { setNumber: 4, weight: 205, reps: 6, completed: true },
-          ],
-        },
-        {
-          id: "2",
-          name: "Incline Dumbbell Press",
-          description: "3 sets x 8-10 reps",
-          type: "Single",
-          videoUrl: "https://example.com/incline-db-press-tutorial",
-          sets: [
-            { setNumber: 1, weight: 60, reps: 10, completed: true },
-            { setNumber: 2, weight: 65, reps: 10, completed: true },
-            { setNumber: 3, weight: 70, reps: 8, completed: true },
-          ],
-        },
-        {
-          id: "3",
-          name: "Seated Shoulder Press",
-          description: "3 sets x 8-10 reps",
-          type: "Single",
-          videoUrl: "https://example.com/shoulder-press-tutorial",
-          sets: [
-            { setNumber: 1, weight: 95, reps: 10, completed: true },
-            { setNumber: 2, weight: 115, reps: 8, completed: true },
-            { setNumber: 3, weight: 115, reps: 8, completed: false },
-          ],
-        },
-      ],
-    },
-  ],
-  supplements: [
-    {
-      name: "Multivitamin",
-      timing: "Morning",
-      completed: true,
-    },
-    {
-      name: "Fish Oil",
-      timing: "Morning",
-      completed: true,
-    },
-    {
-      name: "Creatine",
-      timing: "Pre-Workout",
-      completed: false,
-    },
-    {
-      name: "Pre-workout supplement",
-      timing: "Pre-Workout",
-      completed: false,
-    },
-  ],
+type Client = {
+  id: string;
+  name: string;
+  updated_at: string;
+  created_at: string;
+  role: string;
 };
 
-// Mock data for the coach dashboard
-const mockClients = [
-  { id: 1, name: "Sarah Johnson", lastActive: "2 hours ago", compliance: 85 },
-  { id: 2, name: "Mike Smith", lastActive: "1 day ago", compliance: 92 },
-  { id: 3, name: "Emma Davis", lastActive: "3 hours ago", compliance: 78 },
-  { id: 4, name: "John Wilson", lastActive: "5 hours ago", compliance: 95 },
-];
-
-const mockActivity = [
-  {
-    id: 1,
-    client: "Sarah Johnson",
-    action: "Completed workout",
-    time: "2 hours ago",
-  },
-  { id: 2, client: "Mike Smith", action: "Logged meals", time: "3 hours ago" },
-  {
-    id: 3,
-    client: "Emma Davis",
-    action: "Updated weight",
-    time: "4 hours ago",
-  },
-  {
-    id: 4,
-    client: "John Wilson",
-    action: "Completed workout",
-    time: "5 hours ago",
-  },
-];
+type Activity = {
+  id: string;
+  clientName: string;
+  action: string;
+  time: string;
+};
 
 export const loader: LoaderFunction = async ({ request }) => {
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
     (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
   );
-  let accessToken, refreshToken;
+  let accessToken;
   if (supabaseAuthCookieKey) {
     try {
-      // Decode from base64 before parsing
       const decoded = Buffer.from(
         cookies[supabaseAuthCookieKey],
         "base64"
       ).toString("utf-8");
-      console.log("[LOADER] decoded cookie value:", decoded);
-      // Parse twice: first to get the string, then to get the array
-      const [access, refresh] = JSON.parse(JSON.parse(decoded));
+      const [access] = JSON.parse(JSON.parse(decoded));
       accessToken = access;
-      refreshToken = refresh;
     } catch (e) {
       accessToken = undefined;
-      refreshToken = undefined;
     }
   }
-  console.log("[LOADER] accessToken:", accessToken);
-  console.log("[LOADER] refreshToken:", refreshToken);
 
   let coachId = null;
   let authId: string | undefined;
@@ -235,32 +93,159 @@ export const loader: LoaderFunction = async ({ request }) => {
         decoded && typeof decoded === "object" && "sub" in decoded
           ? (decoded.sub as string)
           : undefined;
-      console.log("[LOADER] decoded authId:", authId);
     } catch (e) {
-      console.log("[LOADER] JWT decode error:", e);
+      /* ignore */
     }
   }
+
+  let totalClients = 0;
+  let activeClients = 0;
+  let inactiveClients = 0;
+  let compliance = 0;
+  let clients: Client[] = [];
+  let recentClients: Client[] = [];
+  const recentActivity: Activity[] = [];
 
   if (authId) {
     const supabase = createClient<Database>(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
     );
-    // Fetch full user record including role and coach_id
-    const { data: user, error: userError } = await supabase
+    const { data: user } = await supabase
       .from("users")
       .select("id, role, coach_id")
       .eq("auth_id", authId)
       .single();
-    console.log("[LOADER] user:", user, userError);
     if (user) {
-      // If coach, use their own id; if client, use their coach_id
       coachId = user.role === "coach" ? user.id : user.coach_id;
     }
+    if (coachId) {
+      // Fetch all clients for this coach
+      const { data: clientRows } = await supabase
+        .from("users")
+        .select("id, name, updated_at, created_at, role")
+        .eq("coach_id", coachId)
+        .eq("role", "client");
+      clients = clientRows ?? [];
+      totalClients = clients.length;
+      activeClients = totalClients;
+      inactiveClients = 0;
+      // Recent Clients: last 30 days
+      const monthAgo = new Date();
+      monthAgo.setDate(monthAgo.getDate() - 30);
+      recentClients = clients
+        .filter((c) => new Date(c.created_at) >= monthAgo)
+        .sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      // Workout compliance: % of workouts completed in last 7 days
+      if (totalClients > 0) {
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const { data: workouts } = await supabase
+          .from("workouts")
+          .select("id, user_id, completed, date")
+          .in(
+            "user_id",
+            clients.map((c) => c.id)
+          )
+          .gte("date", weekAgo.toISOString().slice(0, 10));
+        const totalWorkouts = (workouts ?? []).length;
+        const completedWorkouts = (workouts ?? []).filter(
+          (w: { completed: boolean }) => w.completed
+        ).length;
+        compliance =
+          totalWorkouts > 0
+            ? Math.round((completedWorkouts / totalWorkouts) * 100)
+            : 0;
+      }
+      // Recent Activity: today only
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      // Workouts completed today
+      const { data: workoutsToday } = await supabase
+        .from("workouts")
+        .select("id, user_id, completed, date")
+        .in(
+          "user_id",
+          clients.map((c) => c.id)
+        )
+        .gte("date", today.toISOString().slice(0, 10))
+        .lt("date", tomorrow.toISOString().slice(0, 10));
+      if (workoutsToday) {
+        for (const w of workoutsToday) {
+          if (w.completed) {
+            const client = clients.find((c) => c.id === w.user_id);
+            recentActivity.push({
+              id: w.id,
+              clientName: client ? client.name : "Unknown",
+              action: "Completed workout",
+              time: w.date,
+            });
+          }
+        }
+      }
+      // Meals logged today
+      const { data: mealsLogged } = await supabase
+        .from("meal_completions")
+        .select("id, user_id, completed_at")
+        .in(
+          "user_id",
+          clients.map((c) => c.id)
+        )
+        .gte("completed_at", today.toISOString())
+        .lt("completed_at", tomorrow.toISOString());
+      if (mealsLogged) {
+        for (const m of mealsLogged) {
+          const client = clients.find((c) => c.id === m.user_id);
+          recentActivity.push({
+            id: m.id,
+            clientName: client ? client.name : "Unknown",
+            action: "Logged meal",
+            time: m.completed_at,
+          });
+        }
+      }
+      // Supplements taken today
+      const { data: suppsLogged } = await supabase
+        .from("supplement_completions")
+        .select("id, user_id, completed_at")
+        .in(
+          "user_id",
+          clients.map((c) => c.id)
+        )
+        .gte("completed_at", today.toISOString())
+        .lt("completed_at", tomorrow.toISOString());
+      if (suppsLogged) {
+        for (const s of suppsLogged) {
+          const client = clients.find((c) => c.id === s.user_id);
+          recentActivity.push({
+            id: s.id,
+            clientName: client ? client.name : "Unknown",
+            action: "Took supplement",
+            time: s.completed_at,
+          });
+        }
+      }
+      // Sort activity by time desc
+      recentActivity.sort(
+        (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()
+      );
+    }
   }
-  return json<LoaderData & { coachId: string | null }>({
-    clientData: mockClientData,
+
+  return json({
     coachId,
+    totalClients,
+    activeClients,
+    inactiveClients,
+    compliance,
+    clients,
+    recentClients,
+    recentActivity,
   });
 };
 
@@ -301,7 +286,7 @@ export default function Dashboard() {
             <Link to="/dashboard/clients" className="group">
               <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
                 <h3 className="font-semibold text-lg mb-2">Total Clients</h3>
-                <p className="text-4xl font-bold">24</p>
+                <p className="text-4xl font-bold">{data.totalClients}</p>
                 <p className="text-sm text-muted-foreground mt-2">
                   +3 this month
                 </p>
@@ -311,7 +296,7 @@ export default function Dashboard() {
             <Link to="/dashboard/clients/active" className="group">
               <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
                 <h3 className="font-semibold text-lg mb-2">Active Clients</h3>
-                <p className="text-4xl font-bold">18</p>
+                <p className="text-4xl font-bold">{data.activeClients}</p>
                 <p className="text-sm text-muted-foreground mt-2">
                   75% of total
                 </p>
@@ -321,7 +306,9 @@ export default function Dashboard() {
             <Link to="/dashboard/clients/inactive" className="group">
               <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
                 <h3 className="font-semibold text-lg mb-2">Inactive Clients</h3>
-                <p className="text-4xl font-bold text-red-500">6</p>
+                <p className="text-4xl font-bold text-red-500">
+                  {data.inactiveClients}
+                </p>
                 <p className="text-sm text-muted-foreground mt-2">
                   25% of total
                 </p>
@@ -333,7 +320,7 @@ export default function Dashboard() {
                 <h3 className="font-semibold text-lg mb-2">
                   Client Compliance
                 </h3>
-                <p className="text-4xl font-bold">87%</p>
+                <p className="text-4xl font-bold">{data.compliance}%</p>
                 <p className="text-sm text-muted-foreground mt-2">
                   +5% from last week
                 </p>
@@ -347,32 +334,37 @@ export default function Dashboard() {
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Recent Clients</h3>
               <div className="space-y-4">
-                {mockClients.map((client) => (
-                  <div
-                    key={client.id}
-                    className="flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <p className="font-medium">{client.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Last active {client.lastActive}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-[60px] h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-green-500 rounded-full"
-                          style={{ width: `${client.compliance}%` }}
-                        />
-                      </div>
-                      <span className="text-sm font-medium">
-                        {client.compliance}%
-                      </span>
-                    </div>
+                {data.recentClients.length === 0 ? (
+                  <div className="text-gray-dark dark:text-gray-light">
+                    No new clients in the last month.
                   </div>
-                ))}
+                ) : (
+                  data.recentClients.map((client) => (
+                    <div
+                      key={client.id}
+                      className="flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div>
+                          <p className="font-medium">{client.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Joined{" "}
+                            {new Date(client.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-[60px] h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-green-500 rounded-full"
+                            style={{ width: `100%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-medium">100%</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </Card>
 
@@ -380,29 +372,29 @@ export default function Dashboard() {
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Recent Activity</h3>
               <div className="space-y-4">
-                {mockActivity.map((activity) => (
-                  <div key={activity.id} className="flex items-start gap-3">
-                    <div
-                      className={
-                        "w-2 h-2 mt-2 rounded-full " +
-                        (activity.action.includes("workout")
-                          ? "bg-green-500"
-                          : activity.action.includes("meals")
-                          ? "bg-blue-500"
-                          : "bg-yellow-500")
-                      }
-                    />
-                    <div>
-                      <p className="font-medium">{activity.client}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {activity.action}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {activity.time}
-                      </p>
-                    </div>
+                {data.recentActivity.length === 0 ? (
+                  <div className="text-gray-dark dark:text-gray-light">
+                    No activity yet today.
                   </div>
-                ))}
+                ) : (
+                  data.recentActivity.map((activity) => (
+                    <div key={activity.id} className="flex items-start gap-3">
+                      <div className="w-2 h-2 mt-2 rounded-full bg-primary" />
+                      <div>
+                        <p className="font-medium">{activity.clientName}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {activity.action}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(activity.time).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </Card>
           </div>
