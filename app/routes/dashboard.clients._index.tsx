@@ -10,6 +10,7 @@ import { Buffer } from "buffer";
 import type { LoaderFunction } from "@remix-run/node";
 import type { Database } from "~/lib/supabase";
 import { useLoaderData } from "@remix-run/react";
+import ClientProfile from "~/components/coach/ClientProfile";
 import { Link } from "@remix-run/react";
 
 export const meta: MetaFunction = () => {
@@ -179,61 +180,30 @@ export default function ClientsIndex() {
       </div>
 
       <div className="space-y-4">
-        {filteredClients.map(
-          (client: {
-            id: string;
-            name: string;
-            email?: string;
-            goal?: string;
-            starting_weight?: number;
-            current_weight?: number;
-            workout_split?: string;
-            role?: string;
-            coach_id?: string;
-            slug?: string;
-          }) => (
-            <Link
-              key={client.id}
-              to={`/dashboard/clients/${client.slug || client.id}`}
-              className="block p-4 border rounded bg-white dark:bg-night shadow hover:shadow-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer"
-              style={{ textDecoration: "none", color: "inherit" }}
-            >
-              <div className="font-extrabold text-2xl mb-2">
-                {client.name || "Unnamed"}
-              </div>
-              <div className="text-xs text-gray-500 mb-1">
-                {client.email || ""}
-              </div>
-              <div className="grid grid-cols-5 gap-4 text-xs mb-1 mt-3 pt-4">
-                <div className="font-semibold text-left text-green-500">
-                  Goal
-                </div>
-                <div className="font-semibold text-left">Workout Split</div>
-                <div className="font-semibold text-left">Macros</div>
-                <div className="font-semibold text-left">Supplements</div>
-                <div className="font-semibold text-left">Weight</div>
-              </div>
-              <div className="grid grid-cols-5 gap-4 text-xs">
-                <div className="text-left text-green-500">
-                  {client.goal || "N/A"}
-                </div>
-                <div className="text-left">{client.workout_split || "N/A"}</div>
-                <div className="flex flex-col items-left">
-                  <span>Protein: N/A</span>
-                  <span>Carbs: N/A</span>
-                  <span>Fats: N/A</span>
-                </div>
-                <div className="text-left">N/A</div>
-                <div className="text-left">
-                  {client.starting_weight != null &&
-                  client.current_weight != null
-                    ? `${client.starting_weight} → ${client.current_weight}`
-                    : "N/A"}
-                </div>
-              </div>
-            </Link>
-          )
-        )}
+        {filteredClients.map((client) => (
+          <Link
+            key={client.id}
+            to={`/dashboard/clients/${client.slug || client.id}`}
+            className="block hover:shadow-lg transition-all"
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            <div>
+              <ClientProfile
+                client={{
+                  id: client.id,
+                  name: client.name || "Unnamed",
+                  startingWeight: client.starting_weight ?? 0,
+                  currentWeight: client.current_weight ?? 0,
+                  currentMacros: { protein: 0, carbs: 0, fat: 0 },
+                  workoutSplit: client.workout_split || "N/A",
+                  supplementCount: 0,
+                  goal: client.goal || "N/A",
+                }}
+                mealPlan={{ meals: [] }}
+              />
+            </div>
+          </Link>
+        ))}
       </div>
 
       <ClientInviteModal

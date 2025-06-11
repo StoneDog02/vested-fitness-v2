@@ -1,5 +1,16 @@
-import { Client } from "~/lib/supabase";
 import { calculateMacros } from "~/lib/utils";
+
+// Inline Client type for this component
+interface Client {
+  id: string;
+  name: string;
+  startingWeight: number;
+  currentWeight: number;
+  currentMacros: { protein: number; carbs: number; fat: number };
+  workoutSplit: string;
+  supplementCount: number;
+  goal?: string;
+}
 
 interface ClientProfileProps {
   client: Client;
@@ -35,6 +46,13 @@ export default function ClientProfile({
           {client.name}
         </h3>
       </div>
+      {client.goal && (
+        <div className="mb-4">
+          <span className="inline-block px-3 py-1 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded-full text-sm font-semibold">
+            Goal: {client.goal}
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-y-6 gap-x-4">
         <div>
