@@ -12,6 +12,43 @@ import type { Database } from "~/lib/supabase";
 import { useLoaderData } from "@remix-run/react";
 import ClientProfile from "~/components/coach/ClientProfile";
 import { Link } from "@remix-run/react";
+import { calculateMacros } from "~/lib/utils";
+
+interface Supplement {
+  id: string;
+  name: string;
+}
+
+interface MealFood {
+  id: string;
+  name: string;
+  portion?: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
+interface Meal {
+  id: string;
+  name: string;
+  time?: string;
+  sequence_order?: number;
+  foods: MealFood[];
+}
+
+interface MealPlan {
+  id: string;
+  title: string;
+  is_active: boolean;
+  meals: Meal[];
+}
+
+interface WorkoutPlan {
+  id: string;
+  title: string;
+  is_active: boolean;
+}
 
 export const meta: MetaFunction = () => {
   return [
@@ -87,6 +124,9 @@ export const loader: LoaderFunction = async ({ request }) => {
     role?: string;
     coach_id?: string;
     slug?: string;
+    activeMealPlan?: MealPlan | null;
+    activeWorkoutPlan?: WorkoutPlan | null;
+    supplements?: Supplement[];
   }[] = [];
   if (coachId) {
     const supabase = createClient<Database>(
@@ -101,7 +141,65 @@ export const loader: LoaderFunction = async ({ request }) => {
       .eq("coach_id", coachId)
       .eq("role", "client");
     if (error) console.log("[LOADER] Supabase error:", error);
-    if (data) clients = data;
+    if (data) {
+      // For each client, fetch their active meal plan, workout plan, and supplements
+      clients = await Promise.all(
+        data.map(async (client) => {
+          // Active meal plan
+          const { data: mealPlansRaw } = await supabase
+            .from("meal_plans")
+            .select("id, title, is_active")
+            .eq("user_id", client.id)
+            .eq("is_active", true)
+            .order("created_at", { ascending: false });
+          let activeMealPlan = null;
+          if (mealPlansRaw && mealPlansRaw.length > 0) {
+            const plan = mealPlansRaw[0];
+            const { data: mealsRaw } = await supabase
+              .from("meals")
+              .select("id, name, time, sequence_order")
+              .eq("meal_plan_id", plan.id)
+              .order("sequence_order", { ascending: true });
+            const meals = await Promise.all(
+              (mealsRaw || []).map(async (meal) => {
+                const { data: foods } = await supabase
+                  .from("foods")
+                  .select("id, name, portion, calories, protein, carbs, fat")
+                  .eq("meal_id", meal.id);
+                return { ...meal, foods: foods || [] };
+              })
+            );
+            activeMealPlan = { ...plan, meals };
+          }
+
+          // Active workout plan
+          const { data: workoutPlansRaw } = await supabase
+            .from("workout_plans")
+            .select("id, title, is_active")
+            .eq("user_id", client.id)
+            .eq("is_active", true)
+            .order("created_at", { ascending: false });
+          const activeWorkoutPlan =
+            workoutPlansRaw && workoutPlansRaw.length > 0
+              ? workoutPlansRaw[0]
+              : null;
+
+          // Supplements
+          const { data: supplementsRaw } = await supabase
+            .from("supplements")
+            .select("id, name")
+            .eq("user_id", client.id);
+          const supplements = supplementsRaw || [];
+
+          return {
+            ...client,
+            activeMealPlan,
+            activeWorkoutPlan,
+            supplements,
+          };
+        })
+      );
+    }
     console.log("[LOADER] Filtered client users from Supabase:", clients);
   }
 
@@ -122,6 +220,9 @@ export default function ClientsIndex() {
       role?: string;
       coach_id?: string;
       slug?: string;
+      activeMealPlan?: MealPlan | null;
+      activeWorkoutPlan?: WorkoutPlan | null;
+      supplements?: Supplement[];
     }[];
   }>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -180,30 +281,56 @@ export default function ClientsIndex() {
       </div>
 
       <div className="space-y-4">
-        {filteredClients.map((client) => (
-          <Link
-            key={client.id}
-            to={`/dashboard/clients/${client.slug || client.id}`}
-            className="block hover:shadow-lg transition-all"
-            style={{ textDecoration: "none", color: "inherit" }}
-          >
-            <div>
-              <ClientProfile
-                client={{
-                  id: client.id,
-                  name: client.name || "Unnamed",
-                  startingWeight: client.starting_weight ?? 0,
-                  currentWeight: client.current_weight ?? 0,
-                  currentMacros: { protein: 0, carbs: 0, fat: 0 },
-                  workoutSplit: client.workout_split || "N/A",
-                  supplementCount: 0,
-                  goal: client.goal || "N/A",
-                }}
-                mealPlan={{ meals: [] }}
-              />
-            </div>
-          </Link>
-        ))}
+        {filteredClients.map((client) => {
+          // Convert meal/food IDs to numbers for ClientProfile compatibility
+          const safeMeals = (client.activeMealPlan?.meals || []).map(
+            (meal) => ({
+              ...meal,
+              id:
+                typeof meal.id === "number" ? meal.id : parseInt(meal.id) || 0,
+              foods: (meal.foods || []).map((food) => ({
+                ...food,
+                id:
+                  typeof food.id === "number"
+                    ? food.id
+                    : parseInt(food.id) || 0,
+              })),
+            })
+          );
+          // Calculate macros from active meal plan
+          let macros = { protein: 0, carbs: 0, fat: 0 };
+          if (safeMeals.length > 0) {
+            macros = calculateMacros(safeMeals);
+          }
+          // Workout split from active workout plan
+          const workoutSplit = client.activeWorkoutPlan?.title || "N/A";
+          // Supplements
+          const supplementCount = client.supplements?.length || 0;
+          return (
+            <Link
+              key={client.id}
+              to={`/dashboard/clients/${client.slug || client.id}`}
+              className="block hover:shadow-lg transition-all"
+              style={{ textDecoration: "none", color: "inherit" }}
+            >
+              <div>
+                <ClientProfile
+                  client={{
+                    id: client.id,
+                    name: client.name || "Unnamed",
+                    startingWeight: client.starting_weight ?? 0,
+                    currentWeight: client.current_weight ?? 0,
+                    currentMacros: macros,
+                    workoutSplit,
+                    supplementCount,
+                    goal: client.goal || "N/A",
+                  }}
+                  mealPlan={{ meals: safeMeals }}
+                />
+              </div>
+            </Link>
+          );
+        })}
       </div>
 
       <ClientInviteModal

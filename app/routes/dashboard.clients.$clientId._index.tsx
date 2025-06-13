@@ -11,6 +11,7 @@ import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import LineChart from "~/components/ui/LineChart";
+import { calculateMacros } from "~/lib/utils";
 
 export const meta: MetaFunction = () => {
   return [
@@ -19,7 +20,90 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-export const loader = async ({ params }: { params: { clientId: string } }) => {
+interface Food {
+  id: number;
+  name: string;
+  portion?: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
+interface Meal {
+  id: number;
+  name: string;
+  time?: string;
+  sequence_order?: number;
+  foods: Food[];
+}
+
+interface MealPlan {
+  id: string;
+  title: string;
+  is_active: boolean;
+  meals: Meal[];
+}
+
+interface WorkoutPlan {
+  id: string;
+  title: string;
+  is_active: boolean;
+}
+
+interface Supplement {
+  id: string;
+  name: string;
+}
+
+interface MinimalClient {
+  id: string;
+  name: string;
+  email?: string;
+  goal?: string;
+  starting_weight?: number;
+  current_weight?: number;
+  workout_split?: string;
+  role?: string;
+  coach_id?: string;
+  slug?: string;
+}
+
+interface Update {
+  id: string;
+  coach_id: string;
+  client_id: string;
+  message: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CheckIn {
+  id: string;
+  notes: string;
+  created_at: string;
+}
+
+interface WeightLog {
+  id: string;
+  weight: number;
+  logged_at: string;
+}
+
+interface LoaderData {
+  client: MinimalClient;
+  updates: Update[];
+  checkIns: CheckIn[];
+  mealPlans: MealPlan[];
+  supplements: Supplement[];
+  weightLogs?: WeightLog[];
+  activeMealPlan?: MealPlan | null;
+  activeWorkoutPlan?: WorkoutPlan | null;
+}
+
+export const loader: import("@remix-run/node").LoaderFunction = async ({
+  params,
+}) => {
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
@@ -34,6 +118,17 @@ export const loader = async ({ params }: { params: { clientId: string } }) => {
     .eq("slug", params.clientId)
     .single();
 
+  if (client) {
+    client.id = String(client.id);
+    client.slug = client.slug ? String(client.slug) : "";
+    client.name = client.name ? String(client.name) : "";
+    client.email = client.email ? String(client.email) : "";
+    client.goal = client.goal ? String(client.goal) : "";
+    client.workout_split = client.workout_split || "";
+    client.role = client.role ? String(client.role) : "client";
+    client.coach_id = client.coach_id ? String(client.coach_id) : "";
+  }
+
   // If not found by slug, try by id
   if (error || !client) {
     const { data: clientById, error: errorById } = await supabase
@@ -43,25 +138,37 @@ export const loader = async ({ params }: { params: { clientId: string } }) => {
       )
       .eq("id", params.clientId)
       .single();
+    if (clientById) {
+      clientById.id = String(clientById.id);
+      clientById.slug = clientById.slug ? String(clientById.slug) : "";
+      clientById.name = clientById.name ? String(clientById.name) : "";
+      clientById.email = clientById.email ? String(clientById.email) : "";
+      clientById.goal = clientById.goal ? String(clientById.goal) : "";
+      clientById.workout_split = clientById.workout_split || "";
+      clientById.role = clientById.role ? String(clientById.role) : "client";
+      clientById.coach_id = clientById.coach_id
+        ? String(clientById.coach_id)
+        : "";
+    }
     client = clientById;
     error = errorById;
   }
 
   if (error || !client) {
-    // Return safe defaults if not found
+    const fallbackClient: MinimalClient = {
+      id: params.clientId,
+      name: "Unknown Client",
+      email: "",
+      goal: "",
+      starting_weight: 0,
+      current_weight: 0,
+      workout_split: "",
+      role: "client",
+      coach_id: "",
+      slug: "",
+    };
     return json({
-      client: {
-        id: params.clientId,
-        name: "Unknown Client",
-        email: "",
-        goal: "",
-        starting_weight: null,
-        current_weight: null,
-        workout_split: "",
-        role: "client",
-        coach_id: "",
-        slug: "",
-      },
+      client: fallbackClient,
       updates: [],
       checkIns: [],
       mealPlans: [],
@@ -90,40 +197,58 @@ export const loader = async ({ params }: { params: { clientId: string } }) => {
     .eq("user_id", client.id)
     .order("created_at", { ascending: false });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mealPlans: any[] = [];
+  let activeMealPlan = null;
   if (mealPlansRaw && mealPlansRaw.length > 0) {
-    // For each meal plan, fetch meals and foods
     mealPlans = await Promise.all(
-      mealPlansRaw.map(async (plan) => {
-        const { data: mealsRaw } = await supabase
-          .from("meals")
-          .select("id, name, time, sequence_order")
-          .eq("meal_plan_id", plan.id)
-          .order("sequence_order", { ascending: true });
-        const meals = await Promise.all(
-          (mealsRaw || []).map(async (meal) => {
-            const { data: foods } = await supabase
-              .from("foods")
-              .select("id, name, portion, calories, protein, carbs, fat")
-              .eq("meal_id", meal.id);
-            return { ...meal, foods: foods || [] };
-          })
-        );
-        return { ...plan, meals };
-      })
+      mealPlansRaw.map(
+        async (plan: {
+          id: string;
+          title: string;
+          description: string;
+          is_active: boolean;
+          created_at: string;
+        }) => {
+          const { data: mealsRaw } = await supabase
+            .from("meals")
+            .select("id, name, time, sequence_order")
+            .eq("meal_plan_id", plan.id)
+            .order("sequence_order", { ascending: true });
+          const meals = await Promise.all(
+            (mealsRaw || []).map(async (meal) => {
+              const { data: foods } = await supabase
+                .from("foods")
+                .select("id, name, portion, calories, protein, carbs, fat")
+                .eq("meal_id", meal.id);
+              return { ...meal, foods: foods || [] };
+            })
+          );
+          return { ...plan, meals };
+        }
+      )
     );
+    activeMealPlan = mealPlans.find((p) => p.is_active) || null;
   }
+
+  // Fetch active workout plan
+  const { data: workoutPlansRaw } = await supabase
+    .from("workout_plans")
+    .select("id, title, is_active")
+    .eq("user_id", client.id)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false });
+  const activeWorkoutPlan =
+    workoutPlansRaw && workoutPlansRaw.length > 0 ? workoutPlansRaw[0] : null;
 
   // Fetch supplements
   const { data: supplements } = await supabase
     .from("supplements")
-    .select("id, name, dosage, frequency, timing, notes, start_date")
+    .select("id, name")
     .eq("user_id", client.id)
     .order("created_at", { ascending: false });
 
   // Fetch weight logs for the client
-  const { data: weightLogsRaw, error: weightLogsError } = await supabase
+  const { data: weightLogsRaw } = await supabase
     .from("weight_logs")
     .select("id, weight, logged_at")
     .eq("user_id", client.id)
@@ -137,6 +262,8 @@ export const loader = async ({ params }: { params: { clientId: string } }) => {
     mealPlans: mealPlans || [],
     supplements: supplements || [],
     weightLogs,
+    activeMealPlan,
+    activeWorkoutPlan,
   });
 };
 
@@ -144,17 +271,18 @@ export default function ClientDetails() {
   const {
     client,
     updates,
-    mealPlans,
     checkIns: rawCheckIns,
-    weightLogs,
-  } = useLoaderData<typeof loader>();
+    weightLogs = [],
+    activeMealPlan,
+    activeWorkoutPlan,
+    supplements,
+  } = useLoaderData<LoaderData>();
   const [showAddMessage, setShowAddMessage] = useState(false);
   const [showAddCheckIn, setShowAddCheckIn] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const fetcher = useFetcher();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const checkIns = (rawCheckIns || []).map((c: any) => ({
+  const checkIns = ((rawCheckIns as CheckIn[]) || []).map((c) => ({
     ...c,
     date: c.created_at,
   }));
@@ -192,18 +320,35 @@ export default function ClientDetails() {
   // Weight chart data
   const hasWeightLogs = weightLogs && weightLogs.length > 0;
   const chartData = hasWeightLogs
-    ? weightLogs.map((w: any) => ({
+    ? (weightLogs as WeightLog[]).map((w) => ({
         date: w.logged_at,
         weight: Number(w.weight),
       }))
     : [];
   const startWeight = hasWeightLogs
     ? chartData[0].weight
-    : client.starting_weight;
+    : client.starting_weight ?? 0;
   const currentWeight = hasWeightLogs
     ? chartData[chartData.length - 1].weight
-    : client.current_weight;
+    : client.current_weight ?? 0;
   const totalChange = currentWeight - startWeight;
+
+  // Prepare real data for ClientProfile
+  const safeMeals = (activeMealPlan?.meals || []).map((meal) => ({
+    ...meal,
+    id: typeof meal.id === "number" ? meal.id : parseInt(meal.id) || 0,
+    foods: (meal.foods || []).map((food) => ({
+      ...food,
+      id: typeof food.id === "number" ? food.id : parseInt(food.id) || 0,
+    })),
+  }));
+  let macros = { protein: 0, carbs: 0, fat: 0 };
+  if (safeMeals.length > 0) {
+    macros = calculateMacros(safeMeals);
+  }
+  const workoutSplit =
+    activeWorkoutPlan?.title || client.workout_split || "N/A";
+  const supplementCount = supplements?.length || 0;
 
   return (
     <ClientDetailLayout>
@@ -211,7 +356,19 @@ export default function ClientDetails() {
         <div className="mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="flex-1">
-              <ClientProfile client={client} mealPlan={mealPlans[0] || {}} />
+              <ClientProfile
+                client={{
+                  id: client.id,
+                  name: client.name || "Unnamed",
+                  startingWeight: client.starting_weight ?? 0,
+                  currentWeight: client.current_weight ?? 0,
+                  currentMacros: macros,
+                  workoutSplit,
+                  supplementCount,
+                  goal: client.goal || "N/A",
+                }}
+                mealPlan={{ meals: safeMeals }}
+              />
             </div>
           </div>
         </div>

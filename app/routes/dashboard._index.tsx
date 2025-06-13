@@ -19,6 +19,7 @@ type LoaderData = {
   activeClients: number;
   inactiveClients: number;
   compliance: number;
+  percentChange: number;
   clients: Client[];
   recentClients: Client[];
   recentActivity: Activity[];
@@ -102,6 +103,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   let activeClients = 0;
   let inactiveClients = 0;
   let compliance = 0;
+  let percentChange = 0;
   let clients: Client[] = [];
   let recentClients: Client[] = [];
   const recentActivity: Activity[] = [];
@@ -143,6 +145,8 @@ export const loader: LoaderFunction = async ({ request }) => {
       if (totalClients > 0) {
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 7);
+        const twoWeeksAgo = new Date();
+        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
         const { data: workouts } = await supabase
           .from("workouts")
           .select("id, user_id, completed, date")
@@ -159,6 +163,24 @@ export const loader: LoaderFunction = async ({ request }) => {
           totalWorkouts > 0
             ? Math.round((completedWorkouts / totalWorkouts) * 100)
             : 0;
+
+        // Previous week compliance
+        const { data: prevWorkouts } = await supabase
+          .from("workouts")
+          .select("id, user_id, completed, date")
+          .in(
+            "user_id",
+            clients.map((c) => c.id)
+          )
+          .gte("date", twoWeeksAgo.toISOString().slice(0, 10))
+          .lt("date", weekAgo.toISOString().slice(0, 10));
+        const prevTotal = (prevWorkouts ?? []).length;
+        const prevCompleted = (prevWorkouts ?? []).filter(
+          (w: { completed: boolean }) => w.completed
+        ).length;
+        const prevCompliance =
+          prevTotal > 0 ? Math.round((prevCompleted / prevTotal) * 100) : 0;
+        percentChange = compliance - prevCompliance;
       }
       // Recent Activity: today only
       const today = new Date();
@@ -243,6 +265,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     activeClients,
     inactiveClients,
     compliance,
+    percentChange,
     clients,
     recentClients,
     recentActivity,
@@ -321,8 +344,17 @@ export default function Dashboard() {
                   Client Compliance
                 </h3>
                 <p className="text-4xl font-bold">{data.compliance}%</p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  +5% from last week
+                <p
+                  className={`text-sm mt-2 ${
+                    data.percentChange > 0
+                      ? "text-green-600"
+                      : data.percentChange < 0
+                      ? "text-red-500"
+                      : "text-gray-400"
+                  }`}
+                >
+                  {data.percentChange > 0 && "+"}
+                  {data.percentChange}% from last week
                 </p>
               </Card>
             </Link>
