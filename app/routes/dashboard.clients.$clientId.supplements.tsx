@@ -222,13 +222,6 @@ export const action = async ({
     const dosage = formData.get("dosage") as string;
     const frequency = formData.get("frequency") as string;
     const instructions = formData.get("instructions") as string;
-    console.log("[SUPPLEMENTS][ACTION][ADD] Inserting:", {
-      user_id: client.id,
-      name,
-      dosage,
-      frequency,
-      instructions,
-    });
     const { data, error } = await supabase
       .from("supplements")
       .insert({
@@ -238,14 +231,12 @@ export const action = async ({
         frequency,
         instructions,
       })
-      .select();
-    console.log(
-      "[SUPPLEMENTS][ACTION][ADD] Insert result:",
-      data,
-      "error:",
-      error
-    );
-    return redirect(request.url);
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to add supplement" }, { status: 500 });
+    }
+    return json({ supplement: data });
   }
   if (intent === "edit") {
     const id = formData.get("id") as string;
@@ -253,41 +244,29 @@ export const action = async ({
     const dosage = formData.get("dosage") as string;
     const frequency = formData.get("frequency") as string;
     const instructions = formData.get("instructions") as string;
-    console.log("[SUPPLEMENTS][ACTION][EDIT] Updating:", {
-      id,
-      name,
-      dosage,
-      frequency,
-      instructions,
-    });
     const { data, error } = await supabase
       .from("supplements")
       .update({ name, dosage, frequency, instructions })
       .eq("id", id)
-      .select();
-    console.log(
-      "[SUPPLEMENTS][ACTION][EDIT] Update result:",
-      data,
-      "error:",
-      error
-    );
-    return redirect(request.url);
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to update supplement" }, { status: 500 });
+    }
+    return json({ supplement: data });
   }
   if (intent === "remove") {
     const id = formData.get("id") as string;
-    console.log("[SUPPLEMENTS][ACTION][REMOVE] Deleting id:", id);
     const { data, error } = await supabase
       .from("supplements")
       .delete()
       .eq("id", id)
-      .select();
-    console.log(
-      "[SUPPLEMENTS][ACTION][REMOVE] Delete result:",
-      data,
-      "error:",
-      error
-    );
-    return redirect(request.url);
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to delete supplement" }, { status: 500 });
+    }
+    return json({ deletedSupplement: data });
   }
   return redirect(request.url);
 };

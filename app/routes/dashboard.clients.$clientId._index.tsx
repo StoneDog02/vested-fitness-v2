@@ -90,6 +90,12 @@ interface WeightLog {
   logged_at: string;
 }
 
+interface CheckInNote {
+  id: string;
+  date: string;
+  notes: string;
+}
+
 interface LoaderData {
   client: MinimalClient;
   updates: Update[];
@@ -156,7 +162,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
 
   if (error || !client) {
     const fallbackClient: MinimalClient = {
-      id: params.clientId,
+      id: params.clientId || "",
       name: "Unknown Client",
       email: "",
       goal: "",
@@ -240,12 +246,26 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   const activeWorkoutPlan =
     workoutPlansRaw && workoutPlansRaw.length > 0 ? workoutPlansRaw[0] : null;
 
-  // Fetch supplements
+  // Debug: log env vars and client id
+  console.log('[LOADER DEBUG] SUPABASE_URL:', process.env.SUPABASE_URL);
+  console.log('[LOADER DEBUG] SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY?.slice(0,8));
+  console.log('[LOADER DEBUG] client.id:', client.id);
+
+  // Fetch supplements (normal query)
   const { data: supplements } = await supabase
     .from("supplements")
-    .select("id, name")
+    .select("id, name, user_id")
     .eq("user_id", client.id)
     .order("created_at", { ascending: false });
+  console.log('[LOADER DEBUG] supplements for client.id:', supplements);
+
+  // Fetch supplements (hardcoded user_id)
+  const { data: supplementsDirect } = await supabase
+    .from("supplements")
+    .select("id, name, user_id")
+    .eq("user_id", "d4728752-6a9b-4ed6-9b40-7399cd0372df")
+    .order("created_at", { ascending: false });
+  console.log('[LOADER DEBUG] supplements for hardcoded user_id:', supplementsDirect);
 
   // Fetch weight logs for the client
   const { data: weightLogsRaw } = await supabase
@@ -267,11 +287,128 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   });
 };
 
+export const action: import("@remix-run/node").ActionFunction = async ({ request, params }) => {
+  const supabase = createClient<Database>(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
+  const formData = await request.formData();
+  const intent = formData.get("intent")?.toString();
+  const message = formData.get("message")?.toString();
+  const notes = formData.get("notes")?.toString();
+  const id = formData.get("id")?.toString();
+
+  // Find client by slug or id
+  let { data: client, error } = await supabase
+    .from("users")
+    .select("id, coach_id")
+    .eq("slug", params.clientId)
+    .single();
+  if (!client || error) {
+    const { data: clientById } = await supabase
+      .from("users")
+      .select("id, coach_id")
+      .eq("id", params.clientId)
+      .single();
+    client = clientById;
+  }
+  if (!client) {
+    return json({ error: "Client not found" }, { status: 404 });
+  }
+  const coach_id = client.coach_id;
+
+  // CRUD for coach_updates
+  if (intent === "addUpdate" && message) {
+    const { data, error } = await supabase
+      .from("coach_updates")
+      .insert({ coach_id, client_id: client.id, message })
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to add update" }, { status: 500 });
+    }
+    return json({ update: data });
+  }
+  if (intent === "editUpdate" && id && message) {
+    const { data, error } = await supabase
+      .from("coach_updates")
+      .update({ message, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to update message" }, { status: 500 });
+    }
+    return json({ update: data });
+  }
+  if (intent === "deleteUpdate" && id) {
+    const { data, error } = await supabase
+      .from("coach_updates")
+      .delete()
+      .eq("id", id)
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to delete update" }, { status: 500 });
+    }
+    return json({ deletedUpdate: data });
+  }
+
+  // CRUD for check_ins
+  if (intent === "addCheckIn" && notes) {
+    const { data, error } = await supabase
+      .from("check_ins")
+      .insert({ client_id: client.id, coach_id, notes })
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to add check-in" }, { status: 500 });
+    }
+    return json({ checkIn: data });
+  }
+  if (intent === "editCheckIn" && id && notes) {
+    const { data, error } = await supabase
+      .from("check_ins")
+      .update({ notes })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to update check-in" }, { status: 500 });
+    }
+    return json({ checkIn: data });
+  }
+  if (intent === "deleteCheckIn" && id) {
+    const { data, error } = await supabase
+      .from("check_ins")
+      .delete()
+      .eq("id", id)
+      .select()
+      .single();
+    if (error || !data) {
+      return json({ error: error?.message || "Failed to delete check-in" }, { status: 500 });
+    }
+    return json({ deletedCheckIn: data });
+  }
+
+  return json({ error: "No valid data or intent provided" }, { status: 400 });
+};
+
+// Utility to get the start of the week (Sunday) for a given date
+function getWeekStart(dateStr: string) {
+  const date = new Date(dateStr);
+  const day = date.getDay(); // 0 (Sun) - 6 (Sat)
+  const diff = date.getDate() - day;
+  const weekStart = new Date(date.setDate(diff));
+  weekStart.setHours(0, 0, 0, 0);
+  return weekStart.getTime(); // Use timestamp for grouping
+}
+
 export default function ClientDetails() {
   const {
     client,
-    updates,
-    checkIns: rawCheckIns,
+    updates: loaderUpdates,
+    checkIns: loaderCheckIns,
     weightLogs = [],
     activeMealPlan,
     activeWorkoutPlan,
@@ -282,26 +419,34 @@ export default function ClientDetails() {
   const [showHistory, setShowHistory] = useState(false);
   const fetcher = useFetcher();
 
-  const checkIns = ((rawCheckIns as CheckIn[]) || []).map((c) => ({
-    ...c,
-    date: c.created_at,
-  }));
+  // Local state for updates, checkIns, and supplements
+  const [updates, setUpdates] = useState<Update[]>(loaderUpdates);
+  const [checkIns, setCheckIns] = useState<CheckInNote[]>(
+    ((loaderCheckIns as CheckIn[]) || []).map((c) => ({ id: c.id, date: c.created_at, notes: c.notes }))
+  );
+  const [supplementsState, setSupplements] = useState<Supplement[]>(supplements);
 
-  // Sort checkIns by created_at descending (should already be from loader)
-  const sortedCheckIns = [...checkIns];
-  // Most recent is 'This Week', previous is 'Last Week', rest is history
-  const thisWeekCheckIn = sortedCheckIns[0] || null;
-  const lastWeekCheckIn = sortedCheckIns[1] || null;
-  const historyCheckIns = sortedCheckIns.slice(2);
+  // Sort checkIns by date descending
+  const sortedCheckIns = [...checkIns].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  // Add check-in handler (submits to API, then reloads page)
-  const handleAddCheckIn = (notes: string) => {
-    fetcher.submit(
-      { notes },
-      { method: "post", action: `/api/check-ins/${client.id}` }
-    );
-    setShowAddCheckIn(false);
-  };
+  // Group check-ins by week start (Sunday)
+  const weekGroups: { [weekStart: number]: CheckInNote[] } = {};
+  for (const checkIn of sortedCheckIns) {
+    const weekStart = getWeekStart(checkIn.date);
+    if (!weekGroups[weekStart]) weekGroups[weekStart] = [];
+    weekGroups[weekStart].push(checkIn);
+  }
+  // Get all week start timestamps, sorted descending (most recent week first)
+  const weekStarts = Object.keys(weekGroups)
+    .map(Number)
+    .sort((a, b) => b - a);
+
+  // For each week, pick the most recent check-in
+  const weekCheckIns = weekStarts.map((ws) => weekGroups[ws][0]);
+
+  const thisWeekCheckIn = weekCheckIns[0] || null;
+  const lastWeekCheckIn = weekCheckIns[1] || null;
+  const historyCheckIns = weekCheckIns.slice(2);
 
   // History modal pagination (if needed)
   const [currentPage, setCurrentPage] = useState(1);
@@ -310,10 +455,54 @@ export default function ClientDetails() {
   const hasMore = displayedHistory.length < historyCheckIns.length;
   const handleLoadMore = () => setCurrentPage((p) => p + 1);
 
-  // Reload data after adding a check-in
+  // When checkIns changes (add/delete), reset pagination if modal is open
+  useEffect(() => {
+    if (showHistory) {
+      setCurrentPage(1);
+    }
+  }, [checkIns, showHistory]);
+
+  // Add check-in handler (submits to API, then updates state)
+  const handleAddCheckIn = (notes: string) => {
+    fetcher.submit(
+      { intent: "addCheckIn", notes },
+      { method: "post" }
+    );
+    setShowAddCheckIn(false);
+  };
+
+  // Add update handler (submits to API, then updates state)
+  const handleAddUpdate = (message: string) => {
+    fetcher.submit(
+      { intent: "addUpdate", message },
+      { method: "post" }
+    );
+    setShowAddMessage(false);
+  };
+
+  // Update local state after fetcher completes
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
-      window.location.reload();
+      const data: any = fetcher.data;
+      if (data.checkIn) {
+        setCheckIns((prev) => [{ id: data.checkIn.id, date: data.checkIn.created_at, notes: data.checkIn.notes }, ...prev]);
+      }
+      if (data.update) {
+        setUpdates((prev) => [data.update, ...prev]);
+      }
+      if (data.deletedUpdate) {
+        setUpdates((prev) => prev.filter((u) => u.id !== data.deletedUpdate.id));
+      }
+      if (data.deletedCheckIn) {
+        setCheckIns((prev) => prev.filter((c) => c.id !== data.deletedCheckIn.id));
+      }
+      // Handle supplements add/delete (assume data.supplement or data.deletedSupplement)
+      if (data.supplement) {
+        setSupplements((prev) => [data.supplement, ...prev]);
+      }
+      if (data.deletedSupplement) {
+        setSupplements((prev) => prev.filter((s) => s.id !== data.deletedSupplement.id));
+      }
     }
   }, [fetcher.state, fetcher.data]);
 
@@ -348,7 +537,23 @@ export default function ClientDetails() {
   }
   const workoutSplit =
     activeWorkoutPlan?.title || client.workout_split || "N/A";
-  const supplementCount = supplements?.length || 0;
+  const supplementCount = supplementsState?.length || 0;
+
+  // Edit handlers for updates
+  const deleteUpdate = (id: string) => {
+    fetcher.submit(
+      { intent: "deleteUpdate", id },
+      { method: "post" }
+    );
+  };
+
+  // Edit handlers for check-ins
+  const deleteCheckIn = (id: string) => {
+    fetcher.submit(
+      { intent: "deleteCheckIn", id },
+      { method: "post" }
+    );
+  };
 
   return (
     <ClientDetailLayout>
@@ -360,8 +565,8 @@ export default function ClientDetails() {
                 client={{
                   id: client.id,
                   name: client.name || "Unnamed",
-                  startingWeight: client.starting_weight ?? 0,
-                  currentWeight: client.current_weight ?? 0,
+                  startingWeight: startWeight,
+                  currentWeight: currentWeight,
                   currentMacros: macros,
                   workoutSplit,
                   supplementCount,
@@ -399,8 +604,18 @@ export default function ClientDetails() {
                       key={update.id}
                       className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
                     >
-                      <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
-                        {new Date(update.created_at).toLocaleDateString()}
+                      <div className="flex justify-between items-center">
+                        <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
+                          {new Date(update.created_at).toLocaleDateString()}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            className="text-xs text-red-500 hover:underline"
+                            onClick={() => deleteUpdate(update.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                       <p className="text-secondary dark:text-alabaster">
                         {update.message}
@@ -433,40 +648,50 @@ export default function ClientDetails() {
                 </div>
               }
             >
-              {thisWeekCheckIn || lastWeekCheckIn ? (
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
-                      Last Week
-                    </h4>
-                    <p className="text-sm text-gray-dark dark:text-gray-light">
-                      {lastWeekCheckIn ? (
-                        lastWeekCheckIn.notes
-                      ) : (
-                        <span className="italic text-gray-400">
-                          No check-in yet.
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
-                      This Week
-                    </h4>
-                    <p className="text-sm text-gray-dark dark:text-gray-light">
-                      {thisWeekCheckIn ? (
-                        thisWeekCheckIn.notes
-                      ) : (
-                        <span className="italic text-gray-400">
-                          No check-in yet.
-                        </span>
-                      )}
-                    </p>
-                  </div>
+              <div className="space-y-6">
+                {/* Last Week Section */}
+                <div>
+                  <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
+                    Last Week
+                  </h4>
+                  {lastWeekCheckIn ? (
+                    <div className="flex justify-between items-center mb-1">
+                      <p className="text-sm text-gray-dark dark:text-gray-light">
+                        {lastWeekCheckIn.notes}
+                      </p>
+                      <button
+                        className="text-xs text-red-500 hover:underline ml-4"
+                        onClick={() => deleteCheckIn(lastWeekCheckIn.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="italic text-gray-400 text-sm">No Previous Check In Yet.</div>
+                  )}
                 </div>
-              ) : (
-                <div className="text-gray-500 text-sm">No check-ins yet.</div>
-              )}
+                {/* This Week Section */}
+                <div>
+                  <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
+                    This Week
+                  </h4>
+                  {thisWeekCheckIn ? (
+                    <div className="flex justify-between items-center mb-1">
+                      <p className="text-sm text-gray-dark dark:text-gray-light">
+                        {thisWeekCheckIn.notes}
+                      </p>
+                      <button
+                        className="text-xs text-red-500 hover:underline ml-4"
+                        onClick={() => deleteCheckIn(thisWeekCheckIn.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="italic text-gray-400 text-sm">Add This Week's Check In.</div>
+                  )}
+                </div>
+              </div>
             </Card>
           </div>
 
@@ -524,13 +749,7 @@ export default function ClientDetails() {
         <AddMessageModal
           isOpen={showAddMessage}
           onClose={() => setShowAddMessage(false)}
-          onSubmit={(message) => {
-            fetcher.submit(
-              { message },
-              { method: "post", action: `/api/coach-updates/${client.id}` }
-            );
-            setShowAddMessage(false);
-          }}
+          onSubmit={handleAddUpdate}
         />
 
         <AddCheckInModal
