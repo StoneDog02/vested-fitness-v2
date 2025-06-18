@@ -31,17 +31,34 @@ type Update = {
   timestamp: string;
 };
 
+// Add Food type
+type Food = {
+  id: string;
+  name: string;
+  portion: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+};
+
+// Update Meal type
 type Meal = {
   name: string;
-  description: string;
   time: string;
   completed: boolean;
+  foods: Food[];
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  description?: string;
 };
 
 type Supplement = {
   name: string;
-  timing: "Morning" | "Pre-Workout" | "Post-Workout" | "Evening";
-  completed: boolean;
+  timing?: "Morning" | "Pre-Workout" | "Post-Workout" | "Evening";
+  completed?: boolean;
 };
 
 type ClientDashboardData = {
@@ -49,6 +66,9 @@ type ClientDashboardData = {
   meals: Meal[];
   workouts: DailyWorkout[];
   supplements: Supplement[];
+  workoutCompliance: number;
+  mealCompliance: number;
+  weightChange: number;
 };
 
 type Client = {
@@ -115,11 +135,208 @@ export const loader: LoaderFunction = async ({ request }) => {
     );
     const { data: user } = await supabase
       .from("users")
-      .select("id, role, coach_id")
+      .select("id, role, coach_id, starting_weight, current_weight")
       .eq("auth_id", authId)
       .single();
     if (user) {
       coachId = user.role === "coach" ? user.id : user.coach_id;
+      if (user.role === "client") {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dayOfWeek = today.getDay();
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - dayOfWeek);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 7);
+        const { data: workouts } = await supabase
+          .from("workouts")
+          .select("id, completed, date")
+          .eq("user_id", user.id)
+          .gte("date", weekStart.toISOString().slice(0, 10))
+          .lt("date", weekEnd.toISOString().slice(0, 10));
+        const totalWorkouts = (workouts ?? []).length;
+        const completedWorkouts = (workouts ?? []).filter((w: any) => w.completed).length;
+        const workoutCompliance = totalWorkouts > 0 ? Math.round((completedWorkouts / totalWorkouts) * 100) : 0;
+        const { data: mealPlans } = await supabase
+          .from("meal_plans")
+          .select("id, is_active")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .limit(1);
+        let meals: Meal[] = [];
+        if (mealPlans && mealPlans.length > 0) {
+          const planId = mealPlans[0].id;
+          let mealsRaw = null;
+          let mealsError = null;
+          try {
+            const result = await supabase
+              .from("meals")
+              .select("id, name, time")
+              .eq("meal_plan_id", planId);
+            mealsRaw = result.data;
+            mealsError = result.error;
+          } catch (err) {
+            /* ignore */
+          }
+          // For each meal, fetch foods and calculate macros
+          meals = [];
+          if (mealsRaw && mealsRaw.length > 0) {
+            for (const meal of mealsRaw) {
+              let foodsRaw: Food[] = [];
+              try {
+                const foodsResult = await supabase
+                  .from("foods")
+                  .select("id, name, portion, calories, protein, carbs, fat")
+                  .eq("meal_id", meal.id);
+                foodsRaw = (foodsResult.data as Food[]) || [];
+              } catch (err) {
+                /* ignore */
+              }
+              // Calculate macros
+              let calories = 0, protein = 0, carbs = 0, fat = 0;
+              for (const food of foodsRaw) {
+                calories += Number(food.calories) || 0;
+                protein += Number(food.protein) || 0;
+                carbs += Number(food.carbs) || 0;
+                fat += Number(food.fat) || 0;
+              }
+              meals.push({
+                name: meal.name,
+                time: meal.time || "",
+                foods: foodsRaw,
+                calories,
+                protein,
+                carbs,
+                fat,
+                completed: false, // always false, just for display
+                description: ""
+              });
+            }
+          }
+        }
+        const { data: mealCompletions } = await supabase
+          .from("meal_completions")
+          .select("meal_id, completed_at")
+          .eq("user_id", user.id)
+          .gte("completed_at", weekStart.toISOString())
+          .lt("completed_at", weekEnd.toISOString());
+        const completedMeals = (mealCompletions ?? []).length;
+        const totalPossibleMeals = meals.length * 7;
+        const mealCompliance = totalPossibleMeals > 0 ? Math.round((completedMeals / totalPossibleMeals) * 100) : 0;
+        const { data: weightLogs } = await supabase
+          .from("weight_logs")
+          .select("weight, logged_at")
+          .eq("user_id", user.id)
+          .order("logged_at", { ascending: true });
+        let weightChange = 0;
+        if (weightLogs && weightLogs.length > 0) {
+          const firstWeight = weightLogs[0].weight;
+          const lastWeight = weightLogs[weightLogs.length - 1].weight;
+          weightChange = lastWeight - firstWeight;
+        } else if (user.starting_weight && user.current_weight) {
+          weightChange = user.current_weight - user.starting_weight;
+        }
+        // Fetch coach updates for today only
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(startOfDay);
+        endOfDay.setDate(startOfDay.getDate() + 1);
+        const { data: updatesRaw } = await supabase
+          .from("coach_updates")
+          .select("message, created_at")
+          .eq("client_id", user.id)
+          .gte("created_at", startOfDay.toISOString())
+          .lt("created_at", endOfDay.toISOString())
+          .order("created_at", { ascending: false });
+        const updates = (updatesRaw ?? []).map((u: any) => ({
+          message: u.message,
+          timestamp: new Date(u.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        }));
+        // Fetch active workout plan and today's workout for the client
+        let todaysWorkouts: DailyWorkout[] = [];
+        const { data: workoutPlans } = await supabase
+          .from("workout_plans")
+          .select("id, title, is_active")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .limit(1);
+        if (workoutPlans && workoutPlans.length > 0) {
+          const planId = workoutPlans[0].id;
+          const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          const todayDay = daysOfWeek[new Date().getDay()];
+          const { data: planDays } = await supabase
+            .from("workout_plan_days")
+            .select("id, day_of_week, is_rest, workout_id")
+            .eq("workout_plan_id", planId)
+            .eq("day_of_week", todayDay)
+            .limit(1);
+          if (planDays && planDays.length > 0 && !planDays[0].is_rest && planDays[0].workout_id) {
+            const { data: workout, error: workoutError } = await supabase
+              .from("workouts")
+              .select("id, name, type")
+              .eq("id", planDays[0].workout_id)
+              .single();
+            if (workout) {
+              // Fetch exercises for this workout
+              const { data: exercisesRaw } = await supabase
+                .from("exercises")
+                .select("id, name, description, type")
+                .eq("workout_id", workout.id);
+              // For each exercise, fetch sets
+              const exercises = await Promise.all((exercisesRaw ?? []).map(async (ex: any) => {
+                const { data: setsRaw } = await supabase
+                  .from("exercise_sets")
+                  .select("set_number, reps")
+                  .eq("exercise_id", ex.id)
+                  .order("set_number", { ascending: true });
+                return {
+                  id: ex.id,
+                  name: ex.name,
+                  description: ex.description,
+                  type: ex.type,
+                  sets: (setsRaw ?? []).map((set: any) => ({
+                    setNumber: set.set_number,
+                    reps: set.reps,
+                    completed: false,
+                  })),
+                };
+              }));
+              // Group exercises by type
+              const groups = Array.from(new Set(exercises.map(ex => ex.type))).map(type => ({
+                type,
+                exercises: exercises.filter(ex => ex.type === type),
+              }));
+              todaysWorkouts.push({
+                id: workout.id,
+                name: workout.name,
+                exercises,
+                groups,
+                date: today.toISOString().slice(0, 10),
+                completed: false,
+              });
+            }
+          }
+        }
+        // Fetch supplements for this client
+        const { data: supplementsRaw } = await supabase
+          .from("supplements")
+          .select("id, name")
+          .eq("user_id", user.id);
+        const supplements = (supplementsRaw ?? []).map((s: any) => ({
+          name: s.name,
+        }));
+        const clientData: ClientDashboardData = {
+          updates,
+          meals,
+          workouts: todaysWorkouts,
+          supplements,
+          workoutCompliance,
+          mealCompliance,
+          weightChange,
+        };
+        return json({ clientData });
+      }
     }
     if (coachId) {
       // Fetch all clients for this coach
@@ -273,7 +490,6 @@ export const loader: LoaderFunction = async ({ request }) => {
 };
 
 export default function Dashboard() {
-  console.log("Dashboard component rendered");
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const data = useLoaderData<LoaderData>();
   const { clientData } = data;
@@ -282,10 +498,6 @@ export default function Dashboard() {
     ?.data as { role: "coach" | "client" };
   const role = parentData?.role;
   const coachId = data.coachId;
-
-  // Debug logs
-  console.log("Dashboard loader data:", data);
-  console.log("Dashboard coachId prop to modal:", coachId);
 
   return (
     <>
@@ -450,20 +662,32 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-2">Workout Compliance</h3>
-              <p className="text-4xl font-bold">85%</p>
+              <p className="text-4xl font-bold">
+                {typeof clientData?.workoutCompliance === "number" && !isNaN(clientData.workoutCompliance)
+                  ? `${clientData.workoutCompliance}%`
+                  : "-%"}
+              </p>
               <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
             </Card>
 
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-2">Meal Compliance</h3>
-              <p className="text-4xl font-bold">92%</p>
+              <p className="text-4xl font-bold">
+                {typeof clientData?.mealCompliance === "number" && !isNaN(clientData.mealCompliance)
+                  ? `${clientData.mealCompliance}%`
+                  : "-%"}
+              </p>
               <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
             </Card>
 
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-2">Weight Change</h3>
-              <p className="text-4xl font-bold text-green-500">-2.5 lbs</p>
-              <p className="text-sm text-muted-foreground mt-2">This month</p>
+              <p className="text-4xl font-bold text-green-500">
+                {typeof clientData?.weightChange === "number" && !isNaN(clientData.weightChange)
+                  ? `${clientData.weightChange > 0 ? "+" : ""}${clientData.weightChange} lbs`
+                  : "- lbs"}
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">Since sign up</p>
             </Card>
           </div>
 
@@ -473,94 +697,103 @@ export default function Dashboard() {
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Recent Updates</h3>
               <div className="space-y-4">
-                {clientData?.updates.map((update, index) => (
-                  <div key={index} className="flex items-start gap-3">
-                    <div className="w-2 h-2 mt-2 rounded-full bg-primary" />
-                    <div>
-                      <p className="text-sm text-secondary dark:text-alabaster">
-                        {update.message}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {update.timestamp}
-                      </p>
+                {clientData?.updates && clientData.updates.length > 0 ? (
+                  clientData.updates.map((update, index) => (
+                    <div key={index} className="flex items-start gap-3">
+                      <div className="w-2 h-2 mt-2 rounded-full bg-primary" />
+                      <div>
+                        <p className="text-sm text-secondary dark:text-alabaster">
+                          {update.message}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {update.timestamp}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <div className="text-gray-dark dark:text-gray-light text-sm">No Updates From Coach</div>
+                )}
               </div>
             </Card>
 
             {/* Today's Meals */}
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Today&apos;s Meals</h3>
-              <div className="space-y-4">
-                {clientData?.meals.map((meal, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="font-medium">{meal.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {meal.time}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {meal.description}
-                      </p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={meal.completed}
-                      readOnly
-                      className="w-4 h-4 rounded border-gray-300"
-                    />
+              <div className="rounded-xl bg-white shadow p-6 space-y-6">
+                {(clientData?.meals?.length ?? 0) === 0 ? (
+                  <div className="text-gray-500">No meals planned for today.</div>
+                ) : (
+                  <div className="space-y-6">
+                    {(clientData?.meals ?? []).map((meal, idx) => (
+                      <div key={meal.name + meal.time} className="rounded-lg bg-gray-50 shadow-sm p-5">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <div className="text-xl font-semibold">{meal.name}</div>
+                            <div className="text-gray-500">{meal.time.slice(0, 5)}</div>
+                          </div>
+                          <div className="flex flex-col items-end">
+                            <span className="font-bold text-lg">{meal.calories} cal</span>
+                            <div className="flex gap-2 mt-1">
+                              <span className="bg-blue-100 text-blue-800 rounded-full px-2 py-0.5 text-xs font-medium">P: {meal.protein}g</span>
+                              <span className="bg-green-100 text-green-800 rounded-full px-2 py-0.5 text-xs font-medium">C: {meal.carbs}g</span>
+                              <span className="bg-yellow-100 text-yellow-800 rounded-full px-2 py-0.5 text-xs font-medium">F: {meal.fat}g</span>
+                            </div>
+                          </div>
+                        </div>
+                        <ul className="mt-3 pl-4 border-l-2 border-gray-100 space-y-1">
+                          {meal.foods.map(food => (
+                            <li key={food.id} className="text-gray-700">
+                              <span className="font-medium">{food.name}</span> ({food.portion}) – 
+                              <span className="ml-1 text-xs text-gray-500">
+                                {food.calories} cal, P: {food.protein}g, C: {food.carbs}g, F: {food.fat}g
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             </Card>
 
             {/* Today's Workouts */}
             <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-4">
-                Today&apos;s Workouts
-              </h3>
-              <div className="space-y-4">
-                {clientData?.workouts.map((workout) => (
-                  <div
-                    key={workout.id}
-                    className="p-4 bg-gray-lightest dark:bg-secondary-light/5 rounded-lg"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <p className="font-medium text-secondary dark:text-alabaster">
-                          {workout.name}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {workout.exercises.length} exercises
-                        </p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={workout.completed}
-                        readOnly
-                        className="w-4 h-4 rounded border-gray-300"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      {workout.exercises.map((exercise) => (
-                        <div key={exercise.id} className="text-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="text-secondary dark:text-alabaster/90">
-                              {exercise.name}
-                            </span>
-                            <span className="text-muted-foreground">
-                              {exercise.description}
-                            </span>
-                          </div>
+              <h3 className="font-semibold text-lg mb-4">Today's Workouts</h3>
+              <div className="rounded-xl bg-white shadow p-6 space-y-6">
+                {(clientData?.workouts?.length ?? 0) === 0 ? (
+                  <div className="text-gray-500">No workouts planned for today.</div>
+                ) : (
+                  <div className="space-y-6">
+                    {(clientData?.workouts ?? []).map((workout) => (
+                      <div key={workout.id} className="rounded-lg bg-gray-50 shadow-sm p-5">
+                        <div className="text-xl font-semibold mb-2">{workout.name}</div>
+                        <div className="space-y-4">
+                          {workout.groups?.map(group => (
+                            <div key={group.type}>
+                              <span className="bg-green-100 text-green-800 rounded-full px-3 py-1 text-xs font-medium mb-2 inline-block">{group.type}</span>
+                              <ul className="mt-2 pl-4 border-l-2 border-gray-100 space-y-2">
+                                {group.exercises.map((exercise) => {
+                                  const setsCount = exercise.sets.length;
+                                  const reps = setsCount > 0 ? exercise.sets[0].reps : "-";
+                                  return (
+                                    <li key={exercise.id} className="text-gray-700">
+                                      <span className="font-medium">{exercise.name}</span>
+                                      <span className="ml-2 text-xs text-gray-500">
+                                        {setsCount} set{setsCount !== 1 ? "s" : ""} x {reps} reps
+                                      </span>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             </Card>
 
@@ -569,27 +802,11 @@ export default function Dashboard() {
               <h3 className="font-semibold text-lg mb-4">
                 Today&apos;s Supplements
               </h3>
-              <div className="space-y-4">
+              <ul className="list-disc pl-6 space-y-2">
                 {clientData?.supplements.map((supplement, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="font-medium">{supplement.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {supplement.timing}
-                      </p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={supplement.completed}
-                      readOnly
-                      className="w-4 h-4 rounded border-gray-300"
-                    />
-                  </div>
+                  <li key={index} className="font-medium">{supplement.name}</li>
                 ))}
-              </div>
+              </ul>
             </Card>
           </div>
         </div>

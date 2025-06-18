@@ -127,6 +127,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     activeMealPlan?: MealPlan | null;
     activeWorkoutPlan?: WorkoutPlan | null;
     supplements?: Supplement[];
+    firstWeightLog?: { weight: number };
   }[] = [];
   if (coachId) {
     const supabase = createClient<Database>(
@@ -141,9 +142,10 @@ export const loader: LoaderFunction = async ({ request }) => {
       .eq("coach_id", coachId)
       .eq("role", "client");
     if (error) console.log("[LOADER] Supabase error:", error);
+    let clientsWithWeightLogs: typeof clients = [];
     if (data) {
-      // For each client, fetch their active meal plan, workout plan, and supplements
-      clients = await Promise.all(
+      // For each client, fetch their active meal plan, workout plan, supplements, and first weight log
+      clientsWithWeightLogs = await Promise.all(
         data.map(async (client) => {
           // Active meal plan
           const { data: mealPlansRaw } = await supabase
@@ -191,15 +193,26 @@ export const loader: LoaderFunction = async ({ request }) => {
             .eq("user_id", client.id);
           const supplements = supplementsRaw || [];
 
+          // First weight log
+          const { data: firstWeightLogRaw } = await supabase
+            .from("weight_logs")
+            .select("weight")
+            .eq("user_id", client.id)
+            .order("logged_at", { ascending: true })
+            .limit(1);
+          const firstWeightLog = firstWeightLogRaw && firstWeightLogRaw.length > 0 ? firstWeightLogRaw[0] : undefined;
+
           return {
             ...client,
             activeMealPlan,
             activeWorkoutPlan,
             supplements,
+            firstWeightLog,
           };
         })
       );
     }
+    clients = clientsWithWeightLogs;
     console.log("[LOADER] Filtered client users from Supabase:", clients);
   }
 
@@ -223,6 +236,7 @@ export default function ClientsIndex() {
       activeMealPlan?: MealPlan | null;
       activeWorkoutPlan?: WorkoutPlan | null;
       supplements?: Supplement[];
+      firstWeightLog?: { weight: number };
     }[];
   }>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -306,6 +320,8 @@ export default function ClientsIndex() {
           const workoutSplit = client.activeWorkoutPlan?.title || "N/A";
           // Supplements
           const supplementCount = client.supplements?.length || 0;
+          // Use first weight log as startingWeight if it exists, else fallback
+          const startingWeight = client.firstWeightLog?.weight ?? client.starting_weight ?? 0;
           return (
             <Link
               key={client.id}
@@ -318,7 +334,7 @@ export default function ClientsIndex() {
                   client={{
                     id: client.id,
                     name: client.name || "Unnamed",
-                    startingWeight: client.starting_weight ?? 0,
+                    startingWeight,
                     currentWeight: client.current_weight ?? 0,
                     currentMacros: macros,
                     workoutSplit,

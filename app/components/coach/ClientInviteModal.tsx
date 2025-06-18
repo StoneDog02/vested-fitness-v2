@@ -25,8 +25,6 @@ export default function ClientInviteModal({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
 
-  console.log("ClientInviteModal coachId:", coachId);
-
   // Close modal and reload route on successful invite
   React.useEffect(() => {
     if (fetcher.data?.success) {
@@ -50,7 +48,6 @@ export default function ClientInviteModal({
       size="md"
     >
       <div className="space-y-6">
-        <div style={{ color: "red" }}>DEBUG coachId: {coachId}</div>
         {fetcher.data?.success ? (
           <div className="bg-green-500/10 text-green-600 dark:text-green-400 p-4 rounded-lg mb-4">
             Invitation sent successfully to {fetcher.data.email}!

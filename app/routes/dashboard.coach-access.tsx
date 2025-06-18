@@ -1,20 +1,19 @@
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import { parse } from "cookie";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
+import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
+import LineChart from "~/components/ui/LineChart";
+import { ResponsiveContainer } from "recharts";
 
 export const meta: MetaFunction = () => {
   return [
@@ -78,29 +77,54 @@ const getChangeColor = (change: number, goal: string) => {
   }
 };
 
-export const loader = async () => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!
+    process.env.SUPABASE_SERVICE_KEY!
   );
 
-  // Get the current user's ID
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return json({ updates: [], goal: mockClientData.goal });
+  // Parse cookies to get Supabase auth token
+  const cookies = parse(request.headers.get("cookie") || "");
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  let accessToken;
+  if (supabaseAuthCookieKey) {
+    try {
+      const decoded = Buffer.from(
+        cookies[supabaseAuthCookieKey],
+        "base64"
+      ).toString("utf-8");
+      const [access] = JSON.parse(JSON.parse(decoded));
+      accessToken = access;
+    } catch (e) {
+      accessToken = undefined;
+    }
+  }
+
+  let authId;
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken);
+      authId = decoded && typeof decoded === "object" && "sub" in decoded
+        ? decoded.sub
+        : undefined;
+    } catch (e) {
+      authId = undefined;
+    }
+  }
+  if (!authId) {
+    return json({ updates: [], goal: mockClientData.goal, checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [] });
   }
 
   // Get the client's user record
   const { data: clientUser } = await supabase
     .from("users")
     .select("id, goal")
-    .eq("auth_id", user.id)
+    .eq("auth_id", authId)
     .single();
-
   if (!clientUser) {
-    return json({ updates: [], goal: mockClientData.goal });
+    return json({ updates: [], goal: mockClientData.goal, checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [] });
   }
 
   // Get the updates
@@ -110,40 +134,120 @@ export const loader = async () => {
     .eq("client_id", clientUser.id)
     .order("created_at", { ascending: false });
 
-  if (error) {
-    console.error("Error fetching updates:", error);
-    return json({ updates: [], goal: mockClientData.goal });
+  // Get check-in notes for this client
+  const { data: checkIns } = await supabase
+    .from("check_ins")
+    .select("id, notes, created_at")
+    .eq("client_id", clientUser.id)
+    .order("created_at", { ascending: false });
+
+  // Get weight logs for the client
+  const { data: weightLogsRaw } = await supabase
+    .from("weight_logs")
+    .select("id, weight, logged_at")
+    .eq("user_id", clientUser.id)
+    .order("logged_at", { ascending: true });
+  const weightLogs = weightLogsRaw || [];
+
+  // Helper to get week start (Sunday)
+  function getWeekStart(date: Date) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - d.getDay());
+    return d;
   }
 
+  const today = new Date();
+  const thisWeekStart = getWeekStart(today);
+  const lastWeekStart = new Date(thisWeekStart);
+  lastWeekStart.setDate(thisWeekStart.getDate() - 7);
+  const nextWeekStart = new Date(thisWeekStart);
+  nextWeekStart.setDate(thisWeekStart.getDate() + 7);
+
+  let thisWeekNote = null;
+  let lastWeekNote = null;
+
+  if (checkIns && checkIns.length > 0) {
+    // Find the most recent check-in for this week
+    thisWeekNote = checkIns.find((ci) => {
+      const created = new Date(ci.created_at);
+      return created >= thisWeekStart && created < nextWeekStart;
+    });
+    // Find the most recent check-in for last week
+    lastWeekNote = checkIns.find((ci) => {
+      const created = new Date(ci.created_at);
+      return created >= lastWeekStart && created < thisWeekStart;
+    });
+  }
+
+  // Filter updates to only those from the last 7 days
+  const now = new Date();
+  const oneWeekAgo = new Date(now);
+  oneWeekAgo.setDate(now.getDate() - 7);
+  const recentUpdates = (updates || []).filter((u: any) => {
+    const created = new Date(u.created_at);
+    return created >= oneWeekAgo;
+  });
+  // Container grows to fit up to 3 updates, scrolls if more
+  const containerMaxHeight = recentUpdates.length > 3 ? 'max-h-40' : '';
+  const showScrollIndicator = recentUpdates.length > 3;
+
   return json({
-    updates,
+    updates: updates || [],
     goal: clientUser.goal || mockClientData.goal,
+    checkInNotes: {
+      thisWeek: thisWeekNote || null,
+      lastWeek: lastWeekNote || null,
+    },
+    allCheckIns: checkIns || [],
+    allUpdates: updates || [],
+    weightLogs,
   });
 };
 
 export default function CoachAccess() {
-  const { updates, goal } = useLoaderData<typeof loader>();
+  const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [] } = useLoaderData<typeof loader>();
+  const [showUpdateHistory, setShowUpdateHistory] = useState(false);
+  const [showCheckInHistory, setShowCheckInHistory] = useState(false);
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [newWeight, setNewWeight] = useState("");
-  const [mockWeightData, setMockWeightData] = useState(initialWeightData);
+  const [weightLogs, setWeightLogs] = useState(initialWeightLogs);
 
-  const handleAddWeight = () => {
-    if (!newWeight) return;
+  // Filter updates to only those from the last 7 days
+  const now = new Date();
+  const oneWeekAgo = new Date(now);
+  oneWeekAgo.setDate(now.getDate() - 7);
+  const recentUpdates = (updates || []).filter((u: any) => {
+    const created = new Date(u.created_at);
+    return created >= oneWeekAgo;
+  });
+  // Container grows to fit up to 3 updates, scrolls if more
+  const containerMaxHeight = recentUpdates.length > 3 ? 'max-h-40' : '';
+  const showScrollIndicator = recentUpdates.length > 3;
 
-    const today = new Date().toISOString().split("T")[0];
-    const newWeightEntry = {
-      date: today,
-      weight: parseFloat(newWeight),
-    };
+  // Fetch latest weight logs after adding starting weight
+  async function fetchWeightLogs() {
+    try {
+      const res = await fetch("/api/get-weight-logs");
+      if (res.ok) {
+        const data = await res.json();
+        setWeightLogs(data.weightLogs || []);
+      }
+    } catch (err) {
+    }
+  }
 
-    setMockWeightData((prevData) => [...prevData, newWeightEntry]);
-    setShowAddWeight(false);
-    setNewWeight("");
-  };
-
-  const startWeight = mockWeightData[0].weight;
-  const currentWeight = mockWeightData[mockWeightData.length - 1].weight;
-  const totalChange = currentWeight - startWeight;
+  // Prepare chart data from live weight logs
+  const hasWeightLogs = weightLogs && weightLogs.length > 0;
+  const chartData = hasWeightLogs
+    ? weightLogs.map((w: any) => ({
+        date: w.logged_at,
+        weight: Number(w.weight),
+      }))
+    : [];
+  const startWeight = hasWeightLogs ? chartData[0].weight : 0;
+  const currentWeight = hasWeightLogs ? chartData[chartData.length - 1].weight : 0;
+  const totalChange = hasWeightLogs ? currentWeight - startWeight : 0;
 
   return (
     <div className="p-6">
@@ -155,9 +259,19 @@ export default function CoachAccess() {
         {/* Left column with three stacked cards */}
         <div className="space-y-6">
           {/* Updates from Coach */}
-          <Card title="Updates from Coach">
-            <div className="space-y-4">
-              {updates.map((update) => (
+          <Card title={
+            <div className="flex items-center justify-between w-full">
+              <span>Updates from Coach</span>
+              <button
+                onClick={() => setShowUpdateHistory(true)}
+                className="text-xs text-primary hover:underline"
+              >
+                History
+              </button>
+            </div>
+          }>
+            <div className={`relative space-y-4 overflow-y-auto pr-2 custom-scrollbar ${containerMaxHeight}`} style={{ maxHeight: recentUpdates.length > 3 ? '10rem' : 'none' }}>
+              {recentUpdates.map((update: any) => (
                 <div
                   key={update.id}
                   className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
@@ -170,116 +284,170 @@ export default function CoachAccess() {
                   </p>
                 </div>
               ))}
+              {recentUpdates.length === 0 && (
+                <div className="text-gray-dark dark:text-gray-light text-sm">No Updates From Coach</div>
+              )}
+              {showScrollIndicator && (
+                <div className="pointer-events-none absolute bottom-0 left-0 w-full h-6 bg-gradient-to-t from-white dark:from-night to-transparent" />
+              )}
             </div>
           </Card>
+          <UpdateHistoryModal
+            isOpen={showUpdateHistory}
+            onClose={() => setShowUpdateHistory(false)}
+            updates={allUpdates}
+            emptyMessage="No updates yet."
+          />
 
           {/* Check In Notes */}
-          <Card title="Check In Notes">
+          <Card title={
+            <div className="flex items-center justify-between w-full">
+              <span>Check In Notes</span>
+              <button
+                onClick={() => setShowCheckInHistory(true)}
+                className="text-xs text-primary hover:underline"
+              >
+                History
+              </button>
+            </div>
+          }>
             <div className="space-y-4">
               <div>
                 <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
                   Last Week
                 </h4>
-                <p className="text-sm text-gray-dark dark:text-gray-light">
-                  {mockCheckInNotes.lastWeek}
-                </p>
+                {checkInNotes.lastWeek ? (
+                  <>
+                    <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
+                      {new Date(checkInNotes.lastWeek.created_at).toLocaleDateString()}
+                    </div>
+                    <p className="text-sm text-gray-dark dark:text-gray-light">
+                      {checkInNotes.lastWeek.notes}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-dark dark:text-gray-light">No Check In Notes for last week.</p>
+                )}
               </div>
               <div>
                 <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
                   This Week
                 </h4>
-                <p className="text-sm text-gray-dark dark:text-gray-light">
-                  {mockCheckInNotes.thisWeek}
-                </p>
+                {checkInNotes.thisWeek ? (
+                  <>
+                    <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
+                      {new Date(checkInNotes.thisWeek.created_at).toLocaleDateString()}
+                    </div>
+                    <p className="text-sm text-gray-dark dark:text-gray-light">
+                      {checkInNotes.thisWeek.notes}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-dark dark:text-gray-light">No Check In Notes for this week yet</p>
+                )}
               </div>
             </div>
           </Card>
+          <CheckInHistoryModal
+            isOpen={showCheckInHistory}
+            onClose={() => setShowCheckInHistory(false)}
+            checkIns={allCheckIns.map(ci => ({ id: ci.id, date: ci.created_at, notes: ci.notes }))}
+            onLoadMore={() => {}}
+            hasMore={false}
+            emptyMessage="No history yet."
+          />
         </div>
 
         {/* Weight Chart */}
         <div className="md:col-span-2">
-          <Card
-            title={
-              <div className="flex items-baseline gap-2">
-                <span>Weight Progress</span>
-                <span className="text-sm text-gray-dark dark:text-gray-light">
-                  ({goal})
-                </span>
-              </div>
-            }
-          >
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={mockWeightData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis domain={["dataMin - 5", "dataMax + 5"]} />
-                  <Tooltip />
-                  <Line
-                    type="monotone"
-                    dataKey="weight"
-                    stroke="#8884d8"
-                    activeDot={{ r: 8 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+          <Card title={
+            <div className="flex items-center justify-between w-full">
+              <span>Weight Progress</span>
             </div>
-            <div className="mt-4">
-              <div className="flex justify-between items-center mb-4">
-                <p className="text-sm text-gray-dark dark:text-gray-light text-center flex-1">
-                  Starting Weight: {startWeight} lbs
-                </p>
-                <p className="text-sm text-gray-dark dark:text-gray-light text-center flex-1">
-                  Current Weight: {currentWeight} lbs
-                </p>
-                <p
-                  className={`text-sm text-center flex-1 ${getChangeColor(
-                    totalChange,
-                    goal
-                  )}`}
-                >
-                  Total Change: {totalChange} lbs
-                </p>
-              </div>
+          }>
+            <div className="w-full" style={{ height: 350 }}>
               {showAddWeight ? (
-                <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex flex-col items-center gap-4 bg-gray-50 dark:bg-night rounded-xl p-6 shadow-md w-full max-w-xs mx-auto mt-12">
+                  <label htmlFor="add-weight" className="block text-sm font-medium text-secondary dark:text-alabaster mb-1">
+                    {hasWeightLogs ? "Add Weight" : "Set Your Starting Weight"}
+                  </label>
                   <input
+                    id="add-weight"
                     type="number"
                     value={newWeight}
-                    onChange={(e) => setNewWeight(e.target.value)}
-                    placeholder="Enter weight in lbs"
-                    className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-md bg-white dark:bg-night text-secondary dark:text-alabaster"
+                    onChange={e => setNewWeight(e.target.value)}
+                    placeholder={hasWeightLogs ? "Enter weight (lbs)" : "Enter starting weight (lbs)"}
+                    className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-md bg-white dark:bg-night text-secondary dark:text-alabaster text-center text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
                   />
-                  <div className="flex gap-2 sm:flex-shrink-0">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    {hasWeightLogs ? "Log your new weight for today." : "This will be your baseline for progress tracking."}
+                  </span>
+                  <div className="flex gap-2 w-full">
                     <Button
-                      onClick={handleAddWeight}
                       variant="primary"
-                      className="flex-1 sm:flex-initial"
+                      className="flex-1"
+                      onClick={async () => {
+                        if (!newWeight) return;
+                        await fetch("/api/set-starting-weight", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ weight: newWeight }),
+                        });
+                        setShowAddWeight(false);
+                        setNewWeight("");
+                        await fetchWeightLogs();
+                      }}
                     >
                       Save
                     </Button>
                     <Button
+                      variant="outline"
+                      className="flex-1"
                       onClick={() => setShowAddWeight(false)}
-                      variant="secondary"
-                      className="flex-1 sm:flex-initial"
                     >
                       Cancel
                     </Button>
                   </div>
                 </div>
-              ) : (
-                <Button
-                  onClick={() => setShowAddWeight(true)}
-                  variant="primary"
-                  className="w-full"
-                >
-                  + Add Weight
-                </Button>
-              )}
+              ) : hasWeightLogs ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} />
+                </ResponsiveContainer>
+              ) : null}
             </div>
+            {/* Add Weight button below the graph, centered */}
+            {hasWeightLogs && !showAddWeight && (
+              <div className="flex justify-center mt-4">
+                <Button variant="primary" onClick={() => setShowAddWeight(true)}>
+                  Add Weight
+                </Button>
+              </div>
+            )}
           </Card>
         </div>
       </div>
     </div>
   );
+}
+
+// Add this at the very end of the file
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.innerHTML = `
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: linear-gradient(to top, #e5e7eb 60%, transparent 100%);
+      border-radius: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: #e5e7eb transparent;
+    }
+  `;
+  document.head.appendChild(style);
 }

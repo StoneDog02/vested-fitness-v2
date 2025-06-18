@@ -23,4 +23,5 @@ export interface DailyWorkout {
   exercises: Exercise[];
   date: string;
   completed: boolean;
+  groups?: { type: WorkoutType; exercises: Exercise[] }[];
 }

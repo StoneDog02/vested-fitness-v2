@@ -5,6 +5,7 @@ interface CheckInNote {
   id: string;
   date: string;
   notes: string;
+  formattedDate?: string;
 }
 
 interface CheckInHistoryModalProps {
@@ -38,7 +39,7 @@ export default function CheckInHistoryModal({
               className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
             >
               <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
-                {new Date(checkIn.date).toLocaleDateString()}
+                {checkIn.formattedDate ? checkIn.formattedDate : (() => { const d = new Date(checkIn.date); const mm = String(d.getMonth() + 1).padStart(2, '0'); const dd = String(d.getDate()).padStart(2, '0'); const yyyy = d.getFullYear(); return `${mm}/${dd}/${yyyy}`; })()}
               </div>
               <p className="text-sm text-secondary dark:text-alabaster">
                 {checkIn.notes}

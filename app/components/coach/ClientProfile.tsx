@@ -95,14 +95,6 @@ export default function ClientProfile({
             {client.workoutSplit}
           </p>
         </div>
-        <div>
-          <p className="text-gray-dark dark:text-gray-light text-sm mb-1">
-            Supplements
-          </p>
-          <p className="text-secondary dark:text-alabaster">
-            {client.supplementCount}
-          </p>
-        </div>
       </div>
     </div>
   );

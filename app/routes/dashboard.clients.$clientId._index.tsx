@@ -5,6 +5,7 @@ import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import AddMessageModal from "~/components/coach/AddMessageModal";
 import AddCheckInModal from "~/components/coach/AddCheckInModal";
 import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
+import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
 import { useState, useEffect } from "react";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
@@ -12,6 +13,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import LineChart from "~/components/ui/LineChart";
 import { calculateMacros } from "~/lib/utils";
+import { ResponsiveContainer } from "recharts";
 
 export const meta: MetaFunction = () => {
   return [
@@ -404,6 +406,15 @@ function getWeekStart(dateStr: string) {
   return weekStart.getTime(); // Use timestamp for grouping
 }
 
+// Helper to format date as mm/dd/yyyy
+function formatDateMMDDYYYY(dateStr: string) {
+  const date = new Date(dateStr);
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  return `${mm}/${dd}/${yyyy}`;
+}
+
 export default function ClientDetails() {
   const {
     client,
@@ -417,6 +428,7 @@ export default function ClientDetails() {
   const [showAddMessage, setShowAddMessage] = useState(false);
   const [showAddCheckIn, setShowAddCheckIn] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showUpdateHistory, setShowUpdateHistory] = useState(false);
   const fetcher = useFetcher();
 
   // Local state for updates, checkIns, and supplements
@@ -586,12 +598,20 @@ export default function ClientDetails() {
               title={
                 <div className="flex items-center justify-between w-full">
                   <span>Updates to Client</span>
-                  <button
-                    onClick={() => setShowAddMessage(true)}
-                    className="text-sm text-primary hover:underline"
-                  >
-                    +Add Message
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowUpdateHistory(true)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      History
+                    </button>
+                    <button
+                      onClick={() => setShowAddMessage(true)}
+                      className="text-sm text-primary hover:underline"
+                    >
+                      +Add Message
+                    </button>
+                  </div>
                 </div>
               }
             >
@@ -625,6 +645,12 @@ export default function ClientDetails() {
                 )}
               </div>
             </Card>
+            <UpdateHistoryModal
+              isOpen={showUpdateHistory}
+              onClose={() => setShowUpdateHistory(false)}
+              updates={updates}
+              emptyMessage="No updates yet."
+            />
 
             {/* Check In Notes */}
             <Card
@@ -656,9 +682,12 @@ export default function ClientDetails() {
                   </h4>
                   {lastWeekCheckIn ? (
                     <div className="flex justify-between items-center mb-1">
-                      <p className="text-sm text-gray-dark dark:text-gray-light">
-                        {lastWeekCheckIn.notes}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">{formatDateMMDDYYYY(lastWeekCheckIn.date)}</span>
+                        <p className="text-sm text-gray-dark dark:text-gray-light mb-0">
+                          {lastWeekCheckIn.notes}
+                        </p>
+                      </div>
                       <button
                         className="text-xs text-red-500 hover:underline ml-4"
                         onClick={() => deleteCheckIn(lastWeekCheckIn.id)}
@@ -677,9 +706,12 @@ export default function ClientDetails() {
                   </h4>
                   {thisWeekCheckIn ? (
                     <div className="flex justify-between items-center mb-1">
-                      <p className="text-sm text-gray-dark dark:text-gray-light">
-                        {thisWeekCheckIn.notes}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">{formatDateMMDDYYYY(thisWeekCheckIn.date)}</span>
+                        <p className="text-sm text-gray-dark dark:text-gray-light mb-0">
+                          {thisWeekCheckIn.notes}
+                        </p>
+                      </div>
                       <button
                         className="text-xs text-red-500 hover:underline ml-4"
                         onClick={() => deleteCheckIn(thisWeekCheckIn.id)}
@@ -698,49 +730,16 @@ export default function ClientDetails() {
           {/* Weight Chart */}
           <div className="lg:col-span-2">
             <Card title="Weight Progress">
-              <div className="h-64 flex items-center justify-center">
-                <div className="text-center w-full max-w-sm">
-                  {hasWeightLogs ? (
-                    <LineChart data={chartData} height={200}>
-                      {/* Configure axes and lines as needed */}
-                    </LineChart>
-                  ) : (
-                    <p className="text-gray-dark dark:text-gray-light mb-4">
-                      No weight history yet.
-                    </p>
-                  )}
-                  <div className="flex flex-col space-y-2 mt-4">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-secondary dark:text-alabaster">
-                        Starting Weight:
-                      </span>
-                      <span className="text-sm text-secondary dark:text-alabaster">
-                        {startWeight} lbs
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-secondary dark:text-alabaster">
-                        Current Weight:
-                      </span>
-                      <span className="text-sm text-secondary dark:text-alabaster">
-                        {currentWeight} lbs
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-secondary dark:text-alabaster">
-                        Total Change:
-                      </span>
-                      <span
-                        className={
-                          totalChange < 0 ? "text-green-500" : "text-red-500"
-                        }
-                      >
-                        {totalChange > 0 ? "+" : ""}
-                        {totalChange} lbs
-                      </span>
-                    </div>
-                  </div>
-                </div>
+              <div className="w-full" style={{ height: 350 }}>
+                {hasWeightLogs ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData} />
+                  </ResponsiveContainer>
+                ) : (
+                  <p className="text-gray-dark dark:text-gray-light mb-4">
+                    No weight history yet.
+                  </p>
+                )}
               </div>
             </Card>
           </div>
@@ -762,7 +761,7 @@ export default function ClientDetails() {
         <CheckInHistoryModal
           isOpen={showHistory}
           onClose={() => setShowHistory(false)}
-          checkIns={displayedHistory}
+          checkIns={displayedHistory.map((c) => ({ ...c, formattedDate: formatDateMMDDYYYY(c.date) }))}
           onLoadMore={handleLoadMore}
           hasMore={hasMore}
           emptyMessage="No history yet."
