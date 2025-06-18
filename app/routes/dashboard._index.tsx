@@ -69,6 +69,8 @@ type ClientDashboardData = {
   workoutCompliance: number;
   mealCompliance: number;
   weightChange: number;
+  planName?: string | null;
+  isRestDay?: boolean | null;
 };
 
 type Client = {
@@ -255,6 +257,8 @@ export const loader: LoaderFunction = async ({ request }) => {
         }));
         // Fetch active workout plan and today's workout for the client
         let todaysWorkouts: DailyWorkout[] = [];
+        let planName: string | null = null;
+        let isRestDay: boolean | null = null;
         const { data: workoutPlans } = await supabase
           .from("workout_plans")
           .select("id, title, is_active")
@@ -262,6 +266,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           .eq("is_active", true)
           .limit(1);
         if (workoutPlans && workoutPlans.length > 0) {
+          planName = workoutPlans[0].title;
           const planId = workoutPlans[0].id;
           const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
           const todayDay = daysOfWeek[new Date().getDay()];
@@ -271,50 +276,53 @@ export const loader: LoaderFunction = async ({ request }) => {
             .eq("workout_plan_id", planId)
             .eq("day_of_week", todayDay)
             .limit(1);
-          if (planDays && planDays.length > 0 && !planDays[0].is_rest && planDays[0].workout_id) {
-            const { data: workout, error: workoutError } = await supabase
-              .from("workouts")
-              .select("id, name, type")
-              .eq("id", planDays[0].workout_id)
-              .single();
-            if (workout) {
-              // Fetch exercises for this workout
-              const { data: exercisesRaw } = await supabase
-                .from("exercises")
-                .select("id, name, description, type")
-                .eq("workout_id", workout.id);
-              // For each exercise, fetch sets
-              const exercises = await Promise.all((exercisesRaw ?? []).map(async (ex: any) => {
-                const { data: setsRaw } = await supabase
-                  .from("exercise_sets")
-                  .select("set_number, reps")
-                  .eq("exercise_id", ex.id)
-                  .order("set_number", { ascending: true });
-                return {
-                  id: ex.id,
-                  name: ex.name,
-                  description: ex.description,
-                  type: ex.type,
-                  sets: (setsRaw ?? []).map((set: any) => ({
-                    setNumber: set.set_number,
-                    reps: set.reps,
-                    completed: false,
-                  })),
-                };
-              }));
-              // Group exercises by type
-              const groups = Array.from(new Set(exercises.map(ex => ex.type))).map(type => ({
-                type,
-                exercises: exercises.filter(ex => ex.type === type),
-              }));
-              todaysWorkouts.push({
-                id: workout.id,
-                name: workout.name,
-                exercises,
-                groups,
-                date: today.toISOString().slice(0, 10),
-                completed: false,
-              });
+          if (planDays && planDays.length > 0) {
+            isRestDay = !!planDays[0].is_rest;
+            if (!planDays[0].is_rest && planDays[0].workout_id) {
+              const { data: workout, error: workoutError } = await supabase
+                .from("workouts")
+                .select("id, name, type")
+                .eq("id", planDays[0].workout_id)
+                .single();
+              if (workout) {
+                // Fetch exercises for this workout
+                const { data: exercisesRaw } = await supabase
+                  .from("exercises")
+                  .select("id, name, description, type")
+                  .eq("workout_id", workout.id);
+                // For each exercise, fetch sets
+                const exercises = await Promise.all((exercisesRaw ?? []).map(async (ex: any) => {
+                  const { data: setsRaw } = await supabase
+                    .from("exercise_sets")
+                    .select("set_number, reps")
+                    .eq("exercise_id", ex.id)
+                    .order("set_number", { ascending: true });
+                  return {
+                    id: ex.id,
+                    name: ex.name,
+                    description: ex.description,
+                    type: ex.type,
+                    sets: (setsRaw ?? []).map((set: any) => ({
+                      setNumber: set.set_number,
+                      reps: set.reps,
+                      completed: false,
+                    })),
+                  };
+                }));
+                // Group exercises by type
+                const groups = Array.from(new Set(exercises.map(ex => ex.type))).map(type => ({
+                  type,
+                  exercises: exercises.filter(ex => ex.type === type),
+                }));
+                todaysWorkouts.push({
+                  id: workout.id,
+                  name: workout.name,
+                  exercises,
+                  groups,
+                  date: today.toISOString().slice(0, 10),
+                  completed: false,
+                });
+              }
             }
           }
         }
@@ -326,7 +334,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         const supplements = (supplementsRaw ?? []).map((s: any) => ({
           name: s.name,
         }));
-        const clientData: ClientDashboardData = {
+        const clientData: ClientDashboardData & { planName?: string | null; isRestDay?: boolean | null } = {
           updates,
           meals,
           workouts: todaysWorkouts,
@@ -334,6 +342,8 @@ export const loader: LoaderFunction = async ({ request }) => {
           workoutCompliance,
           mealCompliance,
           weightChange,
+          planName,
+          isRestDay,
         };
         return json({ clientData });
       }
@@ -762,7 +772,12 @@ export default function Dashboard() {
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Today's Workouts</h3>
               <div className="rounded-xl bg-white shadow p-6 space-y-6">
-                {(clientData?.workouts?.length ?? 0) === 0 ? (
+                {clientData?.workouts?.length === 0 && clientData?.planName && clientData?.isRestDay ? (
+                  <div className="text-gray-500 text-center">
+                    <div className="font-semibold mb-1">{clientData.planName} - Day</div>
+                    <div>Today is a Rest Day</div>
+                  </div>
+                ) : clientData?.workouts?.length === 0 ? (
                   <div className="text-gray-500">No workouts planned for today.</div>
                 ) : (
                   <div className="space-y-6">
