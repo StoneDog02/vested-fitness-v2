@@ -357,17 +357,50 @@ export const loader: LoaderFunction = async ({ request }) => {
         .eq("role", "client");
       clients = clientRows ?? [];
       totalClients = clients.length;
+      // TEMP: For testing, treat all clients as active (simulate all are subscribed)
       activeClients = totalClients;
       inactiveClients = 0;
       // Recent Clients: last 30 days
       const monthAgo = new Date();
       monthAgo.setDate(monthAgo.getDate() - 30);
-      recentClients = clients
-        .filter((c) => new Date(c.created_at) >= monthAgo)
-        .sort(
-          (a, b) =>
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+      recentClients = await Promise.all(
+        clients
+          .filter((c) => new Date(c.created_at) >= monthAgo)
+          .sort(
+            (a, b) =>
+              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          )
+          .map(async (client) => {
+            // Active meal plan
+            const { data: mealPlansRaw } = await supabase
+              .from("meal_plans")
+              .select("id, title, is_active")
+              .eq("user_id", client.id)
+              .eq("is_active", true)
+              .order("created_at", { ascending: false });
+            const activeMealPlan = mealPlansRaw && mealPlansRaw.length > 0 ? mealPlansRaw[0] : null;
+            // Active workout plan
+            const { data: workoutPlansRaw } = await supabase
+              .from("workout_plans")
+              .select("id, title, is_active")
+              .eq("user_id", client.id)
+              .eq("is_active", true)
+              .order("created_at", { ascending: false });
+            const activeWorkoutPlan = workoutPlansRaw && workoutPlansRaw.length > 0 ? workoutPlansRaw[0] : null;
+            // Supplements
+            const { data: supplementsRaw } = await supabase
+              .from("supplements")
+              .select("id, name")
+              .eq("user_id", client.id);
+            const supplements = supplementsRaw || [];
+            return {
+              ...client,
+              activeMealPlan,
+              activeWorkoutPlan,
+              supplements,
+            };
+          })
+      );
       // Workout compliance: % of workouts completed in last 7 days
       if (totalClients > 0) {
         const weekAgo = new Date();
@@ -533,7 +566,7 @@ export default function Dashboard() {
                 <h3 className="font-semibold text-lg mb-2">Total Clients</h3>
                 <p className="text-4xl font-bold">{data.totalClients}</p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  +3 this month
+                  +{data.recentClients.length} this month
                 </p>
               </Card>
             </Link>
@@ -543,7 +576,7 @@ export default function Dashboard() {
                 <h3 className="font-semibold text-lg mb-2">Active Clients</h3>
                 <p className="text-4xl font-bold">{data.activeClients}</p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  75% of total
+                  {data.totalClients > 0 ? Math.round((data.activeClients / data.totalClients) * 100) : 0}% of total
                 </p>
               </Card>
             </Link>
@@ -555,7 +588,7 @@ export default function Dashboard() {
                   {data.inactiveClients}
                 </p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  25% of total
+                  {data.totalClients > 0 ? Math.round((data.inactiveClients / data.totalClients) * 100) : 0}% of total
                 </p>
               </Card>
             </Link>
@@ -593,31 +626,39 @@ export default function Dashboard() {
                     No new clients in the last month.
                   </div>
                 ) : (
-                  data.recentClients.map((client) => (
-                    <div
-                      key={client.id}
-                      className="flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div>
-                          <p className="font-medium">{client.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Joined{" "}
-                            {new Date(client.created_at).toLocaleDateString()}
-                          </p>
+                  data.recentClients.map((client: Client & { activeMealPlan?: any; activeWorkoutPlan?: any; supplements?: any[] }) => {
+                    // Calculate setup completion percentage
+                    let steps = 0;
+                    if (client.activeMealPlan) steps++;
+                    if (client.activeWorkoutPlan) steps++;
+                    if (client.supplements && client.supplements.length > 0) steps++;
+                    const percent = Math.round((steps / 3) * 100);
+                    return (
+                      <div
+                        key={client.id}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div>
+                            <p className="font-medium">{client.name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              Joined{" "}
+                              {new Date(client.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-[60px] h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-green-500 rounded-full"
+                              style={{ width: `${percent}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-medium">{percent}%</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-[60px] h-2 bg-gray-200 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-green-500 rounded-full"
-                            style={{ width: `100%` }}
-                          />
-                        </div>
-                        <span className="text-sm font-medium">100%</span>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </Card>

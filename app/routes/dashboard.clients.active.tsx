@@ -71,6 +71,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         .eq("coach_id", coachId)
         .eq("role", "client");
       if (clients) {
+        // TEMP: For testing, treat all clients as active (simulate all are subscribed)
         for (const client of clients) {
           // Compliance: % of workouts completed in last 7 days
           const weekAgo = new Date();
@@ -82,7 +83,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .gte("date", weekAgo.toISOString().slice(0, 10));
           const totalWorkouts = (workouts ?? []).length;
           const completedWorkouts = (workouts ?? []).filter(
-            (w: { completed: boolean }) => w.completed
+            (w) => w.completed
           ).length;
           const compliance =
             totalWorkouts > 0

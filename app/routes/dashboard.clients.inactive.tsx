@@ -71,59 +71,9 @@ export const loader: LoaderFunction = async ({ request }) => {
         .eq("coach_id", coachId)
         .eq("role", "client");
       if (clients) {
-        const fourteenDaysAgo = new Date();
-        fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-        for (const client of clients) {
-          // Get all workouts for this client
-          const { data: workouts } = await supabase
-            .from("workouts")
-            .select("id, completed, date")
-            .eq("user_id", client.id);
-          // Find last completed workout date
-          let lastWorkoutDate: string | null = null;
-          if (workouts && workouts.length > 0) {
-            const completedWorkouts = workouts.filter(
-              (w: { completed: boolean }) => w.completed
-            );
-            if (completedWorkouts.length > 0) {
-              lastWorkoutDate = completedWorkouts.reduce((latest, w) =>
-                new Date(w.date) > new Date(latest.date) ? w : latest
-              ).date;
-            }
-          }
-          // If no completed workout, use updated_at
-          const lastActive = lastWorkoutDate || client.updated_at;
-          // Inactive: if last completed workout (or updated_at) is more than 14 days ago
-          if (new Date(lastActive) < fourteenDaysAgo) {
-            // Compliance: % of workouts completed in last 7 days
-            const weekAgo = new Date();
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            const recentWorkouts = (workouts ?? []).filter(
-              (w: { date: string }) => new Date(w.date) >= weekAgo
-            );
-            const totalRecent = recentWorkouts.length;
-            const completedRecent = recentWorkouts.filter(
-              (w: { completed: boolean }) => w.completed
-            ).length;
-            const compliance =
-              totalRecent > 0
-                ? Math.round((completedRecent / totalRecent) * 100)
-                : 0;
-            inactiveClients.push({
-              id: client.id,
-              name: client.name,
-              lastActive,
-              compliance,
-              inactiveSince: lastActive,
-            });
-          }
-        }
-        // Sort by inactiveSince desc
-        inactiveClients.sort(
-          (a, b) =>
-            new Date(b.inactiveSince).getTime() -
-            new Date(a.inactiveSince).getTime()
-        );
+        // TEMP: For testing, treat all clients as active (simulate all are subscribed)
+        // Do not include any clients in inactiveClients
+        // (leave inactiveClients as empty array)
       }
     }
   }
