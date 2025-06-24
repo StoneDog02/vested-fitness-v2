@@ -7,6 +7,7 @@ import {
   ScrollRestoration,
 } from "@remix-run/react";
 import { ThemeProvider } from "./context/ThemeContext";
+import { MealCompletionProvider } from "./context/MealCompletionContext";
 
 import styles from "./tailwind.css?url";
 
@@ -42,7 +43,9 @@ export default function App() {
       </head>
       <body className="transition-colors duration-200 bg-white dark:bg-night text-secondary dark:text-alabaster">
         <ThemeProvider>
-          <Outlet />
+          <MealCompletionProvider>
+            <Outlet />
+          </MealCompletionProvider>
         </ThemeProvider>
         <ScrollRestoration />
         <Scripts />

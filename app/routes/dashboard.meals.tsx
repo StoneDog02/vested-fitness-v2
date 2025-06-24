@@ -9,6 +9,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { useMealCompletion } from "~/context/MealCompletionContext";
 
 export const meta: MetaFunction = () => {
   return [
@@ -197,9 +198,9 @@ export default function Meals() {
   const [calendarData, setCalendarData] = useState(generateCalendarData());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [checkedMeals, setCheckedMeals] = useState<string[]>([]);
   const [isDaySubmitted, setIsDaySubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const { checkedMeals, setCheckedMeals, addCheckedMeal, removeCheckedMeal, resetCheckedMeals, isHydrated } = useMealCompletion();
 
   // Calculate the current date with offset
   const today = new Date();
@@ -220,27 +221,33 @@ export default function Meals() {
   useEffect(() => {
     async function fetchCompletedMeals() {
       setIsDaySubmitted(false);
-      setCheckedMeals([]);
+      
       try {
         const res = await fetch(`/api/get-meal-completions?date=${currentDateApi}`);
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data.completedMealIds) && data.completedMealIds.length > 0) {
-            setCheckedMeals(data.completedMealIds.map(String));
+            // Convert meal IDs from backend to meal keys for frontend consistency
+            const mealKeys = data.completedMealIds.map(String).map(getMealKeyFromId).filter(Boolean) as string[];
+            setCheckedMeals(mealKeys);
             setIsDaySubmitted(true);
           } else {
-            setCheckedMeals([]);
             setIsDaySubmitted(false);
+            // Don't clear checkedMeals here - let localStorage state persist
           }
         }
       } catch (e) {
-        setCheckedMeals([]);
         setIsDaySubmitted(false);
+        // Don't clear checkedMeals here - let localStorage state persist
       }
     }
-    fetchCompletedMeals();
+    
+    // Only fetch if context is hydrated to avoid race conditions
+    if (isHydrated) {
+      fetchCompletedMeals();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDateApi]);
+  }, [currentDateApi, isHydrated]);
 
   // --- Compliance Calendar Backend Integration ---
   useEffect(() => {
@@ -349,19 +356,32 @@ export default function Meals() {
   const formattedDate = getFormattedDate(currentDate, today);
 
   // Function to handle "checked" state for meals
-  const toggleMealCheck = (mealId: string | number) => {
-    const idStr = String(mealId);
-    let updated;
-    if (checkedMeals.includes(idStr)) {
-      updated = checkedMeals.filter((id) => id !== idStr);
+  const toggleMealCheck = (meal: { id: string | number; name: string; time: string }) => {
+    const mealKey = createMealKey(meal);
+    
+    if (checkedMeals.includes(mealKey)) {
+      removeCheckedMeal(mealKey);
     } else {
-      updated = [...checkedMeals, idStr];
+      addCheckedMeal(mealKey);
     }
-    setCheckedMeals(updated);
   };
 
-  // Calculate the macros based on the food items
-  const calculatedMacros = calculateMacros(liveMealPlan?.meals || [], checkedMeals);
+  // Helper function to convert between meal keys and IDs
+  const createMealKey = (meal: { name: string; time: string }) => String(meal.name) + String(meal.time);
+  
+  const getMealIdFromKey = (mealKey: string) => {
+    const meal = liveMealPlan?.meals?.find((m: any) => createMealKey(m) === mealKey);
+    return meal ? String(meal.id) : null;
+  };
+
+  const getMealKeyFromId = (mealId: string) => {
+    const meal = liveMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
+    return meal ? createMealKey(meal) : null;
+  };
+
+  // Calculate the macros based on the food items - need to convert keys back to check against meal IDs
+  const completedMealIds = checkedMeals.map(getMealIdFromKey).filter(Boolean) as string[];
+  const calculatedMacros = calculateMacros(liveMealPlan?.meals || [], completedMealIds);
 
   // Replace mockMealPlan with liveMealPlan if available
   const mealPlan = liveMealPlan;
@@ -506,29 +526,33 @@ export default function Meals() {
                               : "text-gray-dark dark:text-gray-light cursor-pointer"
                           } select-none`}
                         >
-                          {(isDaySubmitted &&
-                            checkedMeals.includes(String(meal.id))) ||
-                          (!isDaySubmitted && checkedMeals.includes(String(meal.id)))
-                            ? "Completed"
-                            : isDaySubmitted
-                            ? "Not Completed"
-                            : "Mark as complete"}
+                          {!isHydrated
+                            ? "Loading..."
+                            : (() => {
+                                const mealKey = createMealKey(meal);
+                                return (isDaySubmitted && checkedMeals.includes(mealKey)) ||
+                                       (!isDaySubmitted && checkedMeals.includes(mealKey))
+                                  ? "Completed"
+                                  : isDaySubmitted
+                                  ? "Not Completed"
+                                  : "Mark as complete";
+                              })()}
                         </label>
                         <input
                           type="checkbox"
                           id={`meal-${meal.id}`}
                           value={meal.id}
-                          checked={
-                            isDaySubmitted
-                              ? checkedMeals.includes(String(meal.id))
-                              : checkedMeals.includes(String(meal.id))
-                          }
-                          onChange={() =>
-                            !isDaySubmitted && toggleMealCheck(meal.id)
-                          }
-                          disabled={isDaySubmitted}
+                          checked={(() => {
+                            const mealKey = createMealKey(meal);
+                            const isChecked = isHydrated && checkedMeals.includes(mealKey);
+                            return isChecked;
+                          })()}
+                                                      onChange={() => {
+                              !isDaySubmitted && toggleMealCheck(meal);
+                            }}
+                          disabled={isDaySubmitted || !isHydrated}
                           className={`w-4 h-4 sm:w-5 sm:h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
-                            isDaySubmitted
+                            isDaySubmitted || !isHydrated
                               ? "cursor-not-allowed opacity-50"
                               : "cursor-pointer"
                           }`}
@@ -576,10 +600,10 @@ export default function Meals() {
                     setIsSubmitting(true);
                     setSubmitError(null);
                     try {
-                      if (mealPlan && mealPlan.meals) {
-                      }
+                      // Convert meal keys back to meal IDs for backend submission
+                      const mealIdsForBackend = checkedMeals.map(getMealIdFromKey).filter(Boolean) as string[];
                       const body = {
-                        completedMealIds: checkedMeals,
+                        completedMealIds: mealIdsForBackend,
                         date: currentDateApi,
                       };
                       const res = await fetch("/api/submit-meal-completions", {
@@ -596,6 +620,7 @@ export default function Meals() {
                         setShowSuccess(true);
                         window.scrollTo({ top: 0, behavior: "smooth" });
                         setTimeout(() => setShowSuccess(false), 3000);
+                        resetCheckedMeals();
                       } else {
                         setSubmitError(responseJson?.error || 'Submission failed.');
                       }
@@ -661,7 +686,7 @@ export default function Meals() {
                     Daily Progress
                   </h3>
                   <span className="text-sm text-gray-dark dark:text-gray-light">
-                    {mealPlan && mealPlan.meals ? `${checkedMeals.length} of ${mealPlan.meals.length} meals` : "0 of 0 meals"}
+                    {mealPlan && mealPlan.meals ? `${completedMealIds.length} of ${mealPlan.meals.length} meals` : "0 of 0 meals"}
                     completed
                   </span>
                 </div>
@@ -670,14 +695,14 @@ export default function Meals() {
                     className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
                     style={{
                       width: mealPlan && mealPlan.meals && mealPlan.meals.length > 0
-                        ? `${(checkedMeals.length / mealPlan.meals.length) * 100}%`
+                        ? `${(completedMealIds.length / mealPlan.meals.length) * 100}%`
                         : "0%",
                     }}
                   ></div>
                 </div>
                 <div className="text-xs text-gray-dark dark:text-gray-light text-right">
                   {mealPlan && mealPlan.meals && mealPlan.meals.length > 0
-                    ? Math.round((checkedMeals.length / mealPlan.meals.length) * 100)
+                    ? Math.round((completedMealIds.length / mealPlan.meals.length) * 100)
                     : 0}
                   % complete
                 </div>

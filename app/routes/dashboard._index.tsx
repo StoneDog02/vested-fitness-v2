@@ -11,6 +11,7 @@ import { parse } from "cookie";
 import type { LoaderFunction } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { useMealCompletion } from "../context/MealCompletionContext";
 
 type LoaderData = {
   clientData?: ClientDashboardData;
@@ -71,6 +72,7 @@ type ClientDashboardData = {
   weightChange: number;
   planName?: string | null;
   isRestDay?: boolean | null;
+  completedMealIds?: string[];
 };
 
 type Client = {
@@ -167,6 +169,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           .eq("is_active", true)
           .limit(1);
         let meals: Meal[] = [];
+        let completedMealIds: string[] = [];
         if (mealPlans && mealPlans.length > 0) {
           const planId = mealPlans[0].id;
           let mealsRaw = null;
@@ -215,6 +218,22 @@ export const loader: LoaderFunction = async ({ request }) => {
                 description: ""
               });
             }
+            // Fetch completed meal IDs for today
+            const startOfDay = new Date();
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(startOfDay);
+            endOfDay.setDate(startOfDay.getDate() + 1);
+            const { data: todayCompletions } = await supabase
+              .from("meal_completions")
+              .select("meal_id")
+              .eq("user_id", user.id)
+              .gte("completed_at", startOfDay.toISOString())
+              .lt("completed_at", endOfDay.toISOString());
+            const mealIdToKey: Record<string, string> = {};
+            for (const meal of mealsRaw) {
+              mealIdToKey[String(meal.id)] = String(meal.name) + String(meal.time);
+            }
+            completedMealIds = (todayCompletions ?? []).map((c: any) => mealIdToKey[String(c.meal_id)]).filter(Boolean);
           }
         }
         const { data: mealCompletions } = await supabase
@@ -337,7 +356,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         const supplements = (supplementsRaw ?? []).map((s: any) => ({
           name: s.name,
         }));
-        const clientData: ClientDashboardData & { planName?: string | null; isRestDay?: boolean | null } = {
+        const clientData: ClientDashboardData & { planName?: string | null; isRestDay?: boolean | null; completedMealIds?: string[] } = {
           updates,
           meals,
           workouts: todaysWorkouts,
@@ -347,6 +366,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           weightChange,
           planName,
           isRestDay,
+          completedMealIds,
         };
         return json({ clientData });
       }
@@ -536,14 +556,13 @@ export const loader: LoaderFunction = async ({ request }) => {
 };
 
 export default function Dashboard() {
+  const { clientData, coachId, totalClients, activeClients, inactiveClients, compliance, percentChange, clients, recentClients, recentActivity } = useLoaderData<LoaderData>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
-  const data = useLoaderData<LoaderData>();
-  const { clientData } = data;
+  const { checkedMeals, isHydrated } = useMealCompletion();
   const matches = useMatches();
   const parentData = matches.find((match) => match.id === "routes/dashboard")
     ?.data as { role: "coach" | "client" };
   const role = parentData?.role;
-  const coachId = data.coachId;
 
   return (
     <>
@@ -567,9 +586,9 @@ export default function Dashboard() {
             <Link to="/dashboard/clients" className="group">
               <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
                 <h3 className="font-semibold text-lg mb-2">Total Clients</h3>
-                <p className="text-4xl font-bold">{data.totalClients}</p>
+                <p className="text-4xl font-bold">{totalClients}</p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  +{data.recentClients.length} this month
+                  +{recentClients.length} this month
                 </p>
               </Card>
             </Link>
@@ -577,9 +596,9 @@ export default function Dashboard() {
             <Link to="/dashboard/clients/active" className="group">
               <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
                 <h3 className="font-semibold text-lg mb-2">Active Clients</h3>
-                <p className="text-4xl font-bold">{data.activeClients}</p>
+                <p className="text-4xl font-bold">{activeClients}</p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  {data.totalClients > 0 ? Math.round((data.activeClients / data.totalClients) * 100) : 0}% of total
+                  {totalClients > 0 ? Math.round((activeClients / totalClients) * 100) : 0}% of total
                 </p>
               </Card>
             </Link>
@@ -588,10 +607,10 @@ export default function Dashboard() {
               <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
                 <h3 className="font-semibold text-lg mb-2">Inactive Clients</h3>
                 <p className="text-4xl font-bold text-red-500">
-                  {data.inactiveClients}
+                  {inactiveClients}
                 </p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  {data.totalClients > 0 ? Math.round((data.inactiveClients / data.totalClients) * 100) : 0}% of total
+                  {totalClients > 0 ? Math.round((inactiveClients / totalClients) * 100) : 0}% of total
                 </p>
               </Card>
             </Link>
@@ -601,18 +620,18 @@ export default function Dashboard() {
                 <h3 className="font-semibold text-lg mb-2">
                   Client Compliance
                 </h3>
-                <p className="text-4xl font-bold">{data.compliance}%</p>
+                <p className="text-4xl font-bold">{compliance}%</p>
                 <p
                   className={`text-sm mt-2 ${
-                    data.percentChange > 0
+                    percentChange > 0
                       ? "text-green-600"
-                      : data.percentChange < 0
+                      : percentChange < 0
                       ? "text-red-500"
                       : "text-gray-400"
                   }`}
                 >
-                  {data.percentChange > 0 && "+"}
-                  {data.percentChange}% from last week
+                  {percentChange > 0 && "+"}
+                  {percentChange}% from last week
                 </p>
               </Card>
             </Link>
@@ -624,12 +643,12 @@ export default function Dashboard() {
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Recent Clients</h3>
               <div className="space-y-4">
-                {data.recentClients.length === 0 ? (
+                {recentClients.length === 0 ? (
                   <div className="text-gray-dark dark:text-gray-light">
                     No new clients in the last month.
                   </div>
                 ) : (
-                  data.recentClients.map((client: Client & { activeMealPlan?: any; activeWorkoutPlan?: any; supplements?: any[] }) => {
+                  recentClients.map((client: Client & { activeMealPlan?: any; activeWorkoutPlan?: any; supplements?: any[] }) => {
                     // Calculate setup completion percentage
                     let steps = 0;
                     if (client.activeMealPlan) steps++;
@@ -670,12 +689,12 @@ export default function Dashboard() {
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Recent Activity</h3>
               <div className="space-y-4">
-                {data.recentActivity.length === 0 ? (
+                {recentActivity.length === 0 ? (
                   <div className="text-gray-dark dark:text-gray-light">
                     No activity yet today.
                   </div>
                 ) : (
-                  data.recentActivity.map((activity) => (
+                  recentActivity.map((activity) => (
                     <div key={activity.id} className="flex items-start gap-3">
                       <div className="w-2 h-2 mt-2 rounded-full bg-primary" />
                       <div>
@@ -771,32 +790,37 @@ export default function Dashboard() {
               </div>
             </Card>
 
-            {/* Today's Meals */}
+            {/* Next Meal */}
             <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-4">Today&apos;s Meals</h3>
+              <h3 className="font-semibold text-lg mb-4">Next Meal</h3>
               <div className="rounded-xl bg-white shadow p-6 space-y-6">
-                {(clientData?.meals?.length ?? 0) === 0 ? (
+                {!isHydrated ? (
+                  <div className="text-gray-500">Loading meals...</div>
+                ) : (!clientData?.meals || clientData.meals.length === 0) ? (
                   <div className="text-gray-500">No meals planned for today.</div>
-                ) : (
-                  <div className="space-y-6">
-                    {(clientData?.meals ?? []).map((meal, idx) => (
-                      <div key={meal.name + meal.time} className="rounded-lg bg-gray-50 shadow-sm p-5">
+                ) : (() => {
+                    const nextMeal = (clientData.meals ?? []).find((meal) => !checkedMeals.includes(String(meal.name) + String(meal.time)));
+                    if (!nextMeal) {
+                      return <div className="text-green-600 font-semibold">All meals completed for today!</div>;
+                    }
+                    return (
+                      <div className="rounded-lg bg-gray-50 shadow-sm p-5">
                         <div className="flex justify-between items-center">
                           <div>
-                            <div className="text-xl font-semibold">{meal.name}</div>
-                            <div className="text-gray-500">{meal.time.slice(0, 5)}</div>
+                            <div className="text-xl font-semibold">{nextMeal.name}</div>
+                            <div className="text-gray-500">{nextMeal.time.slice(0, 5)}</div>
                           </div>
                           <div className="flex flex-col items-end">
-                            <span className="font-bold text-lg">{meal.calories} cal</span>
+                            <span className="font-bold text-lg">{nextMeal.calories} cal</span>
                             <div className="flex gap-2 mt-1">
-                              <span className="bg-blue-100 text-blue-800 rounded-full px-2 py-0.5 text-xs font-medium">P: {meal.protein}g</span>
-                              <span className="bg-green-100 text-green-800 rounded-full px-2 py-0.5 text-xs font-medium">C: {meal.carbs}g</span>
-                              <span className="bg-yellow-100 text-yellow-800 rounded-full px-2 py-0.5 text-xs font-medium">F: {meal.fat}g</span>
+                              <span className="bg-blue-100 text-blue-800 rounded-full px-2 py-0.5 text-xs font-medium">P: {nextMeal.protein}g</span>
+                              <span className="bg-green-100 text-green-800 rounded-full px-2 py-0.5 text-xs font-medium">C: {nextMeal.carbs}g</span>
+                              <span className="bg-yellow-100 text-yellow-800 rounded-full px-2 py-0.5 text-xs font-medium">F: {nextMeal.fat}g</span>
                             </div>
                           </div>
                         </div>
                         <ul className="mt-3 pl-4 border-l-2 border-gray-100 space-y-1">
-                          {meal.foods.map(food => (
+                          {nextMeal.foods.map(food => (
                             <li key={food.id} className="text-gray-700">
                               <span className="font-medium">{food.name}</span> ({food.portion}) – 
                               <span className="ml-1 text-xs text-gray-500">
@@ -806,9 +830,9 @@ export default function Dashboard() {
                           ))}
                         </ul>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    );
+                  })()
+                }
               </div>
             </Card>
 
