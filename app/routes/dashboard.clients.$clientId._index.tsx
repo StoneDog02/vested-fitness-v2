@@ -248,26 +248,12 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   const activeWorkoutPlan =
     workoutPlansRaw && workoutPlansRaw.length > 0 ? workoutPlansRaw[0] : null;
 
-  // Debug: log env vars and client id
-  console.log('[LOADER DEBUG] SUPABASE_URL:', process.env.SUPABASE_URL);
-  console.log('[LOADER DEBUG] SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY?.slice(0,8));
-  console.log('[LOADER DEBUG] client.id:', client.id);
-
   // Fetch supplements (normal query)
   const { data: supplements } = await supabase
     .from("supplements")
     .select("id, name, user_id")
     .eq("user_id", client.id)
     .order("created_at", { ascending: false });
-  console.log('[LOADER DEBUG] supplements for client.id:', supplements);
-
-  // Fetch supplements (hardcoded user_id)
-  const { data: supplementsDirect } = await supabase
-    .from("supplements")
-    .select("id, name, user_id")
-    .eq("user_id", "d4728752-6a9b-4ed6-9b40-7399cd0372df")
-    .order("created_at", { ascending: false });
-  console.log('[LOADER DEBUG] supplements for hardcoded user_id:', supplementsDirect);
 
   // Fetch weight logs for the client
   const { data: weightLogsRaw } = await supabase
@@ -448,17 +434,22 @@ export default function ClientDetails() {
     if (!weekGroups[weekStart]) weekGroups[weekStart] = [];
     weekGroups[weekStart].push(checkIn);
   }
-  // Get all week start timestamps, sorted descending (most recent week first)
   const weekStarts = Object.keys(weekGroups)
     .map(Number)
     .sort((a, b) => b - a);
 
-  // For each week, pick the most recent check-in
-  const weekCheckIns = weekStarts.map((ws) => weekGroups[ws][0]);
+  // Anchor to current and previous week based on today's date
+  const now = new Date();
+  const thisWeekStart = getWeekStart(now.toISOString());
+  const lastWeekStart = thisWeekStart - 7 * 24 * 60 * 60 * 1000;
 
-  const thisWeekCheckIn = weekCheckIns[0] || null;
-  const lastWeekCheckIn = weekCheckIns[1] || null;
-  const historyCheckIns = weekCheckIns.slice(2);
+  const thisWeekCheckIn = (weekGroups[thisWeekStart] && weekGroups[thisWeekStart][0]) || null;
+  const lastWeekCheckIn = (weekGroups[lastWeekStart] && weekGroups[lastWeekStart][0]) || null;
+
+  // For history, exclude this and last week
+  const historyCheckIns = weekStarts
+    .filter(ws => ws !== thisWeekStart && ws !== lastWeekStart)
+    .map(ws => weekGroups[ws][0]);
 
   // History modal pagination (if needed)
   const [currentPage, setCurrentPage] = useState(1);

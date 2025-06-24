@@ -16,6 +16,10 @@ import type {
   WorkoutType,
   WorkoutGroup,
 } from "~/components/coach/CreateWorkoutModal";
+import ViewWorkoutPlanLibraryModal from "~/components/coach/ViewWorkoutPlanLibraryModal";
+import { parse } from "cookie";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
 
 interface Group {
   type: WorkoutType;
@@ -88,6 +92,7 @@ export const loader = async ({
   if (!client)
     return json({
       workoutPlans: [],
+      libraryPlans: [],
       client: null,
       complianceData: [0, 0, 0, 0, 0, 0, 0],
       weekStart: null,
@@ -194,10 +199,19 @@ export const loader = async ({
       "id, title, description, is_active, created_at, activated_at, deactivated_at"
     )
     .eq("user_id", client.id)
+    .eq("is_template", false)
     .order("created_at", { ascending: false });
-  console.log("[WORKOUTS LOADER] plansRaw:", plansRaw);
 
-  // For each plan, fetch days and workouts
+  // Fetch library workout plans (templates)
+  const { data: libraryPlansRaw } = await supabase
+    .from("workout_plans")
+    .select(
+      "id, title, description, is_active, created_at, activated_at, deactivated_at"
+    )
+    .eq("is_template", true)
+    .order("created_at", { ascending: false });
+
+  // For each plan, fetch days and workouts (for both client and library plans)
   const daysOfWeek = [
     "Sunday",
     "Monday",
@@ -207,113 +221,100 @@ export const loader = async ({
     "Friday",
     "Saturday",
   ];
-  const workoutPlans = await Promise.all(
-    (plansRaw || []).map(async (plan) => {
-      // Fetch days for this plan
-      const { data: daysRaw } = await supabase
-        .from("workout_plan_days")
-        .select("id, day_of_week, is_rest, workout_id")
-        .eq("workout_plan_id", plan.id);
-      console.log(`[WORKOUTS LOADER] daysRaw for plan ${plan.id}:`, daysRaw);
-      // For each day, fetch workout details if not rest
-      const days = await Promise.all(
-        daysOfWeek.map(async (day) => {
-          const dayRow = (daysRaw || []).find((d) => d.day_of_week === day);
-          if (!dayRow) return { day, isRest: true, workout: null };
-          if (dayRow.is_rest || !dayRow.workout_id) {
-            return { day, isRest: true, workout: null };
-          }
-          // Fetch workout details
-          const { data: workout } = await supabase
-            .from("workouts")
-            .select("id, name, date, created_at, type")
-            .eq("id", dayRow.workout_id)
-            .single();
-          let groups: WorkoutGroup[] = [];
-          if (workout) {
-            const { data: groupsRaw } = await supabase
-              .from("exercise_groups")
-              .select("id, group_type, sequence_order, notes")
-              .eq("workout_id", workout.id)
-              .order("sequence_order", { ascending: true });
-            groups = [];
-            for (const group of groupsRaw || []) {
-              const { data: exercisesRaw } = await supabase
-                .from("exercises")
-                .select(
-                  "id, name, description, video_url, sequence_order, group_id"
-                )
-                .eq("group_id", group.id)
-                .order("sequence_order", { ascending: true });
-              const exercises = await Promise.all(
-                (exercisesRaw || []).map(async (exercise) => {
-                  const { data: sets } = await supabase
-                    .from("exercise_sets")
-                    .select("id, set_number, weight, reps, completed, notes")
-                    .eq("exercise_id", exercise.id)
-                    .order("set_number", { ascending: true });
-                  return { ...exercise, sets: sets || [] };
-                })
-              );
-              groups.push({
-                type: group.group_type,
-                exercises: exercises.map((ex) => ({
-                  name: ex.name,
-                  videoUrl: ex.video_url,
-                  sets: ex.sets ? ex.sets.length : 3,
-                  reps: ex.sets && ex.sets[0] ? ex.sets[0].reps : 10,
-                  notes: ex.description || undefined,
-                })),
-              });
+  const fetchDaysAndWorkouts = async (plans: any[]) => {
+    return Promise.all(
+      (plans || []).map(async (plan: any) => {
+        // Fetch days for this plan
+        const { data: daysRaw } = await supabase
+          .from("workout_plan_days")
+          .select("id, day_of_week, is_rest, workout_id")
+          .eq("workout_plan_id", plan.id);
+        // For each day, fetch workout details if not rest
+        const days = await Promise.all(
+          daysOfWeek.map(async (day) => {
+            const dayRow = (daysRaw || []).find((d) => d.day_of_week === day);
+            if (!dayRow) return { day, isRest: true, workout: null };
+            if (dayRow.is_rest || !dayRow.workout_id) {
+              return { day, isRest: true, workout: null };
             }
-            console.log(
-              `[WORKOUTS LOADER] groups for workout ${workout.id}:`,
-              groups
-            );
-          }
-          return {
-            day,
-            isRest: false,
-            workout: workout
-              ? {
-                  id: workout.id,
-                  title: workout.name,
-                  createdAt: workout.created_at,
-                  exercises: groups,
-                }
-              : null,
-          };
-        })
-      );
-      // Map plan fields to match WorkoutPlan interface for buildWeekFromPlan
-      const planForWeek = {
-        id: plan.id,
-        title: plan.title,
-        description: plan.description,
-        isActive: plan.is_active,
-        createdAt: plan.created_at,
-        activatedAt: plan.activated_at,
-        deactivatedAt: plan.deactivated_at,
-        days,
-      };
-      const week = buildWeekFromPlan(planForWeek);
-      console.log(`[WORKOUTS LOADER] week for plan ${plan.id}:`, week);
-      return {
-        id: plan.id,
-        title: plan.title,
-        description: plan.description,
-        isActive: plan.is_active,
-        createdAt: plan.created_at,
-        activatedAt: plan.activated_at,
-        deactivatedAt: plan.deactivated_at,
-        days,
-        week, // Attach for debugging
-      };
-    })
-  );
+            // Fetch workout details
+            const { data: workout } = await supabase
+              .from("workouts")
+              .select("id, name, date, created_at, type")
+              .eq("id", dayRow.workout_id)
+              .single();
+            let groups = [];
+            if (workout) {
+              const { data: groupsRaw } = await supabase
+                .from("exercise_groups")
+                .select("id, group_type, sequence_order, notes")
+                .eq("workout_id", workout.id)
+                .order("sequence_order", { ascending: true });
+              groups = [];
+              for (const group of groupsRaw || []) {
+                const { data: exercisesRaw } = await supabase
+                  .from("exercises")
+                  .select(
+                    "id, name, description, video_url, sequence_order, group_id"
+                  )
+                  .eq("group_id", group.id)
+                  .order("sequence_order", { ascending: true });
+                const exercises = await Promise.all(
+                  (exercisesRaw || []).map(async (exercise) => {
+                    const { data: sets } = await supabase
+                      .from("exercise_sets")
+                      .select("id, set_number, weight, reps, completed, notes")
+                      .eq("exercise_id", exercise.id)
+                      .order("set_number", { ascending: true });
+                    return { ...exercise, sets: sets || [] };
+                  })
+                );
+                groups.push({
+                  type: group.group_type,
+                  exercises: exercises.map((ex) => ({
+                    name: ex.name,
+                    videoUrl: ex.video_url,
+                    sets: ex.sets ? ex.sets.length : 3,
+                    reps: ex.sets && ex.sets[0] ? ex.sets[0].reps : 10,
+                    notes: ex.description || undefined,
+                  })),
+                });
+              }
+            }
+            return {
+              day,
+              isRest: dayRow.is_rest || !workout,
+              workout: workout
+                ? {
+                    id: workout.id,
+                    title: workout.name,
+                    createdAt: workout.created_at,
+                    exercises: groups,
+                  }
+                : null,
+            };
+          })
+        );
+        return {
+          id: plan.id,
+          title: plan.title,
+          description: plan.description,
+          createdAt: plan.created_at,
+          isActive: plan.is_active,
+          activatedAt: plan.activated_at,
+          deactivatedAt: plan.deactivated_at,
+          days,
+        };
+      })
+    );
+  };
+
+  const workoutPlans = await fetchDaysAndWorkouts(plansRaw || []);
+  const libraryPlans = await fetchDaysAndWorkouts(libraryPlansRaw || []);
 
   return json({
     workoutPlans,
+    libraryPlans,
     client,
     complianceData,
     weekStart: weekStart.toISOString(),
@@ -327,6 +328,48 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   );
   const formData = await request.formData();
   const intent = formData.get("intent");
+
+  // Get coachId from auth cookie (same as meals)
+  const cookies = parse(request.headers.get("cookie") || "");
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  let accessToken;
+  if (supabaseAuthCookieKey) {
+    try {
+      const decoded = Buffer.from(
+        cookies[supabaseAuthCookieKey],
+        "base64"
+      ).toString("utf-8");
+      const [access] = JSON.parse(JSON.parse(decoded));
+      accessToken = access;
+    } catch (e) {
+      accessToken = undefined;
+    }
+  }
+  let coachId = null;
+  let authId: string | undefined;
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+      authId =
+        decoded && typeof decoded === "object" && "sub" in decoded
+          ? (decoded.sub as string)
+          : undefined;
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  if (authId) {
+    const { data: user } = await supabase
+      .from("users")
+      .select("id, role, coach_id")
+      .eq("auth_id", authId)
+      .single();
+    if (user) {
+      coachId = user.role === "coach" ? user.id : user.coach_id;
+    }
+  }
 
   // Find client
   const { data: initialClient, error } = await supabase
@@ -345,8 +388,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
   if (!client) return json({ error: "Client not found" }, { status: 400 });
 
+  // Move these variable declarations up so they're available for all action branches
+  const planName = formData.get("planName") as string;
+  const description = formData.get("description") as string | null;
+  const weekJson = formData.get("week") as string;
+  const week = weekJson ? JSON.parse(weekJson) : null;
+  const planId = formData.get("workoutPlanId") as string | null;
+  const daysOfWeek = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+
   if (intent === "delete") {
-    const planId = formData.get("workoutPlanId") as string;
     // Delete the plan (cascade deletes days)
     await supabase.from("workout_plans").delete().eq("id", planId);
     // Optionally, delete all workouts linked to this plan's days
@@ -397,28 +455,152 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(request.url);
   }
 
-  const planName = formData.get("planName") as string;
-  const description = formData.get("description") as string | null;
-  const weekJson = formData.get("week") as string;
-  const week = weekJson ? JSON.parse(weekJson) : null;
-  const planId = formData.get("workoutPlanId") as string | null;
-
-  if (!week || typeof week !== "object") {
-    return json({ error: "Invalid week data" }, { status: 400 });
+  if (intent === "useTemplate") {
+    const templateId = formData.get("templateId") as string;
+    // Get template plan
+    const { data: template } = await supabase
+      .from("workout_plans")
+      .select("title, description")
+      .eq("id", templateId)
+      .single();
+    if (!template) {
+      return json({ error: "Template not found" }, { status: 400 });
+    }
+    // Create new plan from template for client
+    const { data: newPlan, error: planError } = await supabase
+      .from("workout_plans")
+      .insert({
+        user_id: client.id,
+        title: template.title,
+        description: template.description,
+        is_active: false,
+        is_template: false,
+        template_id: templateId,
+      })
+      .select()
+      .single();
+    if (planError || !newPlan) {
+      return json({ error: "Failed to create plan from template" }, { status: 500 });
+    }
+    // Get template days
+    const { data: templateDays } = await supabase
+      .from("workout_plan_days")
+      .select("*")
+      .eq("workout_plan_id", templateId);
+    // Copy days, workouts, groups, exercises, sets
+    if (templateDays) {
+      for (const day of templateDays) {
+        let newWorkoutId = null;
+        if (!day.is_rest && day.workout_id) {
+          // Copy workout
+          const { data: workout } = await supabase
+            .from("workouts")
+            .select("*")
+            .eq("id", day.workout_id)
+            .single();
+          if (workout) {
+            const { data: newWorkout } = await supabase
+              .from("workouts")
+              .insert({
+                user_id: client.id,
+                name: workout.name,
+                is_active: false,
+                date: workout.date,
+                type: workout.type,
+              })
+              .select()
+              .single();
+            newWorkoutId = newWorkout?.id;
+            // Copy groups
+            const { data: groups } = await supabase
+              .from("exercise_groups")
+              .select("*")
+              .eq("workout_id", workout.id);
+            if (groups) {
+              for (const group of groups) {
+                const { data: newGroup } = await supabase
+                  .from("exercise_groups")
+                  .insert({
+                    workout_id: newWorkoutId,
+                    group_type: group.group_type,
+                    sequence_order: group.sequence_order,
+                    notes: group.notes,
+                  })
+                  .select()
+                  .single();
+                // Copy exercises
+                const { data: exercises } = await supabase
+                  .from("exercises")
+                  .select("*")
+                  .eq("group_id", group.id);
+                if (exercises) {
+                  for (const exercise of exercises) {
+                    const { data: newExercise } = await supabase
+                      .from("exercises")
+                      .insert({
+                        workout_id: newWorkoutId,
+                        group_id: newGroup.id,
+                        name: exercise.name,
+                        description: exercise.description,
+                        video_url: exercise.video_url,
+                        sequence_order: exercise.sequence_order,
+                        type: group.group_type || "Single",
+                      })
+                      .select()
+                      .single();
+                    // Copy sets
+                    const { data: sets } = await supabase
+                      .from("exercise_sets")
+                      .select("*")
+                      .eq("exercise_id", exercise.id);
+                    if (sets) {
+                      for (const set of sets) {
+                        await supabase.from("exercise_sets").insert({
+                          exercise_id: newExercise.id,
+                          set_number: set.set_number,
+                          weight: set.weight,
+                          reps: set.reps,
+                          completed: false,
+                          notes: set.notes,
+                          type: group.group_type || "Single",
+                        });
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        // Insert day for new plan
+        await supabase.from("workout_plan_days").insert({
+          workout_plan_id: newPlan.id,
+          day_of_week: day.day_of_week,
+          is_rest: day.is_rest,
+          workout_id: newWorkoutId,
+        });
+      }
+    }
+    return redirect(request.url);
   }
 
-  const daysOfWeek = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-  ];
-
   if (intent === "create") {
-    // Insert workout_plans row
+    // First, create template plan
+    const { data: newTemplate, error: templateError } = await supabase
+      .from("workout_plans")
+      .insert({
+        user_id: coachId,
+        title: planName,
+        description: description || null,
+        is_active: false,
+        is_template: true,
+      })
+      .select()
+      .single();
+    if (templateError || !newTemplate) {
+      return json({ error: "Failed to create template" }, { status: 500 });
+    }
+    // Then, create client plan referencing template
     const { data: newPlan, error: planError } = await supabase
       .from("workout_plans")
       .insert({
@@ -426,151 +608,153 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         title: planName,
         description: description || null,
         is_active: false,
+        is_template: false,
+        template_id: newTemplate.id,
       })
       .select()
       .single();
     if (planError || !newPlan) {
-      return json({ error: "Failed to create plan" }, { status: 500 });
+      return json({ error: "Failed to create client plan" }, { status: 500 });
     }
-    // For each day, insert workout_plan_days
+    // For each day, insert for both template and client plan
     for (const day of daysOfWeek) {
       const dayPlan = week[day];
-      console.log(`[ACTION] Processing day: ${day}`, dayPlan);
-      if (!dayPlan || dayPlan.mode === "rest") {
-        console.log(`[ACTION] Inserting rest day for ${day}`);
-        await supabase.from("workout_plan_days").insert({
-          workout_plan_id: newPlan.id,
-          day_of_week: day,
-          is_rest: true,
-          workout_id: null,
-        });
-      } else if (
-        dayPlan.mode === "workout" &&
-        dayPlan.groups &&
-        dayPlan.groups.length > 0 &&
-        dayPlan.groups.some(
-          (g: WorkoutGroup) => g.exercises && g.exercises.length > 0
-        )
-      ) {
-        console.log(`[ACTION] Inserting workout for ${day}`);
-        const workoutInsert = {
-          user_id: client.id,
-          name: planName + " - " + day,
-          is_active: false,
-          date: new Date().toISOString().slice(0, 10),
-          type: dayPlan.type || "Single",
-        };
-        console.log(
-          `[ACTION] Workout insert object for ${day}:`,
-          workoutInsert
-        );
-        const { data: workout, error: workoutError } = await supabase
+      // Template day
+      let templateWorkoutId = null;
+      if (dayPlan && dayPlan.mode === "workout" && dayPlan.groups && dayPlan.groups.length > 0 && dayPlan.groups.some((g: WorkoutGroup) => g.exercises && g.exercises.length > 0)) {
+        // Insert workout for template
+        const { data: templateWorkout } = await supabase
           .from("workouts")
-          .insert(workoutInsert)
+          .insert({
+            user_id: coachId,
+            name: planName + " - " + day,
+            is_active: false,
+            date: new Date().toISOString().slice(0, 10),
+            type: dayPlan.type || "Single",
+          })
           .select()
           .single();
-        if (workoutError)
-          console.error(
-            `[ACTION] Workout insert error for ${day}:`,
-            workoutError
-          );
-        if (workout) {
+        templateWorkoutId = templateWorkout?.id;
+        // Insert groups/exercises/sets for template
+        if (templateWorkout) {
           let groupOrder = 0;
           for (const group of dayPlan.groups) {
-            // Insert group into exercise_groups
-            const { data: groupRow, error: groupError } = await supabase
+            const { data: groupRow } = await supabase
               .from("exercise_groups")
               .insert({
-                workout_id: workout.id,
+                workout_id: templateWorkout.id,
                 group_type: group.type,
                 sequence_order: groupOrder,
                 notes: group.notes || null,
               })
               .select()
               .single();
-            if (groupError) {
-              console.error(
-                `[ACTION] Group insert error for ${day}:`,
-                groupError
-              );
-              continue;
-            }
             for (const exercise of group.exercises || []) {
-              const exerciseInsert = {
-                workout_id: workout.id,
-                group_id: groupRow.id,
-                name: exercise.name,
-                description: exercise.notes || "",
-                video_url: exercise.videoUrl,
-                sequence_order: 0, // You can add ordering if needed
-              };
-              console.log(
-                `[ACTION] Exercise insert object for ${day}:`,
-                exerciseInsert
-              );
-              const { data: exerciseRow, error: exerciseError } = await supabase
+              const { data: exerciseRow } = await supabase
                 .from("exercises")
-                .insert(exerciseInsert)
+                .insert({
+                  workout_id: templateWorkout.id,
+                  group_id: groupRow.id,
+                  name: exercise.name,
+                  description: exercise.notes || "",
+                  video_url: exercise.videoUrl,
+                  sequence_order: 0,
+                  type: group.type || "Single",
+                })
                 .select()
                 .single();
-              if (exerciseError)
-                console.error(
-                  `[ACTION] Exercise insert error for ${day}:`,
-                  exerciseError
-                );
-              if (
-                exerciseRow &&
-                typeof exercise.sets === "number" &&
-                exercise.sets > 0
-              ) {
+              if (exerciseRow && typeof exercise.sets === "number" && exercise.sets > 0) {
                 for (let j = 0; j < exercise.sets; j++) {
-                  const setInsert = {
+                  await supabase.from("exercise_sets").insert({
                     exercise_id: exerciseRow.id,
                     set_number: j + 1,
                     weight: null,
                     reps: exercise.reps ?? null,
                     completed: false,
                     notes: exercise.notes ?? null,
-                  };
-                  console.log(
-                    `[ACTION] Set insert object for ${day}:`,
-                    setInsert
-                  );
-                  const { error: setError } = await supabase
-                    .from("exercise_sets")
-                    .insert(setInsert);
-                  if (setError)
-                    console.error(
-                      `[ACTION] Set insert error for ${day}:`,
-                      setError
-                    );
+                    type: group.type || "Single",
+                  });
                 }
               }
             }
             groupOrder++;
           }
-          const dayInsert = {
-            workout_plan_id: newPlan.id,
-            day_of_week: day,
-            is_rest: false,
-            workout_id: workout.id,
-          };
-          console.log(
-            `[ACTION] workout_plan_days insert object for ${day}:`,
-            dayInsert
-          );
-          const { error: dayError } = await supabase
-            .from("workout_plan_days")
-            .insert(dayInsert);
-          if (dayError)
-            console.error(
-              `[ACTION] workout_plan_days insert error for ${day}:`,
-              dayError
-            );
         }
-      } else {
-        console.log(`[ACTION] Skipping day ${day} (no exercises)`);
       }
+      await supabase.from("workout_plan_days").insert({
+        workout_plan_id: newTemplate.id,
+        day_of_week: day,
+        is_rest: !dayPlan || dayPlan.mode === "rest",
+        workout_id: templateWorkoutId,
+      });
+      // Client day
+      let clientWorkoutId = null;
+      if (dayPlan && dayPlan.mode === "workout" && dayPlan.groups && dayPlan.groups.length > 0 && dayPlan.groups.some((g: WorkoutGroup) => g.exercises && g.exercises.length > 0)) {
+        // Insert workout for client
+        const { data: clientWorkout } = await supabase
+          .from("workouts")
+          .insert({
+            user_id: client.id,
+            name: planName + " - " + day,
+            is_active: false,
+            date: new Date().toISOString().slice(0, 10),
+            type: dayPlan.type || "Single",
+          })
+          .select()
+          .single();
+        clientWorkoutId = clientWorkout?.id;
+        // Insert groups/exercises/sets for client
+        if (clientWorkout) {
+          let groupOrder = 0;
+          for (const group of dayPlan.groups) {
+            const { data: groupRow } = await supabase
+              .from("exercise_groups")
+              .insert({
+                workout_id: clientWorkout.id,
+                group_type: group.type,
+                sequence_order: groupOrder,
+                notes: group.notes || null,
+              })
+              .select()
+              .single();
+            for (const exercise of group.exercises || []) {
+              const { data: exerciseRow } = await supabase
+                .from("exercises")
+                .insert({
+                  workout_id: clientWorkout.id,
+                  group_id: groupRow.id,
+                  name: exercise.name,
+                  description: exercise.notes || "",
+                  video_url: exercise.videoUrl,
+                  sequence_order: 0,
+                  type: group.type || "Single",
+                })
+                .select()
+                .single();
+              if (exerciseRow && typeof exercise.sets === "number" && exercise.sets > 0) {
+                for (let j = 0; j < exercise.sets; j++) {
+                  await supabase.from("exercise_sets").insert({
+                    exercise_id: exerciseRow.id,
+                    set_number: j + 1,
+                    weight: null,
+                    reps: exercise.reps ?? null,
+                    completed: false,
+                    notes: exercise.notes ?? null,
+                    type: group.type || "Single",
+                  });
+                }
+              }
+            }
+            groupOrder++;
+          }
+        }
+      }
+      await supabase.from("workout_plan_days").insert({
+        workout_plan_id: newPlan.id,
+        day_of_week: day,
+        is_rest: !dayPlan || dayPlan.mode === "rest",
+        workout_id: clientWorkoutId,
+      });
     }
     return redirect(request.url);
   }
@@ -690,6 +874,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                 description: exercise.notes || "",
                 video_url: exercise.videoUrl,
                 sequence_order: 0, // You can add ordering if needed
+                type: group.type || "Single",
               };
               console.log(
                 `[ACTION] Exercise insert object for ${day}:`,
@@ -718,6 +903,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                     reps: exercise.reps ?? null,
                     completed: false,
                     notes: exercise.notes ?? null,
+                    type: group.type || "Single",
                   };
                   console.log(
                     `[ACTION] Set insert object for ${day}:`,
@@ -799,8 +985,9 @@ function buildWeekFromPlan(plan: WorkoutPlan) {
 }
 
 export default function ClientWorkouts() {
-  const { workoutPlans, client, complianceData, weekStart } = useLoaderData<{
+  const { workoutPlans, libraryPlans, client, complianceData, weekStart } = useLoaderData<{
     workoutPlans: WorkoutPlan[];
+    libraryPlans: WorkoutPlan[];
     client: { name: string } | null;
     complianceData: number[];
     weekStart: string;
@@ -815,6 +1002,7 @@ export default function ClientWorkouts() {
     null
   );
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const [, setSearchParams] = useSearchParams();
 
   // For visible plans, just show all plans (or filter as needed)
@@ -925,6 +1113,13 @@ export default function ClientWorkouts() {
               title="Workout History"
               action={
                 <div className="w-full flex flex-row justify-between items-center gap-3">
+                  <button
+                    className="text-primary text-xs font-medium hover:underline px-1"
+                    onClick={() => setIsLibraryModalOpen(true)}
+                    style={{ background: "none", border: "none" }}
+                  >
+                    Library
+                  </button>
                   <button
                     className="text-primary text-xs font-medium hover:underline px-1"
                     onClick={() => setIsHistoryModalOpen(true)}
@@ -1299,6 +1494,29 @@ export default function ClientWorkouts() {
             submitLabel="Save Changes"
           />
         )}
+
+        <ViewWorkoutPlanLibraryModal
+          isOpen={isLibraryModalOpen}
+          onClose={() => setIsLibraryModalOpen(false)}
+          libraryPlans={libraryPlans.map((plan) => ({
+            ...plan,
+            days: plan.days.map((day) => ({
+              ...day,
+              workout: day.workout
+                ? {
+                    ...day.workout,
+                    exercises: (day.workout.exercises || []).flatMap((group: any) =>
+                      (group.exercises || []).map((ex: any) => ({
+                        name: ex.name,
+                        sets: typeof ex.sets === "number" ? ex.sets : 3,
+                        reps: typeof ex.reps === "number" ? ex.reps : 10,
+                      }))
+                    ),
+                  }
+                : null,
+            })),
+          }))}
+        />
       </div>
     </ClientDetailLayout>
   );

@@ -314,6 +314,9 @@ export const loader: LoaderFunction = async ({ request }) => {
                   type,
                   exercises: exercises.filter(ex => ex.type === type),
                 }));
+                console.log('[CLIENT DASHBOARD] exercises:', exercises);
+                console.log('[CLIENT DASHBOARD] groups:', groups);
+                console.log('[CLIENT DASHBOARD] types:', exercises.map(ex => ex.type));
                 todaysWorkouts.push({
                   id: workout.id,
                   name: workout.name,

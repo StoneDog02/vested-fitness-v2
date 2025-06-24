@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { MetaFunction, LoaderFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
@@ -77,19 +77,6 @@ export const loader: LoaderFunction = async ({ request }) => {
               .from("foods")
               .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
               .eq("meal_id", meal.id);
-            // Debug: log all foods for this meal
-            if (foodsRaw) {
-              console.log(`LOADER foods for meal '${meal.name}' (meal.id=${meal.id}):`);
-              foodsRaw.forEach(food => {
-                console.log({
-                  id: food.id,
-                  name: food.name,
-                  food_library_id: food.food_library_id,
-                  calories: food.calories,
-                  food_library: food.food_library
-                });
-              });
-            }
             const foods = (foodsRaw || []).map((food) => {
               const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) : Number(food.protein) || 0;
               const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) : Number(food.carbs) || 0;
@@ -114,9 +101,6 @@ export const loader: LoaderFunction = async ({ request }) => {
           date: "", // Optionally format date range here
           meals,
         };
-        // Debug: log the mealPlan object
-        // eslint-disable-next-line no-console
-        console.log('LOADER mealPlan:', JSON.stringify(mealPlan, null, 2));
       }
     }
   }
@@ -209,16 +193,13 @@ const generateCalendarData = () => {
 export default function Meals() {
   const loaderData = useLoaderData<{ mealPlan: any }>();
   const liveMealPlan = loaderData?.mealPlan;
-  // Debug: log the mealPlan object in the client
-  // eslint-disable-next-line no-console
-  console.log('CLIENT mealPlan:', liveMealPlan);
   const [dayOffset, setDayOffset] = useState(0);
   const [calendarData, setCalendarData] = useState(generateCalendarData());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [submittedDays, setSubmittedDays] = useState<{
-    [key: string]: number[];
-  }>({});
+  const [checkedMeals, setCheckedMeals] = useState<string[]>([]);
+  const [isDaySubmitted, setIsDaySubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Calculate the current date with offset
   const today = new Date();
@@ -232,10 +213,116 @@ export default function Meals() {
     month: "short",
     day: "numeric",
   });
+  // Format for API (YYYY-MM-DD)
+  const currentDateApi = currentDate.toISOString().slice(0, 10);
 
-  // Get submitted meals for current day
-  const submittedMealsForDay: string[] = (submittedDays[currentDateFormatted] || []).map(String);
-  const isDaySubmitted = submittedMealsForDay.length > 0;
+  // Fetch completed meals for the current day from backend
+  useEffect(() => {
+    async function fetchCompletedMeals() {
+      setIsDaySubmitted(false);
+      setCheckedMeals([]);
+      try {
+        const res = await fetch(`/api/get-meal-completions?date=${currentDateApi}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.completedMealIds) && data.completedMealIds.length > 0) {
+            setCheckedMeals(data.completedMealIds.map(String));
+            setIsDaySubmitted(true);
+          } else {
+            setCheckedMeals([]);
+            setIsDaySubmitted(false);
+          }
+        }
+      } catch (e) {
+        setCheckedMeals([]);
+        setIsDaySubmitted(false);
+      }
+    }
+    fetchCompletedMeals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDateApi]);
+
+  // --- Compliance Calendar Backend Integration ---
+  useEffect(() => {
+    async function fetchWeekCompletions() {
+      if (!liveMealPlan || !liveMealPlan.meals || liveMealPlan.meals.length === 0) {
+        setCalendarData(generateCalendarData());
+        return;
+      }
+      // Get start and end of week (Sunday to Saturday)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - today.getDay());
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      const startStr = startOfWeek.toISOString().slice(0, 10);
+      const endStr = endOfWeek.toISOString().slice(0, 10);
+      try {
+        const res = await fetch(`/api/get-meal-completions?start=${startStr}&end=${endStr}`);
+        if (res.ok) {
+          const data = await res.json();
+          const completionsByDate = data.completionsByDate || {};
+          setCalendarData(
+            Array.from({ length: 7 }).map((_, index) => {
+              const date = new Date(startOfWeek);
+              date.setDate(startOfWeek.getDate() + index);
+              date.setHours(0, 0, 0, 0);
+              const dateStr = date.toISOString().slice(0, 10);
+              const prettyDate = date.toLocaleDateString("en-US", {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              });
+              const completed = completionsByDate[dateStr] || [];
+              const total = liveMealPlan.meals.length;
+              const percentage = total > 0 ? Math.round((completed.length / total) * 100) : 0;
+              const todayDate = new Date();
+              todayDate.setHours(0, 0, 0, 0);
+              let status;
+              if (date.getTime() > todayDate.getTime()) {
+                status = "pending";
+                return {
+                  date: prettyDate,
+                  status,
+                  percentage: 0,
+                };
+              } else if (date.getTime() === todayDate.getTime()) {
+                // Today
+                if (completed.length === 0) {
+                  status = "pending";
+                  return {
+                    date: prettyDate,
+                    status,
+                    percentage: 0,
+                  };
+                } else {
+                  status = "completed";
+                  return {
+                    date: prettyDate,
+                    status,
+                    percentage,
+                  };
+                }
+              } else {
+                // Past
+                status = "completed";
+                return {
+                  date: prettyDate,
+                  status,
+                  percentage,
+                };
+              }
+            })
+          );
+        }
+      } catch (e) {
+        setCalendarData(generateCalendarData());
+      }
+    }
+    fetchWeekCompletions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMealPlan]);
 
   // Format the date with relative labels
   const getFormattedDate = (date: Date, today: Date) => {
@@ -262,15 +349,15 @@ export default function Meals() {
   const formattedDate = getFormattedDate(currentDate, today);
 
   // Function to handle "checked" state for meals
-  const [checkedMeals, setCheckedMeals] = useState<string[]>([]);
-
   const toggleMealCheck = (mealId: string | number) => {
     const idStr = String(mealId);
+    let updated;
     if (checkedMeals.includes(idStr)) {
-      setCheckedMeals(checkedMeals.filter((id) => id !== idStr));
+      updated = checkedMeals.filter((id) => id !== idStr);
     } else {
-      setCheckedMeals([...checkedMeals, idStr]);
+      updated = [...checkedMeals, idStr];
     }
+    setCheckedMeals(updated);
   };
 
   // Calculate the macros based on the food items
@@ -420,7 +507,7 @@ export default function Meals() {
                           } select-none`}
                         >
                           {(isDaySubmitted &&
-                            submittedMealsForDay.includes(String(meal.id))) ||
+                            checkedMeals.includes(String(meal.id))) ||
                           (!isDaySubmitted && checkedMeals.includes(String(meal.id)))
                             ? "Completed"
                             : isDaySubmitted
@@ -430,9 +517,10 @@ export default function Meals() {
                         <input
                           type="checkbox"
                           id={`meal-${meal.id}`}
+                          value={meal.id}
                           checked={
                             isDaySubmitted
-                              ? submittedMealsForDay.includes(String(meal.id))
+                              ? checkedMeals.includes(String(meal.id))
                               : checkedMeals.includes(String(meal.id))
                           }
                           onChange={() =>
@@ -486,60 +574,33 @@ export default function Meals() {
                   disabled={isSubmitting || isDaySubmitted}
                   onClick={async () => {
                     setIsSubmitting(true);
-
+                    setSubmitError(null);
                     try {
-                      // Calculate completion percentage
-                      const completionPercentage = Math.round(
-                        (checkedMeals.length / mealPlan.meals.length) * 100
-                      );
-
-                      // Format the current date to match calendar format
-                      const currentDateFormatted = currentDate.toLocaleDateString(
-                        "en-US",
-                        {
-                          weekday: "short",
-                          month: "short",
-                          day: "numeric",
-                        }
-                      );
-
-                      // Simulate API call with setTimeout
-                      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-                      // Update calendar status based on completion percentage
-                      setCalendarData((prevData) =>
-                        prevData.map((day) =>
-                          day.date === currentDateFormatted
-                            ? {
-                                ...day,
-                                percentage: completionPercentage,
-                                status:
-                                  completionPercentage >= 80
-                                    ? "completed"
-                                    : completionPercentage > 0
-                                    ? "partial"
-                                    : "missed",
-                              }
-                            : day
-                        )
-                      );
-
-                      // Store the submitted meals for this day
-                      setSubmittedDays((prev) => ({
-                        ...prev,
-                        [currentDateFormatted]: [...checkedMeals.map(Number)],
-                      }));
-
-                      // Show success message
-                      setShowSuccess(true);
-
-                      // Scroll to top smoothly
-                      window.scrollTo({ top: 0, behavior: "smooth" });
-
-                      // Hide success message after 3 seconds
-                      setTimeout(() => {
-                        setShowSuccess(false);
-                      }, 3000);
+                      if (mealPlan && mealPlan.meals) {
+                      }
+                      const body = {
+                        completedMealIds: checkedMeals,
+                        date: currentDateApi,
+                      };
+                      const res = await fetch("/api/submit-meal-completions", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                      });
+                      let responseJson = null;
+                      try {
+                        responseJson = await res.json();
+                      } catch (e) {}
+                      if (res.ok) {
+                        setIsDaySubmitted(true);
+                        setShowSuccess(true);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                        setTimeout(() => setShowSuccess(false), 3000);
+                      } else {
+                        setSubmitError(responseJson?.error || 'Submission failed.');
+                      }
+                    } catch (err) {
+                      setSubmitError('Submission failed.');
                     } finally {
                       setIsSubmitting(false);
                     }
@@ -578,6 +639,11 @@ export default function Meals() {
                   </span>
                 </Button>
               </div>
+
+              {/* Show error if present */}
+              {submitError && (
+                <div className="text-red-600 text-sm mt-2">{submitError}</div>
+              )}
             </Card>
           </div>
 
@@ -654,34 +720,47 @@ export default function Meals() {
             {/* Compliance Calendar */}
             <Card title="Meal Compliance">
               <div className="space-y-3">
-                {calendarData.map((day, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between py-3 border-b dark:border-davyGray last:border-0"
-                  >
-                    <div className="text-sm font-medium text-secondary dark:text-alabaster">
-                      {day.date}
+                {calendarData.map((day, index) => {
+                  // Determine if this is today
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const startOfWeek = new Date(today);
+                  startOfWeek.setDate(today.getDate() - today.getDay());
+                  const thisDate = new Date(startOfWeek);
+                  thisDate.setDate(startOfWeek.getDate() + index);
+                  thisDate.setHours(0, 0, 0, 0);
+                  const isToday = thisDate.getTime() === today.getTime();
+                  return (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between py-3 border-b dark:border-davyGray last:border-0"
+                    >
+                      <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                        {day.date}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-block w-3 h-3 rounded-full ${
+                            day.status === "pending"
+                              ? isToday
+                                ? "bg-green-500"
+                                : "bg-gray-light dark:bg-davyGray"
+                              : day.percentage >= 80
+                              ? "bg-primary"
+                              : day.percentage > 0
+                              ? "bg-yellow-500"
+                              : "bg-red-500"
+                          }`}
+                        ></span>
+                        <span className="text-sm text-gray-dark dark:text-gray-light">
+                          {day.status === "pending"
+                            ? "Pending"
+                            : `${day.percentage}%`}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`inline-block w-3 h-3 rounded-full ${
-                          day.percentage >= 80
-                            ? "bg-primary"
-                            : day.percentage > 0
-                            ? "bg-yellow-500"
-                            : day.status === "pending"
-                            ? "bg-gray-light dark:bg-davyGray"
-                            : "bg-red-500"
-                        }`}
-                      ></span>
-                      <span className="text-sm text-gray-dark dark:text-gray-light">
-                        {day.status === "pending"
-                          ? "Pending"
-                          : `${day.percentage}%`}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </Card>
           </div>
@@ -704,7 +783,7 @@ function MacroProgressCard({
   colorClass: string;
   unit?: string;
 }) {
-  const percentage = Math.round((completed / total) * 100) || 0;
+  const percentage = total === 0 ? 100 : Math.round((completed / total) * 100);
 
   return (
     <div className="bg-gray-lightest dark:bg-secondary-light/20 rounded-xl p-4">

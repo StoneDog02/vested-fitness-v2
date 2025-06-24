@@ -25,7 +25,6 @@ type ActionData = {
 };
 
 // Create a cookie instance for the Supabase session
-declare const process: { env: { NODE_ENV: string } };
 const supabaseSession = createCookie("sb-ckwcxmxbfffkknrnkdtk-auth-token", {
   path: "/",
   httpOnly: true,
@@ -91,9 +90,7 @@ export const action: ActionFunction = async ({ request }) => {
     if (userRow.role === "coach") {
       return redirect("/dashboard", { headers: { "Set-Cookie": setCookie } });
     } else if (userRow.role === "client") {
-      return redirect("/dashboard/coach-access", {
-        headers: { "Set-Cookie": setCookie },
-      });
+      return redirect("/dashboard", { headers: { "Set-Cookie": setCookie } });
     }
   }
 

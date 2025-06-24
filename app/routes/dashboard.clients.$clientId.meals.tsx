@@ -4,9 +4,10 @@ import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Card from "~/components/ui/Card";
 import CreateMealPlanModal from "~/components/coach/CreateMealPlanModal";
+import ViewMealPlanLibraryModal from "~/components/coach/ViewMealPlanLibraryModal";
 import { ActionFunctionArgs, redirect } from "@remix-run/node";
 import { useFetcher } from "@remix-run/react";
 import {
@@ -15,6 +16,9 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
 } from "@heroicons/react/24/outline";
+import { parse } from "cookie";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
 
 export const loader = async ({
   params,
@@ -46,6 +50,7 @@ export const loader = async ({
   if (!client)
     return json({
       mealPlans: [],
+      libraryPlans: [],
       complianceData: [0, 0, 0, 0, 0, 0, 0],
       client: null,
     });
@@ -73,37 +78,54 @@ export const loader = async ({
       "id, title, description, is_active, created_at, activated_at, deactivated_at"
     )
     .eq("user_id", client.id)
+    .eq("is_template", false)
+    .order("created_at", { ascending: false });
+
+  // Fetch library meal plans
+  const { data: libraryPlansRaw } = await supabase
+    .from("meal_plans")
+    .select(
+      "id, title, description, is_active, created_at, activated_at, deactivated_at"
+    )
+    .eq("is_template", true)
     .order("created_at", { ascending: false });
 
   // For each meal plan, fetch meals and foods
-  const mealPlans = await Promise.all(
-    (mealPlansRaw || []).map(async (plan) => {
-      const { data: mealsRaw } = await supabase
-        .from("meals")
-        .select("id, name, time, sequence_order")
-        .eq("meal_plan_id", plan.id)
-        .order("sequence_order", { ascending: true });
-      const meals = await Promise.all(
-        (mealsRaw || []).map(async (meal) => {
-          const { data: foods } = await supabase
-            .from("foods")
-            .select("name, portion, calories, protein, carbs, fat")
-            .eq("meal_id", meal.id);
-          return { ...meal, foods: foods || [] };
-        })
-      );
-      return {
-        id: plan.id,
-        title: plan.title,
-        description: plan.description,
-        createdAt: plan.created_at,
-        isActive: plan.is_active,
-        activatedAt: plan.activated_at,
-        deactivatedAt: plan.deactivated_at,
-        meals,
-      };
-    })
-  );
+  const fetchMealsAndFoods = async (plans: any[]) => {
+    return Promise.all(
+      (plans || []).map(async (plan) => {
+        const { data: mealsRaw } = await supabase
+          .from("meals")
+          .select("id, name, time, sequence_order")
+          .eq("meal_plan_id", plan.id)
+          .order("sequence_order", { ascending: true });
+        const meals = (await Promise.all(
+          (mealsRaw || []).map(async (meal) => {
+            const { data: foods } = await supabase
+              .from("foods")
+              .select("name, portion, calories, protein, carbs, fat")
+              .eq("meal_id", meal.id);
+            return { ...meal, foods: foods || [] };
+          })
+        ))
+        // Filter out meals with no foods
+        .filter((meal) => meal.foods && meal.foods.length > 0);
+        return {
+          id: plan.id,
+          title: plan.title,
+          description: plan.description,
+          createdAt: plan.created_at,
+          isActive: plan.is_active,
+          activatedAt: plan.activated_at,
+          deactivatedAt: plan.deactivated_at,
+          meals,
+        };
+      })
+    );
+  };
+
+  const mealPlans = await fetchMealsAndFoods(mealPlansRaw || []);
+  const libraryPlans = await fetchMealsAndFoods(libraryPlansRaw || []);
 
   // Fetch all meal completions for this user for the week
   const { data: completionsRaw } = await supabase
@@ -123,8 +145,10 @@ export const loader = async ({
     const plan = mealPlans.find((p) => {
       const activated = p.activatedAt ? new Date(p.activatedAt) : null;
       const deactivated = p.deactivatedAt ? new Date(p.deactivatedAt) : null;
+      const dayStr = day.toISOString().slice(0, 10);
+      const activatedStr = activated ? activated.toISOString().slice(0, 10) : null;
       return (
-        activated && activated <= day && (!deactivated || deactivated > day)
+        activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated > day)
       );
     });
     if (!plan) {
@@ -144,7 +168,7 @@ export const loader = async ({
     complianceData.push(percent);
   }
 
-  return json({ mealPlans, complianceData, client });
+  return json({ mealPlans, libraryPlans, complianceData, client });
 };
 
 export const meta: MetaFunction = () => {
@@ -161,6 +185,48 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   );
   const formData = await request.formData();
   const intent = formData.get("intent");
+
+  // Get coachId from auth cookie
+  const cookies = parse(request.headers.get("cookie") || "");
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  let accessToken;
+  if (supabaseAuthCookieKey) {
+    try {
+      const decoded = Buffer.from(
+        cookies[supabaseAuthCookieKey],
+        "base64"
+      ).toString("utf-8");
+      const [access] = JSON.parse(JSON.parse(decoded));
+      accessToken = access;
+    } catch (e) {
+      accessToken = undefined;
+    }
+  }
+  let coachId = null;
+  let authId: string | undefined;
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+      authId =
+        decoded && typeof decoded === "object" && "sub" in decoded
+          ? (decoded.sub as string)
+          : undefined;
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  if (authId) {
+    const { data: user } = await supabase
+      .from("users")
+      .select("id, role, coach_id")
+      .eq("auth_id", authId)
+      .single();
+    if (user) {
+      coachId = user.role === "coach" ? user.id : user.coach_id;
+    }
+  }
 
   // Find client
   const { data: initialClient, error } = await supabase
@@ -221,6 +287,87 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(request.url);
   }
 
+  if (intent === "useTemplate") {
+    const templateId = formData.get("templateId") as string;
+    
+    // Get template plan
+    const { data: template } = await supabase
+      .from("meal_plans")
+      .select("title, description")
+      .eq("id", templateId)
+      .single();
+    
+    if (!template) {
+      return json({ error: "Template not found" }, { status: 400 });
+    }
+
+    // Create new plan from template
+    const { data: newPlan, error: planError } = await supabase
+      .from("meal_plans")
+      .insert({
+        user_id: client.id,
+        title: template.title,
+        description: template.description,
+        is_active: false,
+        is_template: false,
+        template_id: templateId
+      })
+      .select()
+      .single();
+
+    if (planError || !newPlan) {
+      return json({ error: "Failed to create plan from template" }, { status: 500 });
+    }
+
+    // Get template meals
+    const { data: templateMeals } = await supabase
+      .from("meals")
+      .select("*")
+      .eq("meal_plan_id", templateId)
+      .order("sequence_order", { ascending: true });
+
+    // Copy meals and foods
+    if (templateMeals) {
+      for (const meal of templateMeals) {
+        // Create new meal
+        const { data: newMeal } = await supabase
+          .from("meals")
+          .insert({
+            meal_plan_id: newPlan.id,
+            name: meal.name,
+            time: meal.time,
+            sequence_order: meal.sequence_order
+          })
+          .select()
+          .single();
+
+        if (newMeal) {
+          // Get and copy foods
+          const { data: foods } = await supabase
+            .from("foods")
+            .select("*")
+            .eq("meal_id", meal.id);
+
+          if (foods) {
+            for (const food of foods) {
+              await supabase.from("foods").insert({
+                meal_id: newMeal.id,
+                name: food.name,
+                portion: food.portion,
+                calories: food.calories,
+                protein: food.protein,
+                carbs: food.carbs,
+                fat: food.fat
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return redirect(request.url);
+  }
+
   // Create or edit
   const title = formData.get("title") as string;
   const description = formData.get("description") as string;
@@ -228,74 +375,153 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const meals = JSON.parse(mealsJson);
   const planId = formData.get("planId") as string | null;
 
-  let mealPlan;
-  if (planId) {
-    // Update meal plan
-    const { data: updatedPlan } = await supabase
+  // First, create or update the template version
+  let templatePlan;
+  if (!planId) {
+    // Create new template plan
+    const { data: newTemplate, error: templateError } = await supabase
       .from("meal_plans")
-      .update({ title, description })
-      .eq("id", planId)
+      .insert({
+        user_id: coachId,
+        title,
+        description,
+        is_active: false,
+        is_template: true
+      })
       .select()
       .single();
-    mealPlan = updatedPlan;
-    // Delete old meals/foods
-    const { data: oldMeals } = await supabase
-      .from("meals")
-      .select("id")
-      .eq("meal_plan_id", planId);
-    if (oldMeals) {
-      for (const meal of oldMeals) {
-        await supabase.from("foods").delete().eq("meal_id", meal.id);
-      }
-      await supabase.from("meals").delete().eq("meal_plan_id", planId);
+
+    if (templateError || !newTemplate) {
+      return json({ error: "Failed to create template" }, { status: 500 });
     }
-  } else {
-    // Insert meal plan
-    const { data: newPlan, error: mealPlanError } = await supabase
+    templatePlan = newTemplate;
+
+    // Create client version that references the template
+    const { data: newPlan, error: planError } = await supabase
       .from("meal_plans")
       .insert({
         user_id: client.id,
         title,
         description,
         is_active: false,
+        is_template: false,
+        template_id: templatePlan.id
       })
       .select()
       .single();
-    if (mealPlanError || !newPlan) {
-      return json({ error: "Failed to create meal plan" }, { status: 500 });
+
+    if (planError || !newPlan) {
+      return json({ error: "Failed to create plan" }, { status: 500 });
     }
-    mealPlan = newPlan;
+
+    // Insert meals and foods for both plans
+    for (const [i, meal] of meals.entries()) {
+      // Create meal for template
+      const { data: templateMeal } = await supabase
+        .from("meals")
+        .insert({
+          meal_plan_id: templatePlan.id,
+          name: meal.name,
+          time: meal.time,
+          sequence_order: i,
+        })
+        .select()
+        .single();
+
+      // Create meal for client plan
+      const { data: clientMeal } = await supabase
+        .from("meals")
+        .insert({
+          meal_plan_id: newPlan.id,
+          name: meal.name,
+          time: meal.time,
+          sequence_order: i,
+        })
+        .select()
+        .single();
+
+      if (templateMeal && clientMeal) {
+        for (const food of meal.foods) {
+          // Add food to template meal
+          await supabase.from("foods").insert({
+            meal_id: templateMeal.id,
+            name: food.name,
+            portion: food.portion,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+          });
+
+          // Add food to client meal
+          await supabase.from("foods").insert({
+            meal_id: clientMeal.id,
+            name: food.name,
+            portion: food.portion,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+          });
+        }
+      }
+    }
+  } else {
+    // Update existing plan
+    const { data: updatedPlan } = await supabase
+      .from("meal_plans")
+      .update({ title, description })
+      .eq("id", planId)
+      .select()
+      .single();
+
+    if (updatedPlan) {
+      // Delete old meals/foods
+      const { data: oldMeals } = await supabase
+        .from("meals")
+        .select("id")
+        .eq("meal_plan_id", planId);
+      if (oldMeals) {
+        for (const meal of oldMeals) {
+          await supabase.from("foods").delete().eq("meal_id", meal.id);
+        }
+        await supabase.from("meals").delete().eq("meal_plan_id", planId);
+      }
+
+      // Insert new meals and foods
+      for (const [i, meal] of meals.entries()) {
+        const { data: mealRow } = await supabase
+          .from("meals")
+          .insert({
+            meal_plan_id: planId,
+            name: meal.name,
+            time: meal.time,
+            sequence_order: i,
+          })
+          .select()
+          .single();
+
+        if (mealRow) {
+          for (const food of meal.foods) {
+            await supabase.from("foods").insert({
+              meal_id: mealRow.id,
+              name: food.name,
+              portion: food.portion,
+              calories: food.calories,
+              protein: food.protein,
+              carbs: food.carbs,
+              fat: food.fat,
+            });
+          }
+        }
+      }
+    }
   }
 
-  // Insert meals and foods
-  for (const [i, meal] of meals.entries()) {
-    const { data: mealRow, error: mealError } = await supabase
-      .from("meals")
-      .insert({
-        meal_plan_id: mealPlan.id,
-        name: meal.name,
-        time: meal.time,
-        sequence_order: i,
-      })
-      .select()
-      .single();
-    if (mealError || !mealRow) continue;
-    for (const food of meal.foods) {
-      await supabase.from("foods").insert({
-        meal_id: mealRow.id,
-        name: food.name,
-        portion: food.portion,
-        calories: food.calories,
-        protein: food.protein,
-        carbs: food.carbs,
-        fat: food.fat,
-      });
-    }
-  }
   return redirect(request.url);
 };
 
-type Food = {
+export type Food = {
   name: string;
   portion: string;
   calories: number;
@@ -303,20 +529,30 @@ type Food = {
   carbs: number;
   fat: number;
 };
-type Meal = { id: string | number; name: string; time: string; foods: Food[] };
-type MealPlan = {
+
+export type Meal = {
+  id: string | number;
+  name: string;
+  time: string;
+  foods: Food[];
+};
+
+export type MealPlan = {
   id: string;
   title: string;
   description: string;
   createdAt: string;
   isActive: boolean;
   meals: Meal[];
+  activatedAt?: string;
+  deactivatedAt?: string;
 };
+
 export default function ClientMeals() {
-  const { mealPlans, complianceData, client } = useLoaderData<{
+  const { mealPlans, libraryPlans, client } = useLoaderData<{
     mealPlans: MealPlan[];
-    complianceData: number[];
-    client: { name: string } | null;
+    libraryPlans: MealPlan[];
+    client: { name: string, id: string } | null;
   }>();
   const fetcher = useFetcher();
 
@@ -330,9 +566,10 @@ export default function ClientMeals() {
     ...inactiveMealPlans,
   ];
 
-  // Modal state (placeholder logic)
+  // Modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = React.useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = React.useState(false);
+  const [isLibraryModalOpen, setIsLibraryModalOpen] = React.useState(false);
   type MealPlanType = typeof mealPlans extends (infer U)[] ? U : never;
   const [selectedPlan, setSelectedPlan] = React.useState<MealPlanType | null>(
     null
@@ -352,10 +589,58 @@ export default function ClientMeals() {
   });
   const calendarEnd = new Date(calendarStart);
   calendarEnd.setDate(calendarStart.getDate() + 6);
-
-  // Placeholder compliance data: array of 7 numbers (0-1)
-  // In real use, fetch from DB based on client and week
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // New: Real-time compliance data
+  const [compliancePercentages, setCompliancePercentages] = useState<number[]>([0,0,0,0,0,0,0]);
+
+  useEffect(() => {
+    async function fetchCompliance() {
+      if (!client || !mealPlans || mealPlans.length === 0) {
+        setCompliancePercentages([0,0,0,0,0,0,0]);
+        return;
+      }
+      // Find the active plan for each day in the week
+      const plansByDay = Array.from({ length: 7 }).map((_, i) => {
+        const day = new Date(calendarStart);
+        day.setDate(calendarStart.getDate() + i);
+        day.setHours(0, 0, 0, 0);
+        return mealPlans.find((p) => {
+          const activated = p.activatedAt ? new Date(p.activatedAt) : null;
+          const deactivated = p.deactivatedAt ? new Date(p.deactivatedAt) : null;
+          // Compare only the date part for activation
+          const dayStr = day.toISOString().slice(0, 10);
+          const activatedStr = activated ? activated.toISOString().slice(0, 10) : null;
+          return (
+            activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated > day)
+          );
+        });
+      });
+      // Fetch completions for the week from the API
+      const startStr = calendarStart.toISOString().slice(0, 10);
+      const endStr = calendarEnd.toISOString().slice(0, 10);
+      const apiUrl = `/api/get-meal-completions?userId=${client.id}&start=${startStr}&end=${endStr}`;
+      const res = await fetch(apiUrl);
+      if (!res.ok) {
+        setCompliancePercentages([0,0,0,0,0,0,0]);
+        return;
+      }
+      const data = await res.json();
+      const completionsByDate = data.completionsByDate || {};
+      // For each day, calculate compliance
+      const percentages = Array.from({ length: 7 }).map((_, i) => {
+        const day = new Date(calendarStart);
+        day.setDate(calendarStart.getDate() + i);
+        const dateStr = day.toISOString().slice(0, 10);
+        const plan = plansByDay[i];
+        const completed = completionsByDate[dateStr] || [];
+        if (!plan || !plan.meals || plan.meals.length === 0) return 0;
+        return plan.meals.length > 0 ? completed.length / plan.meals.length : 0;
+      });
+      setCompliancePercentages(percentages);
+    }
+    fetchCompliance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendarStart, client, mealPlans]);
 
   function getBarColor(percent: number) {
     // percent: 0 to 1
@@ -394,6 +679,13 @@ export default function ClientMeals() {
               title="Meal Plan History"
               action={
                 <div className="flex flex-row gap-x-2 items-center">
+                  <button
+                    className="text-primary text-xs font-medium hover:underline px-1"
+                    onClick={() => setIsLibraryModalOpen(true)}
+                    style={{ background: "none", border: "none" }}
+                  >
+                    Library
+                  </button>
                   <button
                     className="text-primary text-xs font-medium hover:underline px-1"
                     onClick={() => setIsHistoryModalOpen(true)}
@@ -590,17 +882,17 @@ export default function ClientMeals() {
                           <div
                             className="absolute left-0 top-0 h-2 rounded-full"
                             style={{
-                              width: `${Math.round(complianceData[i] * 100)}%`,
-                              background: getBarColor(complianceData[i]),
+                              width: `${Math.round(compliancePercentages[i] * 100)}%`,
+                              background: getBarColor(compliancePercentages[i]),
                               transition: "width 0.3s, background 0.3s",
                             }}
                           />
                         </div>
                         <span
                           className="ml-3 text-xs font-medium min-w-[32px] text-right"
-                          style={{ color: getBarColor(complianceData[i]) }}
+                          style={{ color: getBarColor(compliancePercentages[i]) }}
                         >
-                          {Math.round(complianceData[i] * 100)}%
+                          {Math.round(compliancePercentages[i] * 100)}%
                         </span>
                       </div>
                     </div>
@@ -648,14 +940,15 @@ export default function ClientMeals() {
             form.append("description", data.description);
             form.append("meals", JSON.stringify(data.meals));
             if (selectedPlan) {
-              form.append(
-                "planId",
-                historyMealPlans.find(
-                  (p) =>
-                    p.title === selectedPlan.title &&
-                    p.description === selectedPlan.description
-                )?.id || ""
-              );
+              form.append("intent", "edit");
+              const planId = historyMealPlans.find(
+                (p) =>
+                  p.title === selectedPlan.title &&
+                  p.description === selectedPlan.description
+              )?.id || "";
+              form.append("planId", planId);
+            } else {
+              form.append("intent", "create");
             }
             fetcher.submit(form, { method: "post" });
             setIsCreateModalOpen(false);
@@ -777,6 +1070,11 @@ export default function ClientMeals() {
             </div>
           </div>
         )}
+        <ViewMealPlanLibraryModal
+          isOpen={isLibraryModalOpen}
+          onClose={() => setIsLibraryModalOpen(false)}
+          libraryPlans={libraryPlans}
+        />
       </div>
     </ClientDetailLayout>
   );

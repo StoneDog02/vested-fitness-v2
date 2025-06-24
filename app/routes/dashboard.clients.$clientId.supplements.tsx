@@ -37,8 +37,6 @@ export const loader = async ({
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  console.log("[SUPPLEMENTS][LOADER] params:", params);
-
   // Find client by slug or id
   const { data: initialClient, error } = await supabase
     .from("users")
@@ -53,12 +51,8 @@ export const loader = async ({
       .eq("id", params.clientId)
       .single();
     client = clientById;
-    console.log("[SUPPLEMENTS][LOADER] Fallback to id, found:", client);
-  } else {
-    console.log("[SUPPLEMENTS][LOADER] Found by slug:", client);
   }
   if (!client) {
-    console.log("[SUPPLEMENTS][LOADER] No client found, returning empty.");
     return json({
       supplements: [],
       complianceData: [0, 0, 0, 0, 0, 0, 0],
@@ -87,12 +81,6 @@ export const loader = async ({
     .from("supplements")
     .select("id, name, dosage, frequency, instructions")
     .eq("user_id", client.id);
-  console.log(
-    "[SUPPLEMENTS][LOADER] supplementsRaw:",
-    supplementsRaw,
-    "error:",
-    supplementsError
-  );
 
   // Fetch all completions for this user for the week
   const { data: completionsRaw } = await supabase
@@ -149,16 +137,6 @@ export const loader = async ({
         )
       );
       const compliance = Math.round((daysWithCompletion.size / 7) * 100);
-      console.log(
-        "[SUPPLEMENTS][LOADER] Supplement:",
-        supplement,
-        "completions:",
-        completions,
-        "compliance:",
-        compliance,
-        "completionsError:",
-        completionsError
-      );
       return {
         id: supplement.id,
         name: supplement.name,
@@ -170,7 +148,6 @@ export const loader = async ({
     })
   );
 
-  console.log("[SUPPLEMENTS][LOADER] Final supplements:", supplements);
   return json({
     supplements,
     complianceData,
@@ -192,8 +169,6 @@ export const action = async ({
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  console.log("[SUPPLEMENTS][ACTION] intent:", intent, "params:", params);
-
   // Find client by slug or id
   const { data: initialClient, error } = await supabase
     .from("users")
@@ -208,9 +183,6 @@ export const action = async ({
       .eq("id", params.clientId)
       .single();
     client = clientById;
-    console.log("[SUPPLEMENTS][ACTION] Fallback to id, found:", client);
-  } else {
-    console.log("[SUPPLEMENTS][ACTION] Found by slug:", client);
   }
   if (!client) {
     console.log("[SUPPLEMENTS][ACTION] No client found, redirecting.");
