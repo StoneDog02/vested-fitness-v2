@@ -106,20 +106,7 @@ export default function WorkoutCard({
             {exercises[0].description}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={isCompleted}
-            onChange={(e) => handleCompletionChange(e.target.checked)}
-            disabled={isSubmitted}
-            className={`w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary dark:border-gray-600 dark:bg-gray-700 dark:checked:bg-primary dark:focus:ring-primary-light ${
-              isSubmitted ? "cursor-not-allowed opacity-50" : ""
-            }`}
-          />
-          <span className="text-xs xs:text-sm text-secondary dark:text-alabaster/90">
-            Complete
-          </span>
-        </div>
+
       </div>
 
       {/* Video and Table Container */}
@@ -160,7 +147,7 @@ export default function WorkoutCard({
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
-                            value={weights[`${exercise.id}-${set.setNumber}`]}
+                            value={weights[`${exercise.id}-${set.setNumber}`] || ""}
                             onChange={(e) =>
                               handleWeightChange(
                                 exercise.id,

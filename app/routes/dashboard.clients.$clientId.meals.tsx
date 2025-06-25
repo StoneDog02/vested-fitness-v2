@@ -159,10 +159,10 @@ export const loader = async ({
     const meals = plan.meals;
     // Completions for this day and these meals
     const mealIds = new Set(meals.map((m) => m.id));
+    const dayStr = day.toISOString().slice(0, 10); // Get YYYY-MM-DD format
     const completions = (completionsRaw || []).filter((c) => {
-      const compDate = new Date(c.completed_at);
-      compDate.setHours(0, 0, 0, 0);
-      return compDate.getTime() === day.getTime() && mealIds.has(c.meal_id);
+      const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
+      return completedDateStr === dayStr && mealIds.has(c.meal_id);
     });
     const percent = meals.length > 0 ? completions.length / meals.length : 0;
     complianceData.push(percent);
@@ -549,12 +549,14 @@ export type MealPlan = {
 };
 
 export default function ClientMeals() {
-  const { mealPlans, libraryPlans, client } = useLoaderData<{
+  const { mealPlans, libraryPlans, client, complianceData: initialComplianceData } = useLoaderData<{
     mealPlans: MealPlan[];
     libraryPlans: MealPlan[];
     client: { name: string, id: string } | null;
+    complianceData: number[];
   }>();
   const fetcher = useFetcher();
+  const complianceFetcher = useFetcher<{ complianceData: number[] }>();
 
   // Sort meal plans by createdAt descending
   const activeMealPlan = mealPlans.find((plan) => plan.isActive);
@@ -591,56 +593,22 @@ export default function ClientMeals() {
   calendarEnd.setDate(calendarStart.getDate() + 6);
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   // New: Real-time compliance data
-  const [compliancePercentages, setCompliancePercentages] = useState<number[]>([0,0,0,0,0,0,0]);
+  const [compliancePercentages, setCompliancePercentages] = useState<number[]>(initialComplianceData || [0,0,0,0,0,0,0]);
 
+  // Update compliance data when fetcher returns
   useEffect(() => {
-    async function fetchCompliance() {
-      if (!client || !mealPlans || mealPlans.length === 0) {
-        setCompliancePercentages([0,0,0,0,0,0,0]);
-        return;
-      }
-      // Find the active plan for each day in the week
-      const plansByDay = Array.from({ length: 7 }).map((_, i) => {
-        const day = new Date(calendarStart);
-        day.setDate(calendarStart.getDate() + i);
-        day.setHours(0, 0, 0, 0);
-        return mealPlans.find((p) => {
-          const activated = p.activatedAt ? new Date(p.activatedAt) : null;
-          const deactivated = p.deactivatedAt ? new Date(p.deactivatedAt) : null;
-          // Compare only the date part for activation
-          const dayStr = day.toISOString().slice(0, 10);
-          const activatedStr = activated ? activated.toISOString().slice(0, 10) : null;
-          return (
-            activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated > day)
-          );
-        });
-      });
-      // Fetch completions for the week from the API
-      const startStr = calendarStart.toISOString().slice(0, 10);
-      const endStr = calendarEnd.toISOString().slice(0, 10);
-      const apiUrl = `/api/get-meal-completions?userId=${client.id}&start=${startStr}&end=${endStr}`;
-      const res = await fetch(apiUrl);
-      if (!res.ok) {
-        setCompliancePercentages([0,0,0,0,0,0,0]);
-        return;
-      }
-      const data = await res.json();
-      const completionsByDate = data.completionsByDate || {};
-      // For each day, calculate compliance
-      const percentages = Array.from({ length: 7 }).map((_, i) => {
-        const day = new Date(calendarStart);
-        day.setDate(calendarStart.getDate() + i);
-        const dateStr = day.toISOString().slice(0, 10);
-        const plan = plansByDay[i];
-        const completed = completionsByDate[dateStr] || [];
-        if (!plan || !plan.meals || plan.meals.length === 0) return 0;
-        return plan.meals.length > 0 ? completed.length / plan.meals.length : 0;
-      });
-      setCompliancePercentages(percentages);
+    if (complianceFetcher.data?.complianceData) {
+      console.timeEnd('Meal Week Navigation');
+      setCompliancePercentages(complianceFetcher.data.complianceData);
     }
-    fetchCompliance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calendarStart, client, mealPlans]);
+  }, [complianceFetcher.data]);
+
+  // Update when initial loader data changes
+  useEffect(() => {
+    if (initialComplianceData) {
+      setCompliancePercentages(initialComplianceData);
+    }
+  }, [initialComplianceData]);
 
   function getBarColor(percent: number) {
     // percent: 0 to 1
@@ -843,9 +811,16 @@ export default function ClientMeals() {
                     <button
                       className="p-1 rounded hover:bg-gray-100"
                       onClick={() => {
+                        console.time('Meal Week Navigation');
                         const prev = new Date(calendarStart);
                         prev.setDate(prev.getDate() - 7);
                         setCalendarStart(prev);
+                        
+                        // Use fetcher for fast data loading
+                        const params = new URLSearchParams();
+                        params.set("weekStart", prev.toISOString());
+                        params.set("clientId", client?.id || "");
+                        complianceFetcher.load(`/api/get-meal-compliance-week?${params.toString()}`);
                       }}
                       aria-label="Previous week"
                       type="button"
@@ -859,9 +834,16 @@ export default function ClientMeals() {
                     <button
                       className="p-1 rounded hover:bg-gray-100"
                       onClick={() => {
+                        console.time('Meal Week Navigation');
                         const next = new Date(calendarStart);
                         next.setDate(next.getDate() + 7);
                         setCalendarStart(next);
+                        
+                        // Use fetcher for fast data loading
+                        const params = new URLSearchParams();
+                        params.set("weekStart", next.toISOString());
+                        params.set("clientId", client?.id || "");
+                        complianceFetcher.load(`/api/get-meal-compliance-week?${params.toString()}`);
                       }}
                       aria-label="Next week"
                       type="button"
@@ -871,32 +853,62 @@ export default function ClientMeals() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-2">
-                  {dayLabels.map((label, i) => (
-                    <div key={label} className="flex items-center gap-3">
-                      <span className="text-xs text-gray-500 w-10 text-left flex-shrink-0">
-                        {label}
-                      </span>
-                      <div className="flex-1" />
-                      <div className="flex items-center w-1/3 min-w-[80px] max-w-[180px]">
-                        <div className="relative w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className="absolute left-0 top-0 h-2 rounded-full"
-                            style={{
-                              width: `${Math.round(compliancePercentages[i] * 100)}%`,
-                              background: getBarColor(compliancePercentages[i]),
-                              transition: "width 0.3s, background 0.3s",
-                            }}
-                          />
-                        </div>
-                        <span
-                          className="ml-3 text-xs font-medium min-w-[32px] text-right"
-                          style={{ color: getBarColor(compliancePercentages[i]) }}
-                        >
-                          {Math.round(compliancePercentages[i] * 100)}%
+                  {dayLabels.map((label, i) => {
+                    // Determine if this is today or future/past
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const thisDate = new Date(calendarStart);
+                    thisDate.setDate(calendarStart.getDate() + i);
+                    thisDate.setHours(0, 0, 0, 0);
+                    const isToday = thisDate.getTime() === today.getTime();
+                    const isFuture = thisDate.getTime() > today.getTime();
+                    
+                    // Determine percentage for display
+                    let percentage = Math.round((compliancePercentages[i] || 0) * 100);
+                    let displayPercentage = percentage;
+                    
+                    // For pending days, show 0% in the bar but don't show percentage text
+                    if (isFuture || (isToday && compliancePercentages[i] === 0)) {
+                      displayPercentage = 0;
+                    }
+                    
+                    return (
+                      <div key={label} className="flex items-center gap-3">
+                        <span className="text-xs text-gray-500 w-10 text-left flex-shrink-0">
+                          {label}
                         </span>
+                        <div className="flex-1" />
+                        <div className="flex items-center w-1/3 min-w-[80px] max-w-[180px]">
+                          <div className="relative w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="absolute left-0 top-0 h-2 rounded-full"
+                              style={{
+                                width: `${displayPercentage}%`,
+                                background: displayPercentage > 0 ? getBarColor(compliancePercentages[i] || 0) : 'transparent',
+                                transition: "width 0.3s, background 0.3s",
+                              }}
+                            />
+                          </div>
+                          <span
+                            className={`ml-3 text-xs font-medium text-right ${
+                              isToday && compliancePercentages[i] === 0 
+                                ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20' 
+                                : isFuture || (isToday && compliancePercentages[i] === 0)
+                                ? 'text-gray-500 min-w-[32px]'
+                                : 'min-w-[32px]'
+                            }`}
+                            style={{ 
+                              color: !(isFuture || (isToday && compliancePercentages[i] === 0)) 
+                                ? getBarColor(compliancePercentages[i] || 0)
+                                : undefined
+                            }}
+                          >
+                            {isFuture || (isToday && compliancePercentages[i] === 0) ? 'Pending' : `${percentage}%`}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </Card>
             </div>

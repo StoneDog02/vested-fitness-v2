@@ -3,7 +3,7 @@ import Card from "~/components/ui/Card";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import ViewWorkoutPlanModal from "~/components/coach/ViewWorkoutPlanModal";
 import CreateWorkoutModal from "~/components/coach/CreateWorkoutModal";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Modal from "~/components/ui/Modal";
 import { TrashIcon, PencilIcon } from "@heroicons/react/24/outline";
 import { json, redirect } from "@remix-run/node";
@@ -115,81 +115,25 @@ export const loader = async ({
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  // Fetch all exercise_sets for this client for the week
-  // 1. Find all workouts for this client in the week
-  const { data: workoutsRaw } = await supabase
-    .from("workouts")
-    .select("id, date")
+  // Fetch workout completions for this client for the week
+  const dbStart = performance.now();
+  const { data: completions } = await supabase
+    .from("workout_completions")
+    .select("completed_at")
     .eq("user_id", client.id)
-    .gte("date", weekStart.toISOString().slice(0, 10))
-    .lt("date", weekEnd.toISOString().slice(0, 10));
-  const workoutIds = (workoutsRaw || []).map((w) => w.id);
+    .gte("completed_at", weekStart.toISOString().slice(0, 10))
+    .lt("completed_at", weekEnd.toISOString().slice(0, 10));
+  console.log(`DB Query took: ${performance.now() - dbStart}ms`);
 
-  // 2. Find all exercises for those workouts
-  let exerciseIds: string[] = [];
-  if (workoutIds.length > 0) {
-    const { data: exercisesRaw } = await supabase
-      .from("exercises")
-      .select("id, workout_id")
-      .in("workout_id", workoutIds);
-    exerciseIds = (exercisesRaw || []).map((e) => e.id);
-  }
-
-  // 3. Fetch all sets for those exercises
-  let setsRaw: {
-    id: string;
-    exercise_id: string;
-    completed: boolean;
-    created_at: string;
-  }[] = [];
-  if (exerciseIds.length > 0) {
-    const { data: sets } = await supabase
-      .from("exercise_sets")
-      .select("id, exercise_id, completed, created_at")
-      .in("exercise_id", exerciseIds);
-    setsRaw = sets || [];
-  }
-
-  // 4. Build complianceData: for each day, percent of sets completed
+  // Build complianceData: for each day, check if there's a completion
   const complianceData: number[] = [];
   for (let i = 0; i < 7; i++) {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
-    day.setHours(0, 0, 0, 0);
-    // Find workouts for this day
-    const workoutIdsForDay = (workoutsRaw || [])
-      .filter((w) => {
-        const d = new Date(w.date);
-        d.setHours(0, 0, 0, 0);
-        return d.getTime() === day.getTime();
-      })
-      .map((w) => w.id);
-    if (workoutIdsForDay.length === 0) {
-      complianceData.push(0);
-      continue;
-    }
-    // Find exercises for these workouts
-    const exerciseIdsForDay =
-      exerciseIds.length > 0 && workoutsRaw
-        ? (
-            await supabase
-              .from("exercises")
-              .select("id, workout_id")
-              .in("workout_id", workoutIdsForDay)
-          ).data?.map((e) => e.id) || []
-        : [];
-    // Find sets for these exercises
-    const setsForDay = setsRaw.filter((s) =>
-      exerciseIdsForDay.includes(s.exercise_id)
-    );
-    if (setsForDay.length === 0) {
-      complianceData.push(0);
-      continue;
-    }
-    const completedCount = setsForDay.filter((s) => s.completed).length;
-    complianceData.push(
-      setsForDay.length > 0 ? completedCount / setsForDay.length : 0
-    );
+    const dayStr = day.toISOString().slice(0, 10);
+    
+    const hasCompletion = (completions || []).some((c: any) => c.completed_at === dayStr);
+    complianceData.push(hasCompletion ? 1 : 0);
   }
 
   // Fetch all workout plans for the client
@@ -224,77 +168,69 @@ export const loader = async ({
   const fetchDaysAndWorkouts = async (plans: any[]) => {
     return Promise.all(
       (plans || []).map(async (plan: any) => {
-        // Fetch days for this plan
+        // Fetch days for this plan using new workout_days table
         const { data: daysRaw } = await supabase
-          .from("workout_plan_days")
-          .select("id, day_of_week, is_rest, workout_id")
+          .from("workout_days")
+          .select("id, day_of_week, is_rest, workout_name, workout_type")
           .eq("workout_plan_id", plan.id);
+        
         // For each day, fetch workout details if not rest
         const days = await Promise.all(
           daysOfWeek.map(async (day) => {
             const dayRow = (daysRaw || []).find((d) => d.day_of_week === day);
             if (!dayRow) return { day, isRest: true, workout: null };
-            if (dayRow.is_rest || !dayRow.workout_id) {
+            if (dayRow.is_rest) {
               return { day, isRest: true, workout: null };
             }
-            // Fetch workout details
-            const { data: workout } = await supabase
-              .from("workouts")
-              .select("id, name, date, created_at, type")
-              .eq("id", dayRow.workout_id)
-              .single();
-            let groups = [];
-            if (workout) {
-              const { data: groupsRaw } = await supabase
-                .from("exercise_groups")
-                .select("id, group_type, sequence_order, notes")
-                .eq("workout_id", workout.id)
-                .order("sequence_order", { ascending: true });
-              groups = [];
-              for (const group of groupsRaw || []) {
-                const { data: exercisesRaw } = await supabase
-                  .from("exercises")
-                  .select(
-                    "id, name, description, video_url, sequence_order, group_id"
-                  )
-                  .eq("group_id", group.id)
-                  .order("sequence_order", { ascending: true });
-                const exercises = await Promise.all(
-                  (exercisesRaw || []).map(async (exercise) => {
-                    const { data: sets } = await supabase
-                      .from("exercise_sets")
-                      .select("id, set_number, weight, reps, completed, notes")
-                      .eq("exercise_id", exercise.id)
-                      .order("set_number", { ascending: true });
-                    return { ...exercise, sets: sets || [] };
-                  })
-                );
-                groups.push({
-                  type: group.group_type,
-                  exercises: exercises.map((ex) => ({
-                    name: ex.name,
-                    videoUrl: ex.video_url,
-                    sets: ex.sets ? ex.sets.length : 3,
-                    reps: ex.sets && ex.sets[0] ? ex.sets[0].reps : 10,
-                    notes: ex.description || undefined,
-                  })),
+            
+            // Fetch exercises for this workout day using new workout_exercises table
+            const { data: exercisesRaw } = await supabase
+              .from("workout_exercises")
+              .select("id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
+              .eq("workout_day_id", dayRow.id)
+              .order("sequence_order", { ascending: true });
+            
+            // Group exercises by their sequence order and group type
+            const groupsMap = new Map();
+            (exercisesRaw || []).forEach((exercise) => {
+              const groupKey = `${exercise.sequence_order}-${exercise.group_type}`;
+              if (!groupsMap.has(groupKey)) {
+                groupsMap.set(groupKey, {
+                  type: exercise.group_type,
+                  notes: exercise.group_notes,
+                  exercises: []
                 });
               }
-            }
+              
+              // Parse sets data from JSONB
+              const setsData = exercise.sets_data || [];
+              const setsCount = setsData.length || 3;
+              const reps = setsData.length > 0 ? (setsData[0].reps || 10) : 10;
+              
+              groupsMap.get(groupKey).exercises.push({
+                name: exercise.exercise_name,
+                videoUrl: exercise.video_url,
+                sets: setsCount,
+                reps: reps,
+                notes: exercise.exercise_description || undefined,
+              });
+            });
+            
+            const groups = Array.from(groupsMap.values());
+            
             return {
               day,
-              isRest: dayRow.is_rest || !workout,
-              workout: workout
-                ? {
-                    id: workout.id,
-                    title: workout.name,
-                    createdAt: workout.created_at,
-                    exercises: groups,
-                  }
-                : null,
+              isRest: false,
+              workout: {
+                id: dayRow.id, // Using workout_day id instead of old workout id
+                title: dayRow.workout_name || `${plan.title} - ${day}`,
+                createdAt: plan.created_at, // Use plan creation date
+                exercises: groups,
+              },
             };
           })
         );
+        
         return {
           id: plan.id,
           title: plan.title,
@@ -405,37 +341,34 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   ];
 
   if (intent === "delete") {
-    // Delete the plan (cascade deletes days)
-    await supabase.from("workout_plans").delete().eq("id", planId);
-    // Optionally, delete all workouts linked to this plan's days
+    // Get all workout days for this plan
     const { data: days } = await supabase
-      .from("workout_plan_days")
-      .select("workout_id")
+      .from("workout_days")
+      .select("id")
       .eq("workout_plan_id", planId);
+    
+    // Delete all workout exercises for these days
     if (days) {
       for (const day of days) {
-        if (day.workout_id) {
-          // Delete exercises/sets for this workout
-          const { data: exercises } = await supabase
-            .from("exercises")
-            .select("id")
-            .eq("workout_id", day.workout_id);
-          if (exercises) {
-            for (const exercise of exercises) {
-              await supabase
-                .from("exercise_sets")
-                .delete()
-                .eq("exercise_id", exercise.id);
-            }
-            await supabase
-              .from("exercises")
-              .delete()
-              .eq("workout_id", day.workout_id);
-          }
-          await supabase.from("workouts").delete().eq("id", day.workout_id);
-        }
+        await supabase
+          .from("workout_exercises")
+          .delete()
+          .eq("workout_day_id", day.id);
       }
     }
+    
+    // Delete the workout days
+    await supabase
+      .from("workout_days")
+      .delete()
+      .eq("workout_plan_id", planId);
+    
+    // Delete the workout plan
+    await supabase
+      .from("workout_plans")
+      .delete()
+      .eq("id", planId);
+    
     return redirect(request.url);
   }
 
@@ -484,101 +417,50 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
     // Get template days
     const { data: templateDays } = await supabase
-      .from("workout_plan_days")
+      .from("workout_days")
       .select("*")
       .eq("workout_plan_id", templateId);
-    // Copy days, workouts, groups, exercises, sets
+    
+    // Copy days and exercises
     if (templateDays) {
       for (const day of templateDays) {
-        let newWorkoutId = null;
-        if (!day.is_rest && day.workout_id) {
-          // Copy workout
-          const { data: workout } = await supabase
-            .from("workouts")
+        // Insert new workout day for client plan
+        const { data: newDay } = await supabase
+          .from("workout_days")
+          .insert({
+            workout_plan_id: newPlan.id,
+            day_of_week: day.day_of_week,
+            is_rest: day.is_rest,
+            workout_name: day.workout_name,
+            workout_type: day.workout_type,
+          })
+          .select()
+          .single();
+        
+        if (!day.is_rest && newDay) {
+          // Copy exercises for this day
+          const { data: templateExercises } = await supabase
+            .from("workout_exercises")
             .select("*")
-            .eq("id", day.workout_id)
-            .single();
-          if (workout) {
-            const { data: newWorkout } = await supabase
-              .from("workouts")
-              .insert({
-                user_id: client.id,
-                name: workout.name,
-                is_active: false,
-                date: workout.date,
-                type: workout.type,
-              })
-              .select()
-              .single();
-            newWorkoutId = newWorkout?.id;
-            // Copy groups
-            const { data: groups } = await supabase
-              .from("exercise_groups")
-              .select("*")
-              .eq("workout_id", workout.id);
-            if (groups) {
-              for (const group of groups) {
-                const { data: newGroup } = await supabase
-                  .from("exercise_groups")
-                  .insert({
-                    workout_id: newWorkoutId,
-                    group_type: group.group_type,
-                    sequence_order: group.sequence_order,
-                    notes: group.notes,
-                  })
-                  .select()
-                  .single();
-                // Copy exercises
-                const { data: exercises } = await supabase
-                  .from("exercises")
-                  .select("*")
-                  .eq("group_id", group.id);
-                if (exercises) {
-                  for (const exercise of exercises) {
-                    const { data: newExercise } = await supabase
-                      .from("exercises")
-                      .insert({
-                        workout_id: newWorkoutId,
-                        group_id: newGroup.id,
-                        name: exercise.name,
-                        description: exercise.description,
-                        video_url: exercise.video_url,
-                        sequence_order: exercise.sequence_order,
-                        type: group.group_type || "Single",
-                      })
-                      .select()
-                      .single();
-                    // Copy sets
-                    const { data: sets } = await supabase
-                      .from("exercise_sets")
-                      .select("*")
-                      .eq("exercise_id", exercise.id);
-                    if (sets) {
-                      for (const set of sets) {
-                        await supabase.from("exercise_sets").insert({
-                          exercise_id: newExercise.id,
-                          set_number: set.set_number,
-                          weight: set.weight,
-                          reps: set.reps,
-                          completed: false,
-                          notes: set.notes,
-                          type: group.group_type || "Single",
-                        });
-                      }
-                    }
-                  }
-                }
-              }
+            .eq("workout_day_id", day.id);
+          
+          if (templateExercises) {
+            for (const exercise of templateExercises) {
+              await supabase
+                .from("workout_exercises")
+                .insert({
+                  workout_day_id: newDay.id,
+                  group_type: exercise.group_type,
+                  sequence_order: exercise.sequence_order,
+                  exercise_name: exercise.exercise_name,
+                  exercise_description: exercise.exercise_description,
+                  video_url: exercise.video_url,
+                  sets_data: exercise.sets_data,
+                  group_notes: exercise.group_notes,
+                });
             }
           }
         }
-        // Insert day for new plan
-        await supabase.from("workout_plan_days").insert({
-          workout_plan_id: newPlan.id,
-          day_of_week: day.day_of_week,
-          is_rest: day.is_rest,
-          workout_id: newWorkoutId,
-        });
       }
     }
     return redirect(request.url);
@@ -619,142 +501,98 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     // For each day, insert for both template and client plan
     for (const day of daysOfWeek) {
       const dayPlan = week[day];
+      
       // Template day
-      let templateWorkoutId = null;
-      if (dayPlan && dayPlan.mode === "workout" && dayPlan.groups && dayPlan.groups.length > 0 && dayPlan.groups.some((g: WorkoutGroup) => g.exercises && g.exercises.length > 0)) {
-        // Insert workout for template
-        const { data: templateWorkout } = await supabase
-          .from("workouts")
-          .insert({
-            user_id: coachId,
-            name: planName + " - " + day,
-            is_active: false,
-            date: new Date().toISOString().slice(0, 10),
-            type: dayPlan.type || "Single",
-          })
-          .select()
-          .single();
-        templateWorkoutId = templateWorkout?.id;
-        // Insert groups/exercises/sets for template
-        if (templateWorkout) {
-          let groupOrder = 0;
-          for (const group of dayPlan.groups) {
-            const { data: groupRow } = await supabase
-              .from("exercise_groups")
-              .insert({
-                workout_id: templateWorkout.id,
-                group_type: group.type,
-                sequence_order: groupOrder,
-                notes: group.notes || null,
-              })
-              .select()
-              .single();
-            for (const exercise of group.exercises || []) {
-              const { data: exerciseRow } = await supabase
-                .from("exercises")
+      const { data: templateDay } = await supabase
+        .from("workout_days")
+        .insert({
+          workout_plan_id: newTemplate.id,
+          day_of_week: day,
+          is_rest: !dayPlan || dayPlan.mode === "rest",
+          workout_name: dayPlan && dayPlan.mode === "workout" ? `${planName} - ${day}` : null,
+          workout_type: dayPlan && dayPlan.mode === "workout" ? (dayPlan.type || "Single") : null,
+        })
+        .select()
+        .single();
+      
+      // Insert exercises for template if not rest day
+      if (dayPlan && dayPlan.mode === "workout" && dayPlan.groups && dayPlan.groups.length > 0 && templateDay) {
+        let sequenceOrder = 0;
+        for (const group of dayPlan.groups) {
+          for (const exercise of group.exercises || []) {
+            if (exercise.name) {
+              // Create sets data
+              const setsData = Array.from({ length: exercise.sets || 3 }, (_, i) => ({
+                set_number: i + 1,
+                weight: null,
+                reps: exercise.reps || 10,
+                completed: false,
+                notes: exercise.notes || null,
+              }));
+              
+              await supabase
+                .from("workout_exercises")
                 .insert({
-                  workout_id: templateWorkout.id,
-                  group_id: groupRow.id,
-                  name: exercise.name,
-                  description: exercise.notes || "",
+                  workout_day_id: templateDay.id,
+                  group_type: group.type,
+                  sequence_order: sequenceOrder,
+                  exercise_name: exercise.name,
+                  exercise_description: exercise.notes || "",
                   video_url: exercise.videoUrl,
-                  sequence_order: 0,
-                  type: group.type || "Single",
-                })
-                .select()
-                .single();
-              if (exerciseRow && typeof exercise.sets === "number" && exercise.sets > 0) {
-                for (let j = 0; j < exercise.sets; j++) {
-                  await supabase.from("exercise_sets").insert({
-                    exercise_id: exerciseRow.id,
-                    set_number: j + 1,
-                    weight: null,
-                    reps: exercise.reps ?? null,
-                    completed: false,
-                    notes: exercise.notes ?? null,
-                    type: group.type || "Single",
-                  });
-                }
-              }
+                  sets_data: setsData,
+                  group_notes: group.notes || null,
+                });
+              sequenceOrder++;
             }
-            groupOrder++;
           }
         }
       }
-      await supabase.from("workout_plan_days").insert({
-        workout_plan_id: newTemplate.id,
-        day_of_week: day,
-        is_rest: !dayPlan || dayPlan.mode === "rest",
-        workout_id: templateWorkoutId,
-      });
+      
       // Client day
-      let clientWorkoutId = null;
-      if (dayPlan && dayPlan.mode === "workout" && dayPlan.groups && dayPlan.groups.length > 0 && dayPlan.groups.some((g: WorkoutGroup) => g.exercises && g.exercises.length > 0)) {
-        // Insert workout for client
-        const { data: clientWorkout } = await supabase
-          .from("workouts")
-          .insert({
-            user_id: client.id,
-            name: planName + " - " + day,
-            is_active: false,
-            date: new Date().toISOString().slice(0, 10),
-            type: dayPlan.type || "Single",
-          })
-          .select()
-          .single();
-        clientWorkoutId = clientWorkout?.id;
-        // Insert groups/exercises/sets for client
-        if (clientWorkout) {
-          let groupOrder = 0;
-          for (const group of dayPlan.groups) {
-            const { data: groupRow } = await supabase
-              .from("exercise_groups")
-              .insert({
-                workout_id: clientWorkout.id,
-                group_type: group.type,
-                sequence_order: groupOrder,
-                notes: group.notes || null,
-              })
-              .select()
-              .single();
-            for (const exercise of group.exercises || []) {
-              const { data: exerciseRow } = await supabase
-                .from("exercises")
+      const { data: clientDay } = await supabase
+        .from("workout_days")
+        .insert({
+          workout_plan_id: newPlan.id,
+          day_of_week: day,
+          is_rest: !dayPlan || dayPlan.mode === "rest",
+          workout_name: dayPlan && dayPlan.mode === "workout" ? `${planName} - ${day}` : null,
+          workout_type: dayPlan && dayPlan.mode === "workout" ? (dayPlan.type || "Single") : null,
+        })
+        .select()
+        .single();
+      
+      // Insert exercises for client if not rest day
+      if (dayPlan && dayPlan.mode === "workout" && dayPlan.groups && dayPlan.groups.length > 0 && clientDay) {
+        let sequenceOrder = 0;
+        for (const group of dayPlan.groups) {
+          for (const exercise of group.exercises || []) {
+            if (exercise.name) {
+              // Create sets data
+              const setsData = Array.from({ length: exercise.sets || 3 }, (_, i) => ({
+                set_number: i + 1,
+                weight: null,
+                reps: exercise.reps || 10,
+                completed: false,
+                notes: exercise.notes || null,
+              }));
+              
+              await supabase
+                .from("workout_exercises")
                 .insert({
-                  workout_id: clientWorkout.id,
-                  group_id: groupRow.id,
-                  name: exercise.name,
-                  description: exercise.notes || "",
+                  workout_day_id: clientDay.id,
+                  group_type: group.type,
+                  sequence_order: sequenceOrder,
+                  exercise_name: exercise.name,
+                  exercise_description: exercise.notes || "",
                   video_url: exercise.videoUrl,
-                  sequence_order: 0,
-                  type: group.type || "Single",
-                })
-                .select()
-                .single();
-              if (exerciseRow && typeof exercise.sets === "number" && exercise.sets > 0) {
-                for (let j = 0; j < exercise.sets; j++) {
-                  await supabase.from("exercise_sets").insert({
-                    exercise_id: exerciseRow.id,
-                    set_number: j + 1,
-                    weight: null,
-                    reps: exercise.reps ?? null,
-                    completed: false,
-                    notes: exercise.notes ?? null,
-                    type: group.type || "Single",
-                  });
-                }
-              }
+                  sets_data: setsData,
+                  group_notes: group.notes || null,
+                });
+              sequenceOrder++;
             }
-            groupOrder++;
           }
         }
       }
-      await supabase.from("workout_plan_days").insert({
-        workout_plan_id: newPlan.id,
-        day_of_week: day,
-        is_rest: !dayPlan || dayPlan.mode === "rest",
-        workout_id: clientWorkoutId,
-      });
     }
     return redirect(request.url);
   }
@@ -774,175 +612,98 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     // --- DELETE ALL OLD DATA FOR THIS PLAN ---
     // Fetch all days for this plan
     const { data: oldDays } = await supabase
-      .from("workout_plan_days")
-      .select("id, workout_id")
+      .from("workout_days")
+      .select("id")
       .eq("workout_plan_id", planId);
+    
     if (oldDays) {
       for (const day of oldDays) {
-        if (day.workout_id) {
-          // Delete all exercises/sets for this workout
-          const { data: exercises } = await supabase
-            .from("exercises")
-            .select("id")
-            .eq("workout_id", day.workout_id);
-          if (exercises) {
-            for (const exercise of exercises) {
-              await supabase
-                .from("exercise_sets")
-                .delete()
-                .eq("exercise_id", exercise.id);
-            }
-            await supabase
-              .from("exercises")
-              .delete()
-              .eq("workout_id", day.workout_id);
-          }
-          await supabase.from("workouts").delete().eq("id", day.workout_id);
-        }
-        await supabase.from("workout_plan_days").delete().eq("id", day.id);
+        // Delete all exercises for this workout day
+        await supabase
+          .from("workout_exercises")
+          .delete()
+          .eq("workout_day_id", day.id);
       }
+      // Delete all workout days
+      await supabase
+        .from("workout_days")
+        .delete()
+        .eq("workout_plan_id", planId);
     }
 
     // --- INSERT NEW WEEK STRUCTURE ---
     for (const day of daysOfWeek) {
       const dayPlan = week[day];
-      console.log(`[ACTION] Processing day: ${day}`, dayPlan);
-      if (!dayPlan || dayPlan.mode === "rest") {
-        console.log(`[ACTION] Inserting rest day for ${day}`);
-        await supabase.from("workout_plan_days").insert({
+      
+      // Insert workout day
+      const { data: workoutDay, error: dayError } = await supabase
+        .from("workout_days")
+        .insert({
           workout_plan_id: planId,
           day_of_week: day,
-          is_rest: true,
-          workout_id: null,
-        });
-      } else if (
+          is_rest: !dayPlan || dayPlan.mode === "rest",
+          workout_name: dayPlan && dayPlan.mode === "workout" ? `${planName} - ${day}` : null,
+          workout_type: dayPlan && dayPlan.mode === "workout" ? (dayPlan.type || "Single") : null,
+        })
+        .select()
+        .single();
+      
+      if (dayError) {
+        console.error(`[ACTION] Day insert error for ${day}:`, dayError);
+        continue;
+      }
+      
+      // Insert exercises if not rest day
+      if (
+        dayPlan &&
         dayPlan.mode === "workout" &&
         dayPlan.groups &&
         dayPlan.groups.length > 0 &&
-        dayPlan.groups.some(
-          (g: WorkoutGroup) => g.exercises && g.exercises.length > 0
-        )
+        dayPlan.groups.some((g: WorkoutGroup) => g.exercises && g.exercises.length > 0) &&
+        workoutDay
       ) {
-        console.log(`[ACTION] Inserting workout for ${day}`);
-        const workoutInsert = {
-          user_id: client.id,
-          name: planName + " - " + day,
-          is_active: false,
-          date: new Date().toISOString().slice(0, 10),
-          type: dayPlan.type || "Single",
-        };
-        console.log(
-          `[ACTION] Workout insert object for ${day}:`,
-          workoutInsert
-        );
-        const { data: workout, error: workoutError } = await supabase
-          .from("workouts")
-          .insert(workoutInsert)
-          .select()
-          .single();
-        if (workoutError)
-          console.error(
-            `[ACTION] Workout insert error for ${day}:`,
-            workoutError
-          );
-        if (workout) {
-          let groupOrder = 0;
-          for (const group of dayPlan.groups) {
-            // Insert group into exercise_groups
-            const { data: groupRow, error: groupError } = await supabase
-              .from("exercise_groups")
-              .insert({
-                workout_id: workout.id,
-                group_type: group.type,
-                sequence_order: groupOrder,
-                notes: group.notes || null,
-              })
-              .select()
-              .single();
-            if (groupError) {
-              console.error(
-                `[ACTION] Group insert error for ${day}:`,
-                groupError
-              );
-              continue;
-            }
-            for (const exercise of group.exercises || []) {
+
+        let sequenceOrder = 0;
+        
+        for (const group of dayPlan.groups) {
+          for (const exercise of group.exercises || []) {
+            if (exercise.name) {
+              // Create sets data
+              const setsData = Array.from({ length: exercise.sets || 3 }, (_, i) => ({
+                set_number: i + 1,
+                weight: null,
+                reps: exercise.reps || 10,
+                completed: false,
+                notes: exercise.notes || null,
+              }));
+              
               const exerciseInsert = {
-                workout_id: workout.id,
-                group_id: groupRow.id,
-                name: exercise.name,
-                description: exercise.notes || "",
+                workout_day_id: workoutDay.id,
+                group_type: group.type,
+                sequence_order: sequenceOrder,
+                exercise_name: exercise.name,
+                exercise_description: exercise.notes || "",
                 video_url: exercise.videoUrl,
-                sequence_order: 0, // You can add ordering if needed
-                type: group.type || "Single",
+                sets_data: setsData,
+                group_notes: group.notes || null,
               };
-              console.log(
-                `[ACTION] Exercise insert object for ${day}:`,
-                exerciseInsert
-              );
-              const { data: exerciseRow, error: exerciseError } = await supabase
-                .from("exercises")
-                .insert(exerciseInsert)
-                .select()
-                .single();
-              if (exerciseError)
-                console.error(
-                  `[ACTION] Exercise insert error for ${day}:`,
-                  exerciseError
-                );
-              if (
-                exerciseRow &&
-                typeof exercise.sets === "number" &&
-                exercise.sets > 0
-              ) {
-                for (let j = 0; j < exercise.sets; j++) {
-                  const setInsert = {
-                    exercise_id: exerciseRow.id,
-                    set_number: j + 1,
-                    weight: null,
-                    reps: exercise.reps ?? null,
-                    completed: false,
-                    notes: exercise.notes ?? null,
-                    type: group.type || "Single",
-                  };
-                  console.log(
-                    `[ACTION] Set insert object for ${day}:`,
-                    setInsert
-                  );
-                  const { error: setError } = await supabase
-                    .from("exercise_sets")
-                    .insert(setInsert);
-                  if (setError)
-                    console.error(
-                      `[ACTION] Set insert error for ${day}:`,
-                      setError
-                    );
-                }
+              
+
+              
+              const { error: exerciseError } = await supabase
+                .from("workout_exercises")
+                .insert(exerciseInsert);
+              
+              if (exerciseError) {
+                console.error(`[ACTION] Exercise insert error for ${day}:`, exerciseError);
               }
+              
+              sequenceOrder++;
             }
-            groupOrder++;
           }
-          const dayInsert = {
-            workout_plan_id: planId,
-            day_of_week: day,
-            is_rest: false,
-            workout_id: workout.id,
-          };
-          console.log(
-            `[ACTION] workout_plan_days insert object for ${day}:`,
-            dayInsert
-          );
-          const { error: dayError } = await supabase
-            .from("workout_plan_days")
-            .insert(dayInsert);
-          if (dayError)
-            console.error(
-              `[ACTION] workout_plan_days insert error for ${day}:`,
-              dayError
-            );
         }
       } else {
-        console.log(`[ACTION] Skipping day ${day} (no exercises)`);
+
       }
     }
     return redirect(request.url);
@@ -970,29 +731,33 @@ function buildWeekFromPlan(plan: WorkoutPlan) {
     } else if (dayObj.workout) {
       // Now, exercises is actually Group[]
       const groups = dayObj.workout.exercises || [];
-      week[dayObj.day] = {
-        mode: "workout",
+      
+
+      
+      const dayPlan = {
+        mode: "workout" as const,
         type:
           (groups.length > 0 && groups[0].type) || ("Single" as WorkoutType),
         groups,
       };
+      week[dayObj.day] = dayPlan;
     } else {
       week[dayObj.day] = { mode: "rest" };
     }
   }
-  console.log("[WORKOUTS LOADER] buildWeekFromPlan result:", week);
   return week;
 }
 
 export default function ClientWorkouts() {
-  const { workoutPlans, libraryPlans, client, complianceData, weekStart } = useLoaderData<{
+  const { workoutPlans, libraryPlans, client, complianceData: initialComplianceData, weekStart } = useLoaderData<{
     workoutPlans: WorkoutPlan[];
     libraryPlans: WorkoutPlan[];
-    client: { name: string } | null;
+    client: { id: string; name: string } | null;
     complianceData: number[];
     weekStart: string;
   }>();
   const fetcher = useFetcher();
+  const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutPlan | null>(
@@ -1004,13 +769,31 @@ export default function ClientWorkouts() {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const [, setSearchParams] = useSearchParams();
+  const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
+  const [currentWeekStart, setCurrentWeekStart] = useState(weekStart);
+
+  // Update compliance data when fetcher returns
+  useEffect(() => {
+    if (complianceFetcher.data?.complianceData) {
+      setComplianceData(complianceFetcher.data.complianceData);
+    }
+  }, [complianceFetcher.data]);
+
+  // Update when initial loader data changes
+  useEffect(() => {
+    setComplianceData(initialComplianceData);
+    setCurrentWeekStart(weekStart);
+  }, [initialComplianceData, weekStart]);
 
   // For visible plans, just show all plans (or filter as needed)
   const sortedPlans = [...workoutPlans].sort((a, b) =>
     b.createdAt.localeCompare(a.createdAt)
   );
+  
+
 
   const handleEdit = (plan: WorkoutPlan) => {
+    const weekData = buildWeekFromPlan(plan);
     setSelectedWorkout(plan);
     setIsEditModalOpen(true);
   };
@@ -1061,8 +844,8 @@ export default function ClientWorkouts() {
   }
 
   // Week navigation state
-  const calendarStart = weekStart
-    ? new Date(weekStart)
+  const calendarStart = currentWeekStart
+    ? new Date(currentWeekStart)
     : (() => {
         const now = new Date();
         const day = now.getDay();
@@ -1080,21 +863,25 @@ export default function ClientWorkouts() {
     const prev = new Date(calendarStart);
     prev.setDate(prev.getDate() - 7);
     prev.setHours(0, 0, 0, 0);
-    setSearchParams((prevParams) => {
-      const newParams = new URLSearchParams(prevParams);
-      newParams.set("weekStart", prev.toISOString());
-      return newParams;
-    });
+    setCurrentWeekStart(prev.toISOString());
+    
+    // Use fetcher for fast data loading
+    const params = new URLSearchParams();
+    params.set("weekStart", prev.toISOString());
+    params.set("clientId", client?.id || "");
+    complianceFetcher.load(`/api/get-compliance-week?${params.toString()}`);
   }
   function handleNextWeek() {
     const next = new Date(calendarStart);
     next.setDate(next.getDate() + 7);
     next.setHours(0, 0, 0, 0);
-    setSearchParams((prevParams) => {
-      const newParams = new URLSearchParams(prevParams);
-      newParams.set("weekStart", next.toISOString());
-      return newParams;
-    });
+    setCurrentWeekStart(next.toISOString());
+    
+    // Use fetcher for fast data loading
+    const params = new URLSearchParams();
+    params.set("weekStart", next.toISOString());
+    params.set("clientId", client?.id || "");
+    complianceFetcher.load(`/api/get-compliance-week?${params.toString()}`);
   }
 
   return (
@@ -1394,34 +1181,62 @@ export default function ClientWorkouts() {
                 </div>
               </div>
               <div className="flex flex-col gap-2">
-                {dayLabels.map((label, i) => (
-                  <div key={label} className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500 w-10 text-left flex-shrink-0">
-                      {label}
-                    </span>
-                    <div className="flex-1" />
-                    <div className="flex items-center w-1/3 min-w-[80px] max-w-[180px]">
-                      <div className="relative w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className="absolute left-0 top-0 h-2 rounded-full"
-                          style={{
-                            width: `${Math.round(
-                              (complianceData[i] || 0) * 100
-                            )}%`,
-                            background: getBarColor(complianceData[i] || 0),
-                            transition: "width 0.3s, background 0.3s",
-                          }}
-                        />
-                      </div>
-                      <span
-                        className="ml-3 text-xs font-medium min-w-[32px] text-right"
-                        style={{ color: getBarColor(complianceData[i] || 0) }}
-                      >
-                        {Math.round((complianceData[i] || 0) * 100)}%
+                {dayLabels.map((label, i) => {
+                  // Determine if this is today or future/past
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const thisDate = new Date(calendarStart);
+                  thisDate.setDate(calendarStart.getDate() + i);
+                  thisDate.setHours(0, 0, 0, 0);
+                  const isToday = thisDate.getTime() === today.getTime();
+                  const isFuture = thisDate.getTime() > today.getTime();
+                  
+                  // Determine percentage for display
+                  let percentage = Math.round((complianceData[i] || 0) * 100);
+                  let displayPercentage = percentage;
+                  
+                  // For pending days, show 0% in the bar but don't show percentage text
+                  if (isFuture || (isToday && complianceData[i] === 0)) {
+                    displayPercentage = 0;
+                  }
+                  
+                  return (
+                    <div key={label} className="flex items-center gap-3">
+                      <span className="text-xs text-gray-500 w-10 text-left flex-shrink-0">
+                        {label}
                       </span>
+                      <div className="flex-1" />
+                      <div className="flex items-center w-1/3 min-w-[80px] max-w-[180px]">
+                        <div className="relative w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="absolute left-0 top-0 h-2 rounded-full"
+                            style={{
+                              width: `${displayPercentage}%`,
+                              background: displayPercentage > 0 ? getBarColor(complianceData[i] || 0) : 'transparent',
+                              transition: "width 0.3s, background 0.3s",
+                            }}
+                          />
+                        </div>
+                        <span
+                          className={`ml-3 text-xs font-medium text-right ${
+                            isToday && complianceData[i] === 0 
+                              ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20' 
+                              : isFuture || (isToday && complianceData[i] === 0)
+                              ? 'text-gray-500 min-w-[32px]'
+                              : 'min-w-[32px]'
+                          }`}
+                          style={{ 
+                            color: !(isFuture || (isToday && complianceData[i] === 0)) 
+                              ? getBarColor(complianceData[i] || 0)
+                              : undefined
+                          }}
+                        >
+                          {isFuture || (isToday && complianceData[i] === 0) ? 'Pending' : `${percentage}%`}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </Card>
           </div>

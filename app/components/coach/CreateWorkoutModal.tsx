@@ -71,26 +71,28 @@ export default function CreateWorkoutModal({
 
   // Populate form with initial values when editing
   useEffect(() => {
-    if (initialValues && initialValues.week) {
-      setPlanName(initialValues.planName || "");
-      setWeekPlans(initialValues.week);
-      setSavedDays(
-        daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: true }), {})
-      );
-    } else if (isOpen) {
-      setPlanName("");
-      setWeekPlans(
-        daysOfWeek.reduce(
-          (acc, day) => ({ ...acc, [day]: { mode: "rest" } }),
-          {}
-        )
-      );
-      setSavedDays(
-        daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: false }), {})
-      );
+    if (isOpen) {
+      if (initialValues && initialValues.week) {
+        setPlanName(initialValues.planName || "");
+        setWeekPlans(initialValues.week);
+        setSavedDays(
+          daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: true }), {})
+        );
+      } else {
+        setPlanName("");
+        setWeekPlans(
+          daysOfWeek.reduce(
+            (acc, day) => ({ ...acc, [day]: { mode: "rest" } }),
+            {}
+          )
+        );
+        setSavedDays(
+          daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: false }), {})
+        );
+      }
+      setCurrentDayIndex(0);
+      lastDayIndex.current = 0;
     }
-    setCurrentDayIndex(0);
-    lastDayIndex.current = 0;
   }, [initialValues, isOpen]);
 
   // Auto-save when navigating away from a day

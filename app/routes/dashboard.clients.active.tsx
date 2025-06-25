@@ -76,26 +76,44 @@ export const loader: LoaderFunction = async ({ request }) => {
           // Compliance: % of workouts completed in last 7 days
           const weekAgo = new Date();
           weekAgo.setDate(weekAgo.getDate() - 7);
-          const { data: workouts } = await supabase
-            .from("workouts")
-            .select("id, completed, date")
+          
+          // Get workout completions
+          const { data: workoutCompletions } = await supabase
+            .from("workout_completions")
+            .select("id, completed_at")
             .eq("user_id", client.id)
-            .gte("date", weekAgo.toISOString().slice(0, 10));
-          const totalWorkouts = (workouts ?? []).length;
-          const completedWorkouts = (workouts ?? []).filter(
-            (w) => w.completed
-          ).length;
+            .gte("completed_at", weekAgo.toISOString().slice(0, 10));
+          
+          // Get expected workout days for this client
+          const { data: clientPlans } = await supabase
+            .from("workout_plans")
+            .select("id")
+            .eq("user_id", client.id)
+            .eq("is_active", true)
+            .limit(1);
+          
+          let expectedWorkoutDays = 0;
+          if (clientPlans && clientPlans.length > 0) {
+            const { data: workoutDays } = await supabase
+              .from("workout_days")
+              .select("is_rest")
+              .eq("workout_plan_id", clientPlans[0].id);
+            expectedWorkoutDays = (workoutDays || []).filter(day => !day.is_rest).length;
+          }
+          
+          const completedWorkouts = (workoutCompletions ?? []).length;
           const compliance =
-            totalWorkouts > 0
-              ? Math.round((completedWorkouts / totalWorkouts) * 100)
+            expectedWorkoutDays > 0
+              ? Math.round((completedWorkouts / expectedWorkoutDays) * 100)
               : 0;
-          // Last active: use updated_at (or latest workout date if available)
+          
+          // Last active: use updated_at (or latest workout completion if available)
           let lastActive = client.updated_at;
-          if (workouts && workouts.length > 0) {
-            const latestWorkout = workouts.reduce((latest, w) =>
-              new Date(w.date) > new Date(latest.date) ? w : latest
+          if (workoutCompletions && workoutCompletions.length > 0) {
+            const latestCompletion = workoutCompletions.reduce((latest, w) =>
+              new Date(w.completed_at) > new Date(latest.completed_at) ? w : latest
             );
-            lastActive = latestWorkout.date;
+            lastActive = latestCompletion.completed_at;
           }
           activeClients.push({
             id: client.id,

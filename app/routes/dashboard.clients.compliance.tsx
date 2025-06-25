@@ -73,18 +73,35 @@ export const loader: LoaderFunction = async ({ request }) => {
           // Compliance: % of workouts completed in last 7 days
           const weekAgo = new Date();
           weekAgo.setDate(weekAgo.getDate() - 7);
-          const { data: workouts } = await supabase
-            .from("workouts")
-            .select("id, completed, date")
+          
+          // Get workout completions
+          const { data: workoutCompletions } = await supabase
+            .from("workout_completions")
+            .select("id, completed_at")
             .eq("user_id", client.id)
-            .gte("date", weekAgo.toISOString().slice(0, 10));
-          const totalWorkouts = (workouts ?? []).length;
-          const completedWorkouts = (workouts ?? []).filter(
-            (w: { completed: boolean }) => w.completed
-          ).length;
+            .gte("completed_at", weekAgo.toISOString().slice(0, 10));
+          
+          // Get expected workout days for this client
+          const { data: clientPlans } = await supabase
+            .from("workout_plans")
+            .select("id")
+            .eq("user_id", client.id)
+            .eq("is_active", true)
+            .limit(1);
+          
+          let expectedWorkoutDays = 0;
+          if (clientPlans && clientPlans.length > 0) {
+            const { data: workoutDays } = await supabase
+              .from("workout_days")
+              .select("is_rest")
+              .eq("workout_plan_id", clientPlans[0].id);
+            expectedWorkoutDays = (workoutDays || []).filter(day => !day.is_rest).length;
+          }
+          
+          const completedWorkouts = (workoutCompletions ?? []).length;
           const compliance =
-            totalWorkouts > 0
-              ? Math.round((completedWorkouts / totalWorkouts) * 100)
+            expectedWorkoutDays > 0
+              ? Math.round((completedWorkouts / expectedWorkoutDays) * 100)
               : 0;
           complianceClients.push({
             id: client.id,

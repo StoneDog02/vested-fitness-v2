@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
@@ -50,18 +50,21 @@ export const loader: LoaderFunction = async ({ request }) => {
       userId = undefined;
     }
   }
-  if (!userId) return json({ todaysWorkout: null });
+  if (!userId) return json({ todaysWorkout: null, complianceData: [0, 0, 0, 0, 0, 0, 0] });
+  
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
+  
   // Get user row
   const { data: user } = await supabase
     .from("users")
     .select("id")
     .eq("auth_id", userId)
     .single();
-  if (!user) return json({ todaysWorkout: null });
+  if (!user) return json({ todaysWorkout: null, complianceData: [0, 0, 0, 0, 0, 0, 0] });
+  
   // Get active workout plan
   const { data: workoutPlans } = await supabase
     .from("workout_plans")
@@ -69,100 +72,191 @@ export const loader: LoaderFunction = async ({ request }) => {
     .eq("user_id", user.id)
     .eq("is_active", true)
     .limit(1);
-  if (!workoutPlans || workoutPlans.length === 0) return json({ todaysWorkout: null });
+  if (!workoutPlans || workoutPlans.length === 0) return json({ todaysWorkout: null, complianceData: [0, 0, 0, 0, 0, 0, 0] });
+  
   const planId = workoutPlans[0].id;
   const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const todayDay = daysOfWeek[new Date().getDay()];
+  
+  // Get today's workout
+  const today = new Date();
+  const todayDay = daysOfWeek[today.getDay()];
+
   const { data: planDays } = await supabase
-    .from("workout_plan_days")
-    .select("id, day_of_week, is_rest, workout_id")
+    .from("workout_days")
+    .select("id, day_of_week, is_rest, workout_name, workout_type")
     .eq("workout_plan_id", planId)
     .eq("day_of_week", todayDay)
     .limit(1);
-  if (!planDays || planDays.length === 0 || planDays[0].is_rest || !planDays[0].workout_id) {
-    return json({ todaysWorkout: null });
+
+  if (!planDays || planDays.length === 0 || planDays[0].is_rest) {
+    // Even on rest days, return structure for submission
+    const workoutCompletion = {
+      id: null,
+      name: "Rest Day",
+      groups: [],
+      allExercises: [],
+      uniqueTypes: [],
+      isRest: true
+    };
+    
+    // Still calculate compliance for the week
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
+    
+    const complianceData = await calculateWeeklyCompliance(supabase, user.id, startOfWeek);
+    
+    return json({ todaysWorkout: workoutCompletion, complianceData, todaysCompletedGroups: [] });
   }
-  // Fetch workout details
-  const { data: workout } = await supabase
-    .from("workouts")
-    .select("id, name, type")
-    .eq("id", planDays[0].workout_id)
-    .single();
-  if (!workout) return json({ todaysWorkout: null });
-  // Fetch exercise groups for this workout
-  const { data: groupsRaw } = await supabase
-    .from("exercise_groups")
-    .select("id, group_type, sequence_order")
-    .eq("workout_id", workout.id)
+
+  const workoutDay = planDays[0];
+
+  // Fetch exercises for this workout day
+  const { data: exercisesRaw } = await supabase
+    .from("workout_exercises")
+    .select("id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data")
+    .eq("workout_day_id", workoutDay.id)
     .order("sequence_order", { ascending: true });
-  // For each group, fetch exercises and sets
-  const groups = await Promise.all(
-    (groupsRaw || []).map(async (group) => {
-      const { data: exercisesRaw } = await supabase
-        .from("exercises")
-        .select("id, name, description, video_url")
-        .eq("group_id", group.id);
-      const exercises = await Promise.all(
-        (exercisesRaw || []).map(async (ex) => {
-          const { data: setsRaw } = await supabase
-            .from("exercise_sets")
-            .select("set_number, reps")
-            .eq("exercise_id", ex.id)
-            .order("set_number", { ascending: true });
-          return {
-            id: ex.id,
-            name: ex.name,
-            description: ex.description,
-            videoUrl: ex.video_url,
-            type: group.group_type,
-            sets: (setsRaw ?? []).map((set) => ({
-              setNumber: set.set_number,
-              reps: set.reps,
-              completed: false,
-            })),
-          };
-        })
-      );
-      return {
-        type: group.group_type,
-        exercises,
-      };
-    })
-  );
+
+  // Group exercises by their group type and sequence order
+  const groupsMap = new Map();
+  (exercisesRaw || []).forEach((exercise) => {
+    const groupKey = `${exercise.sequence_order}-${exercise.group_type}`;
+    if (!groupsMap.has(groupKey)) {
+      groupsMap.set(groupKey, {
+        id: groupKey,
+        type: exercise.group_type,
+        exercises: []
+      });
+    }
+    
+    // Parse sets data from JSONB
+    const setsData = exercise.sets_data || [];
+    
+    groupsMap.get(groupKey).exercises.push({
+      id: exercise.id,
+      name: exercise.exercise_name,
+      description: exercise.exercise_description,
+      videoUrl: exercise.video_url,
+      type: exercise.group_type,
+      sets: setsData.map((set: any) => ({
+        setNumber: set.set_number,
+        reps: set.reps,
+        completed: false,
+      })),
+    });
+  });
+
+  const groups = Array.from(groupsMap.values());
+  
   // Flatten all exercises for the table
   const allExercises = groups.flatMap((g) => g.exercises);
+  
   // Get all unique types
   const uniqueTypes = Array.from(new Set(groups.map((g) => g.type)));
+
+  // Calculate weekly compliance
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay());
+  startOfWeek.setHours(0, 0, 0, 0);
+  
+  const complianceData = await calculateWeeklyCompliance(supabase, user.id, startOfWeek);
+  
+  // Get today's completion data to pre-populate checkboxes
+  const todayStr = today.toISOString().slice(0, 10);
+  const { data: todaysCompletion } = await supabase
+    .from("workout_completions")
+    .select("completed_groups")
+    .eq("user_id", user.id)
+    .eq("completed_at", todayStr)
+    .single();
+  
   return json({
     todaysWorkout: {
-      id: workout.id,
-      name: workout.name,
+      id: workoutDay.id,
+      name: workoutDay.workout_name || "Today's Workout",
       groups,
       allExercises,
       uniqueTypes,
+      isRest: false
     },
+    complianceData,
+    todaysCompletedGroups: todaysCompletion?.completed_groups || [],
   });
 };
 
+// Helper function to calculate weekly compliance
+async function calculateWeeklyCompliance(supabase: any, userId: string, startOfWeek: Date) {
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 7);
+  
+  // Get workout completions for the week
+  const { data: completions } = await supabase
+    .from("workout_completions")
+    .select("completed_at")
+    .eq("user_id", userId)
+    .gte("completed_at", startOfWeek.toISOString().slice(0, 10))
+    .lt("completed_at", endOfWeek.toISOString().slice(0, 10));
+  
+  // For each day of the week, check if there's a completion
+  const complianceData = [];
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(startOfWeek);
+    day.setDate(startOfWeek.getDate() + i);
+    const dayStr = day.toISOString().slice(0, 10);
+    
+    const hasCompletion = (completions || []).some((c: any) => c.completed_at === dayStr);
+    complianceData.push(hasCompletion ? 1 : 0);
+  }
+  
+  return complianceData;
+}
+
 export default function Workouts() {
-  const { todaysWorkout } = useLoaderData<{ todaysWorkout: null | {
-    id: string;
-    name: string;
-    groups: { type: string; exercises: Exercise[] }[];
-    allExercises: Exercise[];
-    uniqueTypes: string[];
-  } }>();
+  const { todaysWorkout, complianceData: initialComplianceData, todaysCompletedGroups } = useLoaderData<{ 
+    todaysWorkout: null | {
+      id: string;
+      name: string;
+      groups: { id: string; type: string; exercises: Exercise[] }[];
+      allExercises: Exercise[];
+      uniqueTypes: string[];
+      isRest: boolean;
+    };
+    complianceData: number[];
+    todaysCompletedGroups: string[];
+  }>();
+  
   const [dayOffset, setDayOffset] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [submittedData, setSubmittedData] = useState<
-    Record<string, { exercises: Record<string, boolean> }>
-  >({});
-  const [completedExercises, setCompletedExercises] = useState<
-    Record<string, boolean>
-  >({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [completedGroups, setCompletedGroups] = useState<Record<string, boolean>>({});
+  const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
+  const [isWorkoutSubmitted, setIsWorkoutSubmitted] = useState(false);
 
-  // Get the formatted date display
+  // Update compliance data when initial data changes
+  useEffect(() => {
+    setComplianceData(initialComplianceData);
+  }, [initialComplianceData]);
+
+  // Initialize completed groups and submission status based on today's completion data
+  useEffect(() => {
+    if (todaysCompletedGroups.length > 0) {
+      // Today has completions, so pre-populate checkboxes and mark as submitted
+      const initialCompletedGroups: Record<string, boolean> = {};
+      todaysCompletedGroups.forEach((groupId: string) => {
+        initialCompletedGroups[groupId] = true;
+      });
+      setCompletedGroups(initialCompletedGroups);
+      setIsWorkoutSubmitted(true);
+    } else {
+      // Reset state for no completions
+      setCompletedGroups({});
+      setIsWorkoutSubmitted(false);
+    }
+  }, [todaysCompletedGroups]);
+
+  // Get the formatted date display (UI only - no data fetching)
   const getDateDisplay = (offset: number) => {
     const today = new Date();
     const targetDate = new Date(today);
@@ -199,44 +293,269 @@ export default function Workouts() {
   };
   const dateDisplay = getDateDisplay(dayOffset);
 
+  // Handle group completion toggle
+  const toggleGroupCompletion = (groupId: string) => {
+    // Prevent changes if workout is already submitted
+    if (isWorkoutSubmitted) return;
+    
+    setCompletedGroups(prev => ({
+      ...prev,
+      [groupId]: !prev[groupId]
+    }));
+  };
+
+  // Function to refresh compliance data
+  const refreshComplianceData = async () => {
+    try {
+      const today = new Date();
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - today.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+      
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 7);
+      
+      const response = await fetch(`/api/get-workout-completions?start=${startOfWeek.toISOString().slice(0, 10)}&end=${endOfWeek.toISOString().slice(0, 10)}`);
+      if (response.ok) {
+        const data = await response.json();
+        const completionsByDate = data.completionsByDate || {};
+        
+        // Build compliance data for the week
+        const newComplianceData = [];
+        for (let i = 0; i < 7; i++) {
+          const day = new Date(startOfWeek);
+          day.setDate(startOfWeek.getDate() + i);
+          const dayStr = day.toISOString().slice(0, 10);
+          const hasCompletion = completionsByDate[dayStr] && completionsByDate[dayStr].length > 0;
+          newComplianceData.push(hasCompletion ? 1 : 0);
+        }
+        
+        setComplianceData(newComplianceData);
+      }
+    } catch (error) {
+      console.error('Failed to refresh compliance data:', error);
+    }
+  };
+
+  // Handle workout submission
+  const handleSubmitWorkout = async () => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+    
+    try {
+      const today = new Date();
+      const dateStr = today.toISOString().slice(0, 10);
+      
+      const completedGroupIds = Object.entries(completedGroups)
+        .filter(([_, completed]) => completed)
+        .map(([groupId]) => groupId);
+      
+      const body = {
+        completedGroups: completedGroupIds,
+        completedAt: dateStr,
+      };
+      
+      const res = await fetch("/api/submit-workout-completion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      
+      if (res.ok) {
+        setShowSuccess(true);
+        setIsWorkoutSubmitted(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        setTimeout(() => setShowSuccess(false), 3000);
+        
+        // Refresh compliance data to show updated completion status
+        await refreshComplianceData();
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        setSubmitError(errorData.error || 'Submission failed.');
+      }
+    } catch (err) {
+      setSubmitError('Submission failed.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Calculate daily progress
+  const totalGroups = todaysWorkout?.groups?.length || 0;
+  const completedGroupCount = Object.values(completedGroups).filter(Boolean).length;
+  const progressPercentage = totalGroups > 0 ? (completedGroupCount / totalGroups) * 100 : 0;
+
+  // Compliance calendar helpers
+  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const getBarColor = (percent: number) => {
+    if (percent === 0) return "#dc2626"; // red-600
+    return "#16a34a"; // green-600
+  };
+
+  // Week navigation
+  const today = new Date();
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay());
+  startOfWeek.setHours(0, 0, 0, 0);
+  
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+  const formatDateShort = (date: Date) => {
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  };
+
   return (
     <div className="p-4 sm:p-6">
+      {/* Success Message */}
+      {showSuccess && (
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-primary text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-fade-in">
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+          <span>Workout Submitted Successfully</span>
+        </div>
+      )}
+
       <h1 className="text-xl sm:text-3xl font-bold mb-4 sm:mb-6">
-        Today's Workout
+        {dayOffset === 0 ? "Today's Workout" : 
+         dayOffset === 1 ? "Tomorrow's Workout" : 
+         dayOffset === -1 ? "Yesterday's Workout" : 
+         `${dateDisplay.weekday}'s Workout`}
       </h1>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         <div className="md:col-span-2">
           <Card className="mb-4 sm:mb-6">
+            <div className="flex justify-between items-center mb-4 sm:mb-6">
+              <button
+                onClick={() => setDayOffset(dayOffset - 1)}
+                className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                Previous
+              </button>
+              <div className="text-center">
+                <h2 className="text-xl font-semibold text-secondary dark:text-alabaster">
+                  {dateDisplay.title}
+                </h2>
+                <div className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                  {dateDisplay.subtitle}
+                </div>
+                {dayOffset !== 0 && (
+                  <button
+                    onClick={() => setDayOffset(0)}
+                    className="text-xs text-primary hover:text-primary-dark transition-colors duration-200 mt-1"
+                  >
+                    Go to today
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => setDayOffset(dayOffset + 1)}
+                className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1"
+              >
+                Next
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            </div>
+
             <div className="mb-4 sm:mb-6">
               <h2 className="text-xl sm:text-2xl font-semibold text-secondary dark:text-alabaster mb-2">
                 {todaysWorkout ? todaysWorkout.name : "Rest Day"}
               </h2>
-              {todaysWorkout && todaysWorkout.uniqueTypes.length > 0 && (
+              {todaysWorkout && !todaysWorkout.isRest && todaysWorkout.uniqueTypes && todaysWorkout.uniqueTypes.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
-                  {todaysWorkout.uniqueTypes.map((type) => (
+                  {todaysWorkout.uniqueTypes.map((type: string) => (
                     <span
                       key={type}
-                      className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-semibold"
+                      className="px-2 py-0.5 xs:py-1 bg-green-100 text-green-800 rounded-md text-xs xs:text-sm font-medium"
                     >
-                      {type.replace(/([A-Z])/g, ' $1').trim()}
+                      {type}
                     </span>
                   ))}
                 </div>
               )}
             </div>
             <div className="space-y-4 sm:space-y-6">
-              {!todaysWorkout ? (
+              {!todaysWorkout || todaysWorkout.isRest || !todaysWorkout.groups ? (
                 <p className="text-secondary dark:text-alabaster">
-                  No workout scheduled for this day.
+                  {todaysWorkout?.isRest ? "Rest day - take time to recover!" : "No workout scheduled for this day."}
                 </p>
               ) : (
-                todaysWorkout.groups.map((group, idx) => (
+                todaysWorkout.groups.map((group: any, idx: number) => (
                   <div
-                    key={idx}
+                    key={group.id}
                     className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
                   >
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                        Group {idx + 1} - {group.type}
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <label
+                          htmlFor={`group-${group.id}`}
+                          className={`text-sm select-none ${
+                            isWorkoutSubmitted 
+                              ? "text-gray-500 dark:text-gray-400 cursor-not-allowed" 
+                              : "text-gray-dark dark:text-gray-light cursor-pointer"
+                          }`}
+                        >
+                          {isWorkoutSubmitted && completedGroups[group.id] 
+                            ? "Completed & Submitted" 
+                            : completedGroups[group.id] 
+                            ? "Completed" 
+                            : "Mark as complete"}
+                        </label>
+                        <input
+                          type="checkbox"
+                          id={`group-${group.id}`}
+                          checked={completedGroups[group.id] || false}
+                          onChange={() => toggleGroupCompletion(group.id)}
+                          disabled={isWorkoutSubmitted}
+                          className={`w-5 h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
+                            isWorkoutSubmitted 
+                              ? "cursor-not-allowed opacity-50" 
+                              : "cursor-pointer"
+                          }`}
+                        />
+                      </div>
+                    </div>
                     <WorkoutCard
-                      exercises={group.exercises}
+                      exercises={group.exercises || []}
                       type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
                       dayOffset={0}
                     />
@@ -244,13 +563,154 @@ export default function Workouts() {
                 ))
               )}
             </div>
+
+            {/* Submit Button */}
+            <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+              <Button
+                variant="primary"
+                disabled={isSubmitting || isWorkoutSubmitted}
+                onClick={handleSubmitWorkout}
+              >
+                <span className="flex items-center gap-2">
+                  {isSubmitting ? (
+                    <>
+                      <svg
+                        className="animate-spin h-5 w-5"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      <span>Submitting...</span>
+                    </>
+                  ) : isWorkoutSubmitted ? (
+                    "Workout Submitted"
+                  ) : (
+                    "Submit Workout"
+                  )}
+                </span>
+              </Button>
+            </div>
+
+            {/* Show error if present */}
+            {submitError && (
+              <div className="text-red-600 text-sm mt-2">{submitError}</div>
+            )}
           </Card>
         </div>
         <div className="space-y-4 sm:space-y-6">
-          {/* Placeholder for right column */}
-          <Card title="Workout Plan Info">
-            <div className="text-xs sm:text-sm text-gray-dark dark:text-gray-light mb-3 sm:mb-4">
-              {todaysWorkout ? "Active Plan" : "No active plan"}
+          {/* Daily Progress Summary */}
+          <Card title="Daily Progress">
+            <div className="mb-4 bg-gray-lightest dark:bg-secondary-light/20 rounded-xl p-4">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-sm font-semibold text-secondary dark:text-alabaster">
+                  Workout Progress
+                </h3>
+                <span className="text-sm text-gray-dark dark:text-gray-light">
+                  {completedGroupCount} of {totalGroups} groups completed
+                </span>
+              </div>
+              <div className="w-full bg-gray-300 dark:bg-davyGray rounded-full h-3 mb-2">
+                <div
+                  className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
+                  style={{
+                    width: `${progressPercentage}%`,
+                  }}
+                ></div>
+              </div>
+              <div className="text-xs text-gray-dark dark:text-gray-light text-right">
+                {Math.round(progressPercentage)}% complete
+              </div>
+            </div>
+          </Card>
+
+          {/* Workout Compliance Calendar */}
+          <Card title="Workout Compliance">
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-sm font-medium">This Week</span>
+              <div className="text-xs text-gray-500">
+                {formatDateShort(startOfWeek)} - {formatDateShort(endOfWeek)}
+              </div>
+            </div>
+            <div className="space-y-3">
+              {dayLabels.map((label, i) => {
+                // Determine if this is today or future/past
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const thisDate = new Date(startOfWeek);
+                thisDate.setDate(startOfWeek.getDate() + i);
+                thisDate.setHours(0, 0, 0, 0);
+                const isToday = thisDate.getTime() === today.getTime();
+                const isFuture = thisDate.getTime() > today.getTime();
+                
+                // Determine status and display
+                let status: string;
+                let displayText: string;
+                let percentage = Math.round((complianceData[i] || 0) * 100);
+                
+                if (isFuture) {
+                  status = "pending";
+                  displayText = "Pending";
+                } else if (isToday) {
+                  if (complianceData[i] > 0) {
+                    status = "completed";
+                    displayText = `${percentage}%`;
+                  } else {
+                    status = "pending";
+                    displayText = "Pending";
+                  }
+                } else {
+                  // Past day
+                  status = "completed";
+                  displayText = `${percentage}%`;
+                }
+                
+                return (
+                  <div
+                    key={label}
+                    className="flex items-center justify-between py-2 border-b dark:border-davyGray last:border-0"
+                  >
+                    <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                      {thisDate.toLocaleDateString("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-block w-3 h-3 rounded-full ${
+                          status === "pending"
+                            ? isToday
+                              ? "bg-green-500"
+                              : "bg-gray-light dark:bg-davyGray"
+                            : percentage >= 80
+                            ? "bg-primary"
+                            : percentage > 0
+                            ? "bg-yellow-500"
+                            : "bg-red-500"
+                        }`}
+                      ></span>
+                      <span className="text-sm text-gray-dark dark:text-gray-light">
+                        {displayText}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </Card>
         </div>
