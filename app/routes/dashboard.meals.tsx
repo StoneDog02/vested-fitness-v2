@@ -3,7 +3,7 @@ import type { MetaFunction, LoaderFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
@@ -193,7 +193,7 @@ const generateCalendarData = () => {
 
 export default function Meals() {
   const loaderData = useLoaderData<{ mealPlan: any }>();
-  const liveMealPlan = loaderData?.mealPlan;
+  const todaysMealPlan = loaderData?.mealPlan;
   const [dayOffset, setDayOffset] = useState(0);
   const [calendarData, setCalendarData] = useState(generateCalendarData());
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -201,6 +201,81 @@ export default function Meals() {
   const [isDaySubmitted, setIsDaySubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const { checkedMeals, setCheckedMeals, addCheckedMeal, removeCheckedMeal, resetCheckedMeals, isHydrated } = useMealCompletion();
+  const weekFetcher = useFetcher<{ meals: Record<string, any>, completions: Record<string, string[]> }>();
+  
+  // Track current week and cached meal data
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => {
+    const now = new Date();
+    const day = now.getDay();
+    const sunday = new Date(now);
+    sunday.setDate(now.getDate() - day);
+    sunday.setHours(0, 0, 0, 0);
+    return sunday;
+  });
+  const [weekMeals, setWeekMeals] = useState<Record<string, any>>({});
+  const [weekCompletions, setWeekCompletions] = useState<Record<string, string[]>>({});
+  const [currentDayMealPlan, setCurrentDayMealPlan] = useState(todaysMealPlan);
+  const [isLoadingMeals, setIsLoadingMeals] = useState(false);
+
+  // Function to fetch a week's worth of meal data
+  const fetchMealWeek = (weekStart: Date) => {
+    setIsLoadingMeals(true);
+    const params = new URLSearchParams();
+    params.set("weekStart", weekStart.toISOString());
+    weekFetcher.load(`/api/get-meal-week?${params.toString()}`);
+  };
+
+  // Initialize week data on mount
+  useEffect(() => {
+    // Add today's meal plan to the week cache
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    if (todaysMealPlan) {
+      setWeekMeals(prev => ({
+        ...prev,
+        [todayStr]: todaysMealPlan
+      }));
+    }
+    
+    // Fetch the rest of the week's data
+    fetchMealWeek(currentWeekStart);
+  }, []);
+
+  // Handle week fetcher data updates
+  useEffect(() => {
+    if (weekFetcher.data?.meals && weekFetcher.data?.completions) {
+      setWeekMeals(prev => ({ ...prev, ...weekFetcher.data!.meals }));
+      setWeekCompletions(prev => ({ ...prev, ...weekFetcher.data!.completions }));
+      setIsLoadingMeals(false);
+    }
+  }, [weekFetcher.data]);
+
+  // Update meal data when day offset changes
+  useEffect(() => {
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + dayOffset);
+    const dateStr = targetDate.toISOString().slice(0, 10);
+    
+    // Check if we have this day's data in our cache
+    const mealData = weekMeals[dateStr];
+    
+    if (mealData !== undefined) {
+      // We have the data cached
+      setCurrentDayMealPlan(mealData);
+      setIsLoadingMeals(false);
+    } else {
+      // Need to fetch this week's data
+      const weekStart = new Date(targetDate);
+      const dayOfWeek = weekStart.getDay();
+      weekStart.setDate(weekStart.getDate() - dayOfWeek);
+      weekStart.setHours(0, 0, 0, 0);
+      
+      if (weekStart.getTime() !== currentWeekStart.getTime()) {
+        setCurrentWeekStart(weekStart);
+        fetchMealWeek(weekStart);
+      }
+    }
+  }, [dayOffset, weekMeals, currentWeekStart]);
 
   // Calculate the current date with offset
   const today = new Date();
@@ -217,42 +292,46 @@ export default function Meals() {
   // Format for API (YYYY-MM-DD)
   const currentDateApi = currentDate.toISOString().slice(0, 10);
 
-  // Fetch completed meals for the current day from backend
+  // Update completion status when day changes or week data loads
   useEffect(() => {
-    async function fetchCompletedMeals() {
+    const dateStr = currentDate.toISOString().slice(0, 10);
+    const dayCompletions = weekCompletions[dateStr] || [];
+    
+    if (dayCompletions.length > 0) {
+      // Convert meal IDs from backend to meal keys for frontend consistency
+      const mealKeys = dayCompletions.map(String).map(getMealKeyFromId).filter(Boolean) as string[];
+      setCheckedMeals(mealKeys);
+      setIsDaySubmitted(true);
+    } else {
       setIsDaySubmitted(false);
-      
-      try {
-        const res = await fetch(`/api/get-meal-completions?date=${currentDateApi}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.completedMealIds) && data.completedMealIds.length > 0) {
-            // Convert meal IDs from backend to meal keys for frontend consistency
-            const mealKeys = data.completedMealIds.map(String).map(getMealKeyFromId).filter(Boolean) as string[];
-            setCheckedMeals(mealKeys);
-            setIsDaySubmitted(true);
-          } else {
-            setIsDaySubmitted(false);
-            // Don't clear checkedMeals here - let localStorage state persist
-          }
-        }
-      } catch (e) {
-        setIsDaySubmitted(false);
-        // Don't clear checkedMeals here - let localStorage state persist
+      // For today, check the backend for real-time data
+      if (dayOffset === 0 && isHydrated) {
+        fetchCompletedMealsForToday();
       }
     }
-    
-    // Only fetch if context is hydrated to avoid race conditions
-    if (isHydrated) {
-      fetchCompletedMeals();
+  }, [currentDate, weekCompletions, dayOffset, isHydrated]);
+
+  // Fetch completed meals for today from backend (for real-time updates)
+  const fetchCompletedMealsForToday = async () => {
+    try {
+      const res = await fetch(`/api/get-meal-completions?date=${currentDateApi}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.completedMealIds) && data.completedMealIds.length > 0) {
+          const mealKeys = data.completedMealIds.map(String).map(getMealKeyFromId).filter(Boolean) as string[];
+          setCheckedMeals(mealKeys);
+          setIsDaySubmitted(true);
+        }
+      }
+    } catch (e) {
+      // Ignore errors, use cached data
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDateApi, isHydrated]);
+  };
 
   // --- Compliance Calendar Backend Integration ---
   useEffect(() => {
     async function fetchWeekCompletions() {
-      if (!liveMealPlan || !liveMealPlan.meals || liveMealPlan.meals.length === 0) {
+      if (!currentDayMealPlan || !currentDayMealPlan.meals || currentDayMealPlan.meals.length === 0) {
         setCalendarData(generateCalendarData());
         return;
       }
@@ -282,7 +361,7 @@ export default function Meals() {
                 day: "numeric",
               });
               const completed = completionsByDate[dateStr] || [];
-              const total = liveMealPlan.meals.length;
+              const total = currentDayMealPlan.meals.length;
               const percentage = total > 0 ? Math.round((completed.length / total) * 100) : 0;
               const todayDate = new Date();
               todayDate.setHours(0, 0, 0, 0);
@@ -329,7 +408,7 @@ export default function Meals() {
     }
     fetchWeekCompletions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveMealPlan]);
+  }, [currentDayMealPlan]);
 
   // Format the date with relative labels
   const getFormattedDate = (date: Date, today: Date) => {
@@ -370,21 +449,21 @@ export default function Meals() {
   const createMealKey = (meal: { name: string; time: string }) => String(meal.name) + String(meal.time);
   
   const getMealIdFromKey = (mealKey: string) => {
-    const meal = liveMealPlan?.meals?.find((m: any) => createMealKey(m) === mealKey);
+    const meal = currentDayMealPlan?.meals?.find((m: any) => createMealKey(m) === mealKey);
     return meal ? String(meal.id) : null;
   };
 
   const getMealKeyFromId = (mealId: string) => {
-    const meal = liveMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
+    const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
     return meal ? createMealKey(meal) : null;
   };
 
   // Calculate the macros based on the food items - need to convert keys back to check against meal IDs
   const completedMealIds = checkedMeals.map(getMealIdFromKey).filter(Boolean) as string[];
-  const calculatedMacros = calculateMacros(liveMealPlan?.meals || [], completedMealIds);
+  const calculatedMacros = calculateMacros(currentDayMealPlan?.meals || [], completedMealIds);
 
-  // Replace mockMealPlan with liveMealPlan if available
-  const mealPlan = liveMealPlan;
+  // Use the current day's meal plan
+  const mealPlan = currentDayMealPlan;
 
   return (
     <div className="p-6">
@@ -422,7 +501,8 @@ export default function Meals() {
                   setDayOffset(dayOffset - 1);
                   setCheckedMeals([]);
                 }}
-                className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1"
+                disabled={isLoadingMeals}
+                className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1 disabled:opacity-50"
               >
                 <svg
                   className="w-4 h-4"
@@ -467,7 +547,8 @@ export default function Meals() {
                   setDayOffset(dayOffset + 1);
                   setCheckedMeals([]);
                 }}
-                className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1"
+                disabled={isLoadingMeals}
+                className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1 disabled:opacity-50"
               >
                 Next
                 <svg
@@ -487,7 +568,33 @@ export default function Meals() {
             </div>
 
             <div className="space-y-4 sm:space-y-8">
-              {!mealPlan || !mealPlan.meals || mealPlan.meals.length === 0 ? (
+              {isLoadingMeals ? (
+                <div className="text-center py-8">
+                  <div className="inline-flex items-center gap-2 text-gray-500">
+                    <svg
+                      className="animate-spin h-5 w-5"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    Loading meals...
+                  </div>
+                </div>
+              ) : !mealPlan || !mealPlan.meals || mealPlan.meals.length === 0 ? (
                 <div className="text-gray-500 text-center py-8">No meal plan available.</div>
               ) : (
                 mealPlan.meals.map((meal: { id: number | string; name: string; time: string; foods: any[] }) => (

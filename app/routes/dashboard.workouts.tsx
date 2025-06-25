@@ -5,7 +5,7 @@ import Button from "~/components/ui/Button";
 import WorkoutCard from "~/components/workout/WorkoutCard";
 import type { Exercise, WorkoutType } from "~/types/workout";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
@@ -233,6 +233,21 @@ export default function Workouts() {
   const [completedGroups, setCompletedGroups] = useState<Record<string, boolean>>({});
   const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
   const [isWorkoutSubmitted, setIsWorkoutSubmitted] = useState(false);
+  const [currentDayWorkout, setCurrentDayWorkout] = useState(todaysWorkout);
+  const [isLoadingWorkout, setIsLoadingWorkout] = useState(false);
+  const weekFetcher = useFetcher<{ workouts: Record<string, any>, completions: Record<string, string[]> }>();
+  
+  // Track current week and cached workout data
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => {
+    const now = new Date();
+    const day = now.getDay();
+    const sunday = new Date(now);
+    sunday.setDate(now.getDate() - day);
+    sunday.setHours(0, 0, 0, 0);
+    return sunday;
+  });
+  const [weekWorkouts, setWeekWorkouts] = useState<Record<string, any>>({});
+  const [weekCompletions, setWeekCompletions] = useState<Record<string, string[]>>({});
 
   // Update compliance data when initial data changes
   useEffect(() => {
@@ -241,20 +256,98 @@ export default function Workouts() {
 
   // Initialize completed groups and submission status based on today's completion data
   useEffect(() => {
-    if (todaysCompletedGroups.length > 0) {
-      // Today has completions, so pre-populate checkboxes and mark as submitted
-      const initialCompletedGroups: Record<string, boolean> = {};
-      todaysCompletedGroups.forEach((groupId: string) => {
-        initialCompletedGroups[groupId] = true;
-      });
-      setCompletedGroups(initialCompletedGroups);
-      setIsWorkoutSubmitted(true);
-    } else {
-      // Reset state for no completions
-      setCompletedGroups({});
-      setIsWorkoutSubmitted(false);
+    if (dayOffset === 0) {
+      // For today, use the initial data from the loader
+      if (todaysCompletedGroups.length > 0) {
+        const initialCompletedGroups: Record<string, boolean> = {};
+        todaysCompletedGroups.forEach((groupId: string) => {
+          initialCompletedGroups[groupId] = true;
+        });
+        setCompletedGroups(initialCompletedGroups);
+        setIsWorkoutSubmitted(true);
+      } else {
+        setCompletedGroups({});
+        setIsWorkoutSubmitted(false);
+      }
     }
-  }, [todaysCompletedGroups]);
+  }, [todaysCompletedGroups, dayOffset]);
+
+  // Function to fetch a week's worth of workout data
+  const fetchWorkoutWeek = (weekStart: Date) => {
+    setIsLoadingWorkout(true);
+    const params = new URLSearchParams();
+    params.set("weekStart", weekStart.toISOString());
+    weekFetcher.load(`/api/get-workout-week?${params.toString()}`);
+  };
+
+  // Initialize week data on mount
+  useEffect(() => {
+    // Add today's workout to the week cache
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    if (todaysWorkout) {
+      setWeekWorkouts(prev => ({
+        ...prev,
+        [todayStr]: todaysWorkout
+      }));
+    }
+    setWeekCompletions(prev => ({
+      ...prev,
+      [todayStr]: todaysCompletedGroups
+    }));
+    
+    // Fetch the rest of the week's data
+    fetchWorkoutWeek(currentWeekStart);
+  }, []);
+
+  // Handle week fetcher data updates
+  useEffect(() => {
+    if (weekFetcher.data?.workouts && weekFetcher.data?.completions) {
+      setWeekWorkouts(prev => ({ ...prev, ...weekFetcher.data!.workouts }));
+      setWeekCompletions(prev => ({ ...prev, ...weekFetcher.data!.completions }));
+      setIsLoadingWorkout(false);
+    }
+  }, [weekFetcher.data]);
+
+  // Update workout data when day offset changes
+  useEffect(() => {
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + dayOffset);
+    const dateStr = targetDate.toISOString().slice(0, 10);
+    
+    // Check if we have this day's data in our cache
+    const workoutData = weekWorkouts[dateStr];
+    const completionData = weekCompletions[dateStr] || [];
+    
+    if (workoutData !== undefined) {
+      // We have the data cached
+      setCurrentDayWorkout(workoutData);
+      
+      if (completionData.length > 0) {
+        const dayCompletedGroups: Record<string, boolean> = {};
+        completionData.forEach((groupId: string) => {
+          dayCompletedGroups[groupId] = true;
+        });
+        setCompletedGroups(dayCompletedGroups);
+        setIsWorkoutSubmitted(true);
+      } else {
+        setCompletedGroups({});
+        setIsWorkoutSubmitted(false);
+      }
+      setIsLoadingWorkout(false);
+    } else {
+      // Need to fetch this week's data
+      const weekStart = new Date(targetDate);
+      const dayOfWeek = weekStart.getDay();
+      weekStart.setDate(weekStart.getDate() - dayOfWeek);
+      weekStart.setHours(0, 0, 0, 0);
+      
+      if (weekStart.getTime() !== currentWeekStart.getTime()) {
+        setCurrentWeekStart(weekStart);
+        fetchWorkoutWeek(weekStart);
+      }
+    }
+  }, [dayOffset, weekWorkouts, weekCompletions, currentWeekStart]);
 
   // Get the formatted date display (UI only - no data fetching)
   const getDateDisplay = (offset: number) => {
@@ -295,8 +388,8 @@ export default function Workouts() {
 
   // Handle group completion toggle
   const toggleGroupCompletion = (groupId: string) => {
-    // Prevent changes if workout is already submitted
-    if (isWorkoutSubmitted) return;
+    // Prevent changes if workout is already submitted or not today's workout
+    if (isWorkoutSubmitted || dayOffset !== 0) return;
     
     setCompletedGroups(prev => ({
       ...prev,
@@ -381,7 +474,7 @@ export default function Workouts() {
   };
 
   // Calculate daily progress
-  const totalGroups = todaysWorkout?.groups?.length || 0;
+  const totalGroups = currentDayWorkout?.groups?.length || 0;
   const completedGroupCount = Object.values(completedGroups).filter(Boolean).length;
   const progressPercentage = totalGroups > 0 ? (completedGroupCount / totalGroups) * 100 : 0;
 
@@ -495,11 +588,11 @@ export default function Workouts() {
 
             <div className="mb-4 sm:mb-6">
               <h2 className="text-xl sm:text-2xl font-semibold text-secondary dark:text-alabaster mb-2">
-                {todaysWorkout ? todaysWorkout.name : "Rest Day"}
+                {isLoadingWorkout ? "Loading..." : currentDayWorkout ? currentDayWorkout.name : "Rest Day"}
               </h2>
-              {todaysWorkout && !todaysWorkout.isRest && todaysWorkout.uniqueTypes && todaysWorkout.uniqueTypes.length > 0 && (
+              {currentDayWorkout && !currentDayWorkout.isRest && currentDayWorkout.uniqueTypes && currentDayWorkout.uniqueTypes.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
-                  {todaysWorkout.uniqueTypes.map((type: string) => (
+                  {currentDayWorkout.uniqueTypes.map((type: string) => (
                     <span
                       key={type}
                       className="px-2 py-0.5 xs:py-1 bg-green-100 text-green-800 rounded-md text-xs xs:text-sm font-medium"
@@ -511,12 +604,36 @@ export default function Workouts() {
               )}
             </div>
             <div className="space-y-4 sm:space-y-6">
-              {!todaysWorkout || todaysWorkout.isRest || !todaysWorkout.groups ? (
+              {isLoadingWorkout ? (
+                <div className="flex items-center justify-center py-8">
+                  <svg
+                    className="animate-spin h-8 w-8 text-primary"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  <span className="ml-2 text-secondary dark:text-alabaster">Loading workout...</span>
+                </div>
+              ) : !currentDayWorkout || currentDayWorkout.isRest || !currentDayWorkout.groups ? (
                 <p className="text-secondary dark:text-alabaster">
-                  {todaysWorkout?.isRest ? "Rest day - take time to recover!" : "No workout scheduled for this day."}
+                  {currentDayWorkout?.isRest ? "Rest day - take time to recover!" : "No workout scheduled for this day."}
                 </p>
               ) : (
-                todaysWorkout.groups.map((group: any, idx: number) => (
+                currentDayWorkout.groups.map((group: any, idx: number) => (
                   <div
                     key={group.id}
                     className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
@@ -529,12 +646,16 @@ export default function Workouts() {
                         <label
                           htmlFor={`group-${group.id}`}
                           className={`text-sm select-none ${
-                            isWorkoutSubmitted 
+                            isWorkoutSubmitted || dayOffset !== 0
                               ? "text-gray-500 dark:text-gray-400 cursor-not-allowed" 
                               : "text-gray-dark dark:text-gray-light cursor-pointer"
                           }`}
                         >
-                          {isWorkoutSubmitted && completedGroups[group.id] 
+                          {dayOffset !== 0 
+                            ? completedGroups[group.id] 
+                              ? "Completed" 
+                              : "Not completed"
+                            : isWorkoutSubmitted && completedGroups[group.id] 
                             ? "Completed & Submitted" 
                             : completedGroups[group.id] 
                             ? "Completed" 
@@ -545,9 +666,9 @@ export default function Workouts() {
                           id={`group-${group.id}`}
                           checked={completedGroups[group.id] || false}
                           onChange={() => toggleGroupCompletion(group.id)}
-                          disabled={isWorkoutSubmitted}
+                          disabled={isWorkoutSubmitted || dayOffset !== 0}
                           className={`w-5 h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
-                            isWorkoutSubmitted 
+                            isWorkoutSubmitted || dayOffset !== 0
                               ? "cursor-not-allowed opacity-50" 
                               : "cursor-pointer"
                           }`}
@@ -564,50 +685,64 @@ export default function Workouts() {
               )}
             </div>
 
-            {/* Submit Button */}
-            <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
-              <Button
-                variant="primary"
-                disabled={isSubmitting || isWorkoutSubmitted}
-                onClick={handleSubmitWorkout}
-              >
-                <span className="flex items-center gap-2">
-                  {isSubmitting ? (
-                    <>
-                      <svg
-                        className="animate-spin h-5 w-5"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        ></circle>
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
-                      </svg>
-                      <span>Submitting...</span>
-                    </>
-                  ) : isWorkoutSubmitted ? (
-                    "Workout Submitted"
-                  ) : (
-                    "Submit Workout"
-                  )}
-                </span>
-              </Button>
-            </div>
+            {/* Submit Button - Only show for today's workout */}
+            {dayOffset === 0 && currentDayWorkout && !currentDayWorkout.isRest && (
+              <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                <Button
+                  variant="primary"
+                  disabled={isSubmitting || isWorkoutSubmitted}
+                  onClick={handleSubmitWorkout}
+                >
+                  <span className="flex items-center gap-2">
+                    {isSubmitting ? (
+                      <>
+                        <svg
+                          className="animate-spin h-5 w-5"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                        <span>Submitting...</span>
+                      </>
+                    ) : isWorkoutSubmitted ? (
+                      "Workout Submitted"
+                    ) : (
+                      "Submit Workout"
+                    )}
+                  </span>
+                </Button>
+              </div>
+            )}
 
             {/* Show error if present */}
             {submitError && (
               <div className="text-red-600 text-sm mt-2">{submitError}</div>
+            )}
+
+            {/* Show message for past/future days */}
+            {dayOffset !== 0 && (
+              <div className="mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                <div className="text-center text-gray-600 dark:text-gray-400 text-sm">
+                  {dayOffset < 0 
+                    ? "This is a past workout. Completion status is shown as recorded."
+                    : "This is a future workout. You can only submit today's workout."
+                  }
+                </div>
+              </div>
             )}
           </Card>
         </div>
