@@ -793,7 +793,7 @@ export default function Meals() {
                     Daily Progress
                   </h3>
                   <span className="text-sm text-gray-dark dark:text-gray-light">
-                    {mealPlan && mealPlan.meals ? `${completedMealIds.length} of ${mealPlan.meals.length} meals` : "0 of 0 meals"}
+                    {mealPlan && mealPlan.meals ? `${completedMealIds.length} of ${mealPlan.meals.length} meals` : "0 of 0 meals"}{" "}
                     completed
                   </span>
                 </div>
@@ -884,7 +884,11 @@ export default function Meals() {
                               : "bg-red-500"
                           }`}
                         ></span>
-                        <span className="text-sm text-gray-dark dark:text-gray-light">
+                        <span className={`text-sm ${
+                          isToday && day.status === "pending"
+                            ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
+                            : 'text-gray-dark dark:text-gray-light'
+                        }`}>
                           {day.status === "pending"
                             ? "Pending"
                             : `${day.percentage}%`}

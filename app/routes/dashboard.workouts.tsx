@@ -755,7 +755,7 @@ export default function Workouts() {
                   Workout Progress
                 </h3>
                 <span className="text-sm text-gray-dark dark:text-gray-light">
-                  {completedGroupCount} of {totalGroups} groups completed
+                  {completedGroupCount} of {totalGroups} workouts completed
                 </span>
               </div>
               <div className="w-full bg-gray-300 dark:bg-davyGray rounded-full h-3 mb-2">
@@ -839,7 +839,11 @@ export default function Workouts() {
                             : "bg-red-500"
                         }`}
                       ></span>
-                      <span className="text-sm text-gray-dark dark:text-gray-light">
+                      <span className={`text-sm ${
+                        isToday && status === "pending"
+                          ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
+                          : 'text-gray-dark dark:text-gray-light'
+                      }`}>
                         {displayText}
                       </span>
                     </div>
