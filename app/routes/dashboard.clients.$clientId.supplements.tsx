@@ -3,11 +3,11 @@ import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import AddSupplementModal from "~/components/coach/AddSupplementModal";
-import { useState } from "react";
 import { json, redirect } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { useLoaderData, useFetcher, useSearchParams } from "@remix-run/react";
+import { useState, useEffect } from "react";
 
 interface Supplement {
   id: string;
@@ -95,16 +95,15 @@ export const loader = async ({
   for (let i = 0; i < 7; i++) {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
-    day.setHours(0, 0, 0, 0);
+    const dayStr = day.toISOString().split('T')[0]; // Get YYYY-MM-DD format
+    
     // For each supplement, check if a completion exists for this day
     const supplementIds = (supplementsRaw || []).map((s) => s.id);
     let completedCount = 0;
     for (const supplementId of supplementIds) {
       const found = (completionsRaw || []).find((c) => {
-        const compDate = new Date(c.completed_at);
-        compDate.setHours(0, 0, 0, 0);
         return (
-          compDate.getTime() === day.getTime() &&
+          c.completed_at.startsWith(dayStr) &&
           c.supplement_id === supplementId
         );
       });
@@ -152,6 +151,7 @@ export const loader = async ({
     supplements,
     complianceData,
     weekStart: weekStart.toISOString(),
+    client: { id: client.id, name: "Client" }, // Add client data for the fetcher
   });
 };
 
@@ -244,21 +244,38 @@ export const action = async ({
 };
 
 export default function ClientSupplements() {
-  const { supplements, complianceData, weekStart } = useLoaderData<{
+  const { supplements, complianceData: initialComplianceData, weekStart, client } = useLoaderData<{
     supplements: Supplement[];
     complianceData: number[];
     weekStart: string;
+    client: { id: string; name: string } | null;
   }>();
   const fetcher = useFetcher();
+  const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingSupplement, setEditingSupplement] = useState<Supplement | null>(
     null
   );
   const [, setSearchParams] = useSearchParams();
+  const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
+  const [currentWeekStart, setCurrentWeekStart] = useState(weekStart);
+
+  // Update compliance data when fetcher returns
+  useEffect(() => {
+    if (complianceFetcher.data?.complianceData) {
+      setComplianceData(complianceFetcher.data.complianceData);
+    }
+  }, [complianceFetcher.data]);
+
+  // Update when initial loader data changes
+  useEffect(() => {
+    setComplianceData(initialComplianceData);
+    setCurrentWeekStart(weekStart);
+  }, [initialComplianceData, weekStart]);
 
   // Week navigation state
-  const calendarStart = weekStart
-    ? new Date(weekStart)
+  const calendarStart = currentWeekStart
+    ? new Date(currentWeekStart)
     : (() => {
         const now = new Date();
         const day = now.getDay();
@@ -276,21 +293,25 @@ export default function ClientSupplements() {
     const prev = new Date(calendarStart);
     prev.setDate(prev.getDate() - 7);
     prev.setHours(0, 0, 0, 0);
-    setSearchParams((prevParams) => {
-      const newParams = new URLSearchParams(prevParams);
-      newParams.set("weekStart", prev.toISOString());
-      return newParams;
-    });
+    setCurrentWeekStart(prev.toISOString());
+    
+    // Use fetcher for fast data loading
+    const params = new URLSearchParams();
+    params.set("weekStart", prev.toISOString());
+    params.set("clientId", client?.id || "");
+    complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
   }
   function handleNextWeek() {
     const next = new Date(calendarStart);
     next.setDate(next.getDate() + 7);
     next.setHours(0, 0, 0, 0);
-    setSearchParams((prevParams) => {
-      const newParams = new URLSearchParams(prevParams);
-      newParams.set("weekStart", next.toISOString());
-      return newParams;
-    });
+    setCurrentWeekStart(next.toISOString());
+    
+    // Use fetcher for fast data loading
+    const params = new URLSearchParams();
+    params.set("weekStart", next.toISOString());
+    params.set("clientId", client?.id || "");
+    complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
   }
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   function getBarColor(percent: number) {

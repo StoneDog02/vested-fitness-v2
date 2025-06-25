@@ -436,60 +436,114 @@ export const loader: LoaderFunction = async ({ request }) => {
             };
           })
       );
-      // Workout compliance: % of workouts completed in last 7 days
+      // Overall compliance: % of workouts, meals, and supplements completed in last 7 days
       if (totalClients > 0) {
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 7);
         const twoWeeksAgo = new Date();
         twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+        
+        // Fetch all completions for the week
         const { data: workoutCompletions } = await supabase
           .from("workout_completions")
           .select("id, user_id, completed_at")
-          .in(
-            "user_id",
-            clients.map((c) => c.id)
-          )
+          .in("user_id", clients.map((c) => c.id))
+          .gte("completed_at", weekAgo.toISOString().slice(0, 10));
+
+        const { data: mealCompletions } = await supabase
+          .from("meal_completions")
+          .select("id, user_id, completed_at")
+          .in("user_id", clients.map((c) => c.id))
+          .gte("completed_at", weekAgo.toISOString())
+          .lt("completed_at", new Date().toISOString());
+
+        const { data: supplementCompletions } = await supabase
+          .from("supplement_completions")
+          .select("id, user_id, completed_at")
+          .in("user_id", clients.map((c) => c.id))
           .gte("completed_at", weekAgo.toISOString().slice(0, 10));
         
-        // Calculate expected workout days for all clients
+        // Calculate expected activities for all clients
         let totalExpectedWorkouts = 0;
+        let totalExpectedMeals = 0;
+        let totalExpectedSupplements = 0;
+        
         for (const client of clients) {
-          const { data: clientPlans } = await supabase
+          // Expected workouts
+          const { data: clientWorkoutPlans } = await supabase
             .from("workout_plans")
             .select("id")
             .eq("user_id", client.id)
             .eq("is_active", true)
             .limit(1);
           
-          if (clientPlans && clientPlans.length > 0) {
+          if (clientWorkoutPlans && clientWorkoutPlans.length > 0) {
             const { data: workoutDays } = await supabase
               .from("workout_days")
               .select("is_rest")
-              .eq("workout_plan_id", clientPlans[0].id);
+              .eq("workout_plan_id", clientWorkoutPlans[0].id);
             totalExpectedWorkouts += (workoutDays || []).filter(day => !day.is_rest).length;
           }
+
+          // Expected meals (7 days worth)
+          const { data: clientMealPlans } = await supabase
+            .from("meal_plans")
+            .select("id")
+            .eq("user_id", client.id)
+            .eq("is_active", true)
+            .limit(1);
+          
+          if (clientMealPlans && clientMealPlans.length > 0) {
+            const { data: meals } = await supabase
+              .from("meals")
+              .select("id")
+              .eq("meal_plan_id", clientMealPlans[0].id);
+            totalExpectedMeals += (meals || []).length * 7; // 7 days
+          }
+
+          // Expected supplements (7 days worth)
+          const { data: clientSupplements } = await supabase
+            .from("supplements")
+            .select("id")
+            .eq("user_id", client.id);
+          totalExpectedSupplements += (clientSupplements || []).length * 7; // 7 days
         }
         
         const completedWorkouts = (workoutCompletions ?? []).length;
-        compliance =
-          totalExpectedWorkouts > 0
-            ? Math.round((completedWorkouts / totalExpectedWorkouts) * 100)
-            : 0;
+        const completedMeals = (mealCompletions ?? []).length;
+        const completedSupplements = (supplementCompletions ?? []).length;
+        
+        const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
+        const totalExpected = totalExpectedWorkouts + totalExpectedMeals + totalExpectedSupplements;
+        
+        compliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
 
         // Previous week compliance
         const { data: prevWorkoutCompletions } = await supabase
           .from("workout_completions")
           .select("id, user_id, completed_at")
-          .in(
-            "user_id",
-            clients.map((c) => c.id)
-          )
+          .in("user_id", clients.map((c) => c.id))
+          .gte("completed_at", twoWeeksAgo.toISOString().slice(0, 10))
+          .lt("completed_at", weekAgo.toISOString().slice(0, 10));
+
+        const { data: prevMealCompletions } = await supabase
+          .from("meal_completions")
+          .select("id, user_id, completed_at")
+          .in("user_id", clients.map((c) => c.id))
+          .gte("completed_at", twoWeeksAgo.toISOString())
+          .lt("completed_at", weekAgo.toISOString());
+
+        const { data: prevSupplementCompletions } = await supabase
+          .from("supplement_completions")
+          .select("id, user_id, completed_at")
+          .in("user_id", clients.map((c) => c.id))
           .gte("completed_at", twoWeeksAgo.toISOString().slice(0, 10))
           .lt("completed_at", weekAgo.toISOString().slice(0, 10));
         
-        const prevCompleted = (prevWorkoutCompletions ?? []).length;
-        const prevCompliance =
-          totalExpectedWorkouts > 0 ? Math.round((prevCompleted / totalExpectedWorkouts) * 100) : 0;
+        const prevTotalCompleted = (prevWorkoutCompletions ?? []).length + 
+                                   (prevMealCompletions ?? []).length + 
+                                   (prevSupplementCompletions ?? []).length;
+        const prevCompliance = totalExpected > 0 ? Math.round((prevTotalCompleted / totalExpected) * 100) : 0;
         percentChange = compliance - prevCompliance;
       }
       // Recent Activity: today only
@@ -497,69 +551,125 @@ export const loader: LoaderFunction = async ({ request }) => {
       today.setHours(0, 0, 0, 0);
       const tomorrow = new Date(today);
       tomorrow.setDate(today.getDate() + 1);
-      // Workouts completed today
+      
+      // Fetch all activity data
       const { data: workoutsToday } = await supabase
         .from("workout_completions")
         .select("id, user_id, completed_at")
-        .in(
-          "user_id",
-          clients.map((c) => c.id)
-        )
+        .in("user_id", clients.map((c) => c.id))
         .gte("completed_at", today.toISOString().slice(0, 10))
         .lt("completed_at", tomorrow.toISOString().slice(0, 10));
-      if (workoutsToday) {
-        for (const w of workoutsToday) {
-          const client = clients.find((c) => c.id === w.user_id);
-          recentActivity.push({
-            id: w.id,
-            clientName: client ? client.name : "Unknown",
-            action: "Completed workout",
-            time: w.completed_at,
-          });
-        }
-      }
-      // Meals logged today
+
       const { data: mealsLogged } = await supabase
         .from("meal_completions")
         .select("id, user_id, completed_at")
-        .in(
-          "user_id",
-          clients.map((c) => c.id)
-        )
-        .gte("completed_at", today.toISOString())
-        .lt("completed_at", tomorrow.toISOString());
-      if (mealsLogged) {
-        for (const m of mealsLogged) {
-          const client = clients.find((c) => c.id === m.user_id);
-          recentActivity.push({
-            id: m.id,
-            clientName: client ? client.name : "Unknown",
-            action: "Logged meal",
-            time: m.completed_at,
-          });
-        }
-      }
-      // Supplements taken today
+        .in("user_id", clients.map((c) => c.id))
+        .gte("completed_at", today.toISOString().slice(0, 10))
+        .lt("completed_at", tomorrow.toISOString().slice(0, 10));
+
       const { data: suppsLogged } = await supabase
         .from("supplement_completions")
         .select("id, user_id, completed_at")
-        .in(
-          "user_id",
-          clients.map((c) => c.id)
-        )
-        .gte("completed_at", today.toISOString())
-        .lt("completed_at", tomorrow.toISOString());
+        .in("user_id", clients.map((c) => c.id))
+        .gte("completed_at", today.toISOString().slice(0, 10))
+        .lt("completed_at", tomorrow.toISOString().slice(0, 10));
+
+      // Group activities by client and type
+      const activityGroups: { [key: string]: { 
+        clientName: string; 
+        action: string; 
+        count: number; 
+        latestTime: string;
+        id: string;
+      } } = {};
+
+      // Process workouts
+      if (workoutsToday) {
+        for (const w of workoutsToday) {
+          const client = clients.find((c) => c.id === w.user_id);
+          const clientName = client ? client.name : "Unknown";
+          const key = `${w.user_id}-workout`;
+          
+          if (!activityGroups[key]) {
+            activityGroups[key] = {
+              clientName,
+              action: "Completed workout",
+              count: 0,
+              latestTime: w.completed_at,
+              id: w.id,
+            };
+          }
+          activityGroups[key].count++;
+          // Keep the latest time
+          if (new Date(w.completed_at) > new Date(activityGroups[key].latestTime)) {
+            activityGroups[key].latestTime = w.completed_at;
+          }
+        }
+      }
+
+      // Process meals
+      if (mealsLogged) {
+        for (const m of mealsLogged) {
+          const client = clients.find((c) => c.id === m.user_id);
+          const clientName = client ? client.name : "Unknown";
+          const key = `${m.user_id}-meal`;
+          
+          if (!activityGroups[key]) {
+            activityGroups[key] = {
+              clientName,
+              action: "Logged meals",
+              count: 0,
+              latestTime: m.completed_at,
+              id: m.id,
+            };
+          }
+          activityGroups[key].count++;
+          // Keep the latest time
+          if (new Date(m.completed_at) > new Date(activityGroups[key].latestTime)) {
+            activityGroups[key].latestTime = m.completed_at;
+          }
+        }
+      }
+
+      // Process supplements
       if (suppsLogged) {
         for (const s of suppsLogged) {
           const client = clients.find((c) => c.id === s.user_id);
-          recentActivity.push({
-            id: s.id,
-            clientName: client ? client.name : "Unknown",
-            action: "Took supplement",
-            time: s.completed_at,
-          });
+          const clientName = client ? client.name : "Unknown";
+          const key = `${s.user_id}-supplement`;
+          
+          if (!activityGroups[key]) {
+            activityGroups[key] = {
+              clientName,
+              action: "Completed supplements",
+              count: 0,
+              latestTime: s.completed_at,
+              id: s.id,
+            };
+          }
+          activityGroups[key].count++;
+          // Keep the latest time
+          if (new Date(s.completed_at) > new Date(activityGroups[key].latestTime)) {
+            activityGroups[key].latestTime = s.completed_at;
+          }
         }
       }
+
+      // Convert to recentActivity array with proper formatting
+      Object.values(activityGroups).forEach((group) => {
+        let actionText = group.action;
+        if (group.count > 1) {
+          actionText = `${group.action} (${group.count})`;
+        }
+        
+        recentActivity.push({
+          id: group.id,
+          clientName: group.clientName,
+          action: actionText,
+          time: group.latestTime,
+        });
+      });
+
       // Sort activity by time desc
       recentActivity.sort(
         (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()

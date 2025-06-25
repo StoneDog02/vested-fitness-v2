@@ -1,6 +1,9 @@
-import { useState } from "react";
-import type { MetaFunction } from "@remix-run/node";
+import { useState, useEffect } from "react";
+import type { MetaFunction, LoaderFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData, useFetcher } from "@remix-run/react";
 import Card from "~/components/ui/Card";
+import Button from "~/components/ui/Button";
 
 export const meta: MetaFunction = () => {
   return [
@@ -9,99 +12,150 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-// Mock supplements data
-const mockSupplements = [
-  {
-    id: "1",
-    name: "Multivitamin",
-    dosage: "1 tablet",
-    frequency: "Daily",
-    timing: "Morning with breakfast",
-    notes: "Helps fill nutritional gaps in the diet",
-    startDate: "2024-01-15",
-  },
-  {
-    id: "2",
-    name: "Protein Powder",
-    dosage: "1 scoop (25g)",
-    frequency: "Daily",
-    timing: "Post-workout or as needed",
-    notes: "Whey isolate, 24g protein per serving",
-    startDate: "2024-01-15",
-  },
-  {
-    id: "3",
-    name: "Creatine Monohydrate",
-    dosage: "5g",
-    frequency: "Daily",
-    timing: "Any time with water",
-    notes: "No loading phase needed, consistent daily use",
-    startDate: "2024-02-10",
-  },
-];
+interface Supplement {
+  id: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  instructions: string;
+}
 
-// Mock compliance data
-const mockComplianceData = [
-  {
-    date: "Apr 5",
-    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
-    taken: true,
-    compliance: 100,
-  },
-  {
-    date: "Apr 6",
-    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
-    taken: true,
-    compliance: 100,
-  },
-  {
-    date: "Apr 7",
-    supplements: ["Multivitamin", "Protein Powder"],
-    taken: true,
-    compliance: 67,
-  },
-  {
-    date: "Apr 8",
-    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
-    taken: true,
-    compliance: 100,
-  },
-  {
-    date: "Apr 9",
-    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
-    taken: true,
-    compliance: 100,
-  },
-  {
-    date: "Apr 10",
-    supplements: ["Multivitamin", "Creatine"],
-    taken: true,
-    compliance: 67,
-  },
-  {
-    date: "Apr 11",
-    supplements: ["Multivitamin", "Protein Powder", "Creatine"],
-    taken: false,
-    compliance: 0,
-  },
-];
+interface LoaderData {
+  supplements: Supplement[];
+}
+
+export const loader: LoaderFunction = async ({ request }) => {
+  try {
+    // Fetch supplements from API
+    const supplementsResponse = await fetch(`${new URL(request.url).origin}/api/get-supplements`, {
+      headers: {
+        'Cookie': request.headers.get('Cookie') || '',
+      },
+    });
+
+    if (!supplementsResponse.ok) {
+      console.error('Failed to fetch supplements');
+      return json({ supplements: [] } as LoaderData);
+    }
+
+    const supplementsData = await supplementsResponse.json();
+    return json({ supplements: supplementsData.supplements || [] } as LoaderData);
+  } catch (error) {
+    console.error('Error loading supplements:', error);
+    return json({ supplements: [] } as LoaderData);
+  }
+};
 
 export default function Supplements() {
+  const { supplements } = useLoaderData<LoaderData>();
+  const fetcher = useFetcher();
   const [checkedSupplements, setCheckedSupplements] = useState<{
     [key: string]: boolean;
   }>({});
   const [dayOffset, setDayOffset] = useState(0);
+  const [complianceData, setComplianceData] = useState<any[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [isDaySubmitted, setIsDaySubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Get current date with offset
+  const currentDate = new Date();
+  currentDate.setDate(currentDate.getDate() + dayOffset);
+  const currentDateString = currentDate.toISOString().split('T')[0];
+
+  // Load supplement completions for the current date
+  useEffect(() => {
+    const loadCompletions = async () => {
+      try {
+        const response = await fetch(`/api/get-supplement-completions?date=${currentDateString}`);
+        if (response.ok) {
+          const data = await response.json();
+          const completedSupplementIds = data.completions.map((c: any) => c.supplement_id);
+          const newCheckedSupplements: { [key: string]: boolean } = {};
+          completedSupplementIds.forEach((id: string) => {
+            newCheckedSupplements[id] = true;
+          });
+          setCheckedSupplements(newCheckedSupplements);
+          
+          // If there are completions, mark the day as submitted
+          if (completedSupplementIds.length > 0) {
+            setIsDaySubmitted(true);
+          } else {
+            setIsDaySubmitted(false);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading supplement completions:', error);
+      }
+    };
+
+    // Reset submission state when changing days
+    setIsDaySubmitted(false);
+    setCheckedSupplements({});
+    setSubmitError(null);
+    
+    loadCompletions();
+  }, [currentDateString]);
+
+  // Load compliance data for the current week
+  useEffect(() => {
+    const loadComplianceData = async () => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - today.getDay()); // Get Sunday
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6); // Get Saturday
+
+      try {
+        const response = await fetch(`/api/get-supplement-completions?startDate=${startOfWeek.toISOString().split('T')[0]}&endDate=${endOfWeek.toISOString().split('T')[0]}`);
+        if (response.ok) {
+          const data = await response.json();
+          
+          // Process compliance data for the week
+          const weekComplianceData = [];
+          for (let i = 0; i < 7; i++) {
+            const date = new Date(startOfWeek);
+            date.setDate(startOfWeek.getDate() + i);
+            const dateStr = date.toISOString().split('T')[0];
+            
+            const dayCompletions = data.completions.filter((c: any) => 
+              c.completed_at.startsWith(dateStr)
+            );
+            
+            const totalSupplements = supplements.length;
+            const completedCount = dayCompletions.length;
+            const percentage = totalSupplements > 0 ? Math.round((completedCount / totalSupplements) * 100) : 0;
+            
+            weekComplianceData.push({
+              date: date,
+              percentage: percentage,
+              status: percentage > 0 ? "completed" : "pending"
+            });
+          }
+          
+          setComplianceData(weekComplianceData);
+        }
+      } catch (error) {
+        console.error('Error loading compliance data:', error);
+      }
+    };
+
+    if (supplements.length > 0) {
+      loadComplianceData();
+    }
+  }, [supplements]);
 
   const handleSupplementCheck = (id: string) => {
+    // Prevent changes if day is already submitted or not today
+    if (isDaySubmitted || dayOffset !== 0) return;
+    
     setCheckedSupplements((prev) => ({
       ...prev,
       [id]: !prev[id],
     }));
   };
-
-  // Get current date with offset
-  const currentDate = new Date();
-  currentDate.setDate(currentDate.getDate() + dayOffset);
 
   // Format date display
   const getRelativeDay = (offset: number) => {
@@ -128,6 +182,26 @@ export default function Supplements() {
 
   return (
     <div className="p-6">
+      {/* Success Message */}
+      {showSuccess && (
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-primary text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-fade-in">
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+          <span>Supplements Submitted Successfully</span>
+        </div>
+      )}
+
       <h1 className="text-2xl font-bold text-secondary dark:text-alabaster mb-6">
         Supplements
       </h1>
@@ -194,7 +268,7 @@ export default function Supplements() {
             </div>
 
             <div className="space-y-4">
-              {mockSupplements.map((supplement) => (
+              {supplements.map((supplement: Supplement) => (
                 <div
                   key={supplement.id}
                   className="flex items-start p-4 rounded-lg border border-gray-light dark:border-davyGray hover:shadow-md transition-shadow duration-200"
@@ -205,13 +279,20 @@ export default function Supplements() {
                       id={`supplement-${supplement.id}`}
                       checked={!!checkedSupplements[supplement.id]}
                       onChange={() => handleSupplementCheck(supplement.id)}
-                      className="h-4 w-4 rounded border-gray-light text-primary focus:ring-primary"
+                      disabled={isDaySubmitted || dayOffset !== 0}
+                      className={`h-4 w-4 rounded border-gray-light text-primary focus:ring-primary ${
+                        isDaySubmitted || dayOffset !== 0
+                          ? "cursor-not-allowed opacity-50"
+                          : "cursor-pointer"
+                      }`}
                     />
                   </div>
                   <div className="ml-3 flex-grow">
                     <label
                       htmlFor={`supplement-${supplement.id}`}
-                      className="font-medium text-secondary dark:text-alabaster text-lg"
+                      className={`font-medium text-secondary dark:text-alabaster text-lg ${
+                        isDaySubmitted || dayOffset !== 0 ? "cursor-not-allowed" : "cursor-pointer"
+                      }`}
                     >
                       {supplement.name}
                     </label>
@@ -222,79 +303,228 @@ export default function Supplements() {
                           {supplement.dosage}
                         </div>
                         <div>
-                          <span className="font-medium">Timing:</span>{" "}
-                          {supplement.timing}
+                          <span className="font-medium">Frequency:</span>{" "}
+                          {supplement.frequency}
                         </div>
                       </div>
-                      {supplement.notes && (
-                        <div className="mt-2 italic">{supplement.notes}</div>
+                      {supplement.instructions && (
+                        <div className="mt-2 italic">{supplement.instructions}</div>
                       )}
                     </div>
                   </div>
                 </div>
               ))}
             </div>
+
+            {/* Submit Button - Only show for today's supplements */}
+            {dayOffset === 0 && supplements.length > 0 && (
+              <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                <Button
+                  variant="primary"
+                  disabled={isSubmitting || isDaySubmitted}
+                  onClick={async () => {
+                    setIsSubmitting(true);
+                    setSubmitError(null);
+                    
+                    try {
+                      // Get all checked supplement IDs
+                      const completedSupplementIds = Object.entries(checkedSupplements)
+                        .filter(([_, checked]) => checked)
+                        .map(([id]) => id);
+
+                      // Clear all existing completions for this date first, then add new ones
+                      const response = await fetch('/api/submit-supplement-completions', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                          supplementIds: completedSupplementIds,
+                          date: currentDateString,
+                        }),
+                      });
+
+                      if (response.ok) {
+                        setIsDaySubmitted(true);
+                        setShowSuccess(true);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                        setTimeout(() => setShowSuccess(false), 3000);
+                      } else {
+                        const errorData = await response.json().catch(() => ({}));
+                        setSubmitError(errorData.error || 'Submission failed.');
+                      }
+                    } catch (error) {
+                      setSubmitError('Submission failed.');
+                    } finally {
+                      setIsSubmitting(false);
+                    }
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    {isSubmitting ? (
+                      <>
+                        <svg
+                          className="animate-spin h-5 w-5"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                        <span>Submitting...</span>
+                      </>
+                    ) : isDaySubmitted ? (
+                      "Supplements Submitted"
+                    ) : (
+                      "Submit Supplements"
+                    )}
+                  </span>
+                </Button>
+              </div>
+            )}
+
+            {/* Show error if present */}
+            {submitError && (
+              <div className="text-red-600 text-sm mt-2">{submitError}</div>
+            )}
+
+            {/* Show message for past/future days */}
+            {dayOffset !== 0 && (
+              <div className="mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                <div className="text-center text-gray-600 dark:text-gray-400 text-sm">
+                  {dayOffset < 0 
+                    ? "This is a past day. Supplement status is shown as recorded."
+                    : "This is a future day. You can only submit today's supplements."
+                  }
+                </div>
+              </div>
+            )}
           </Card>
         </div>
 
         <div className="space-y-6">
-          {/* Instructions */}
-          <Card title="Instructions">
-            <div className="space-y-3">
-              <p className="text-sm text-gray-dark dark:text-gray-light">
-                Take your supplements as directed by your coach. Mark each
-                supplement as completed after taking it.
-              </p>
-              <h4 className="font-medium text-secondary dark:text-alabaster text-sm mb-1">
-                Recommended times:
-              </h4>
-              <ul className="text-sm space-y-1 text-gray-dark dark:text-gray-light">
-                <li>• Morning supplements: With breakfast</li>
-                <li>• Pre-workout: 30 minutes before exercise</li>
-                <li>• Post-workout: Within 30 minutes after exercise</li>
-                <li>• Evening supplements: With dinner or before bed</li>
-              </ul>
+          {/* Daily Progress Summary */}
+          <Card title="Daily Progress">
+            <div className="mb-4 bg-gray-lightest dark:bg-secondary-light/20 rounded-xl p-4">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-sm font-semibold text-secondary dark:text-alabaster">
+                  Supplement Progress
+                </h3>
+                <span className="text-sm text-gray-dark dark:text-gray-light">
+                  {Object.values(checkedSupplements).filter(Boolean).length} of {supplements.length} supplements completed
+                </span>
+              </div>
+              <div className="w-full bg-gray-300 dark:bg-davyGray rounded-full h-3 mb-2">
+                <div
+                  className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
+                  style={{
+                    width: supplements.length > 0 
+                      ? `${(Object.values(checkedSupplements).filter(Boolean).length / supplements.length) * 100}%` 
+                      : "0%",
+                  }}
+                ></div>
+              </div>
+              <div className="text-xs text-gray-dark dark:text-gray-light text-right">
+                {supplements.length > 0 
+                  ? Math.round((Object.values(checkedSupplements).filter(Boolean).length / supplements.length) * 100)
+                  : 0}% complete
+              </div>
             </div>
           </Card>
 
-          {/* Recent Compliance */}
-          <Card title="Recent Compliance">
-            <div className="space-y-2">
-              {mockComplianceData.map((day) => (
-                <div
-                  key={day.date}
-                  className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-gray-lightest dark:hover:bg-secondary-light/5"
-                >
-                  <span className="text-gray-dark dark:text-gray-light">
-                    {day.date}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <div className="w-20 bg-gray-lightest dark:bg-night rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full ${
-                          day.compliance >= 80
-                            ? "bg-green-500"
-                            : day.compliance >= 50
+          {/* Supplement Compliance Calendar */}
+          <Card title="Supplement Compliance">
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-sm font-medium">This Week</span>
+              <div className="text-xs text-gray-500">
+                {(() => {
+                  const today = new Date();
+                  const startOfWeek = new Date(today);
+                  startOfWeek.setDate(today.getDate() - today.getDay());
+                  const endOfWeek = new Date(startOfWeek);
+                  endOfWeek.setDate(startOfWeek.getDate() + 6);
+                  return `${startOfWeek.getMonth() + 1}/${startOfWeek.getDate()} - ${endOfWeek.getMonth() + 1}/${endOfWeek.getDate()}`;
+                })()}
+              </div>
+            </div>
+            <div className="space-y-3">
+              {complianceData.map((day: any, index: number) => {
+                // Determine if this is today or future/past
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const isToday = day.date.getTime() === today.getTime();
+                const isFuture = day.date.getTime() > today.getTime();
+                
+                // Determine status and display
+                let status: string;
+                let displayText: string;
+                
+                if (isFuture) {
+                  status = "pending";
+                  displayText = "Pending";
+                } else if (isToday) {
+                  if (day.percentage > 0) {
+                    status = "completed";
+                    displayText = `${day.percentage}%`;
+                  } else {
+                    status = "pending";
+                    displayText = "Pending";
+                  }
+                } else {
+                  // Past day
+                  status = "completed";
+                  displayText = `${day.percentage}%`;
+                }
+
+                return (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between py-2 border-b dark:border-davyGray last:border-0"
+                  >
+                    <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                      {day.date.toLocaleDateString("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-block w-3 h-3 rounded-full ${
+                          status === "pending"
+                            ? isToday
+                              ? "bg-green-500"
+                              : "bg-gray-light dark:bg-davyGray"
+                            : day.percentage >= 80
+                            ? "bg-primary"
+                            : day.percentage > 0
                             ? "bg-yellow-500"
                             : "bg-red-500"
                         }`}
-                        style={{ width: `${day.compliance}%` }}
-                      />
+                      ></span>
+                      <span className={`text-sm ${
+                        isToday && status === "pending"
+                          ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
+                          : 'text-gray-dark dark:text-gray-light'
+                      }`}>
+                        {displayText}
+                      </span>
                     </div>
-                    <span
-                      className={`${
-                        day.compliance >= 80
-                          ? "text-green-500"
-                          : day.compliance >= 50
-                          ? "text-yellow-500"
-                          : "text-red-500"
-                      } w-8 text-right`}
-                    >
-                      {day.compliance}%
-                    </span>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
         </div>

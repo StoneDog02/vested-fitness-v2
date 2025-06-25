@@ -70,39 +70,83 @@ export const loader: LoaderFunction = async ({ request }) => {
         .eq("role", "client");
       if (clients) {
         for (const client of clients) {
-          // Compliance: % of workouts completed in last 7 days
+          // Comprehensive compliance: % of workouts, meals, and supplements completed in last 7 days
           const weekAgo = new Date();
           weekAgo.setDate(weekAgo.getDate() - 7);
           
-          // Get workout completions
+          // Fetch all completions for the week
           const { data: workoutCompletions } = await supabase
             .from("workout_completions")
             .select("id, completed_at")
             .eq("user_id", client.id)
             .gte("completed_at", weekAgo.toISOString().slice(0, 10));
+
+          const { data: mealCompletions } = await supabase
+            .from("meal_completions")
+            .select("id, completed_at")
+            .eq("user_id", client.id)
+            .gte("completed_at", weekAgo.toISOString())
+            .lt("completed_at", new Date().toISOString());
+
+          const { data: supplementCompletions } = await supabase
+            .from("supplement_completions")
+            .select("id, completed_at")
+            .eq("user_id", client.id)
+            .gte("completed_at", weekAgo.toISOString().slice(0, 10));
           
-          // Get expected workout days for this client
-          const { data: clientPlans } = await supabase
+          // Calculate expected activities for this client
+          let expectedWorkoutDays = 0;
+          let expectedMeals = 0;
+          let expectedSupplements = 0;
+          
+          // Expected workouts
+          const { data: clientWorkoutPlans } = await supabase
             .from("workout_plans")
             .select("id")
             .eq("user_id", client.id)
             .eq("is_active", true)
             .limit(1);
           
-          let expectedWorkoutDays = 0;
-          if (clientPlans && clientPlans.length > 0) {
+          if (clientWorkoutPlans && clientWorkoutPlans.length > 0) {
             const { data: workoutDays } = await supabase
               .from("workout_days")
               .select("is_rest")
-              .eq("workout_plan_id", clientPlans[0].id);
+              .eq("workout_plan_id", clientWorkoutPlans[0].id);
             expectedWorkoutDays = (workoutDays || []).filter(day => !day.is_rest).length;
           }
+
+          // Expected meals (7 days worth)
+          const { data: clientMealPlans } = await supabase
+            .from("meal_plans")
+            .select("id")
+            .eq("user_id", client.id)
+            .eq("is_active", true)
+            .limit(1);
+          
+          if (clientMealPlans && clientMealPlans.length > 0) {
+            const { data: meals } = await supabase
+              .from("meals")
+              .select("id")
+              .eq("meal_plan_id", clientMealPlans[0].id);
+            expectedMeals = (meals || []).length * 7; // 7 days
+          }
+
+          // Expected supplements (7 days worth)
+          const { data: clientSupplements } = await supabase
+            .from("supplements")
+            .select("id")
+            .eq("user_id", client.id);
+          expectedSupplements = (clientSupplements || []).length * 7; // 7 days
           
           const completedWorkouts = (workoutCompletions ?? []).length;
-          const compliance =
-            expectedWorkoutDays > 0
-              ? Math.round((completedWorkouts / expectedWorkoutDays) * 100)
-              : 0;
+          const completedMeals = (mealCompletions ?? []).length;
+          const completedSupplements = (supplementCompletions ?? []).length;
+          
+          const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
+          const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
+          
+          const compliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
+          
           complianceClients.push({
             id: client.id,
             name: client.name,
@@ -116,6 +160,20 @@ export const loader: LoaderFunction = async ({ request }) => {
   }
   return json({ complianceClients });
 };
+
+// Function to get color based on compliance percentage
+function getComplianceColor(percentage: number): string {
+  if (percentage >= 90) return "#22c55e"; // Green (Tailwind green-500)
+  if (percentage >= 80) return "#84cc16"; // Light green (Tailwind lime-500)
+  if (percentage >= 70) return "#eab308"; // Yellow (Tailwind yellow-500)
+  if (percentage >= 60) return "#f59e0b"; // Orange (Tailwind amber-500)
+  if (percentage >= 50) return "#f97316"; // Dark orange (Tailwind orange-500)
+  if (percentage >= 40) return "#ef4444"; // Red (Tailwind red-500)
+  if (percentage >= 30) return "#dc2626"; // Dark red (Tailwind red-600)
+  if (percentage >= 20) return "#b91c1c"; // Darker red (Tailwind red-700)
+  if (percentage >= 10) return "#991b1b"; // Very dark red (Tailwind red-800)
+  return "#7f1d1d"; // Deep red (Tailwind red-900)
+}
 
 export default function ComplianceClients() {
   const { complianceClients } = useLoaderData<typeof loader>();
@@ -143,31 +201,45 @@ export default function ComplianceClients() {
             </div>
           ) : (
             complianceClients.map((client: ComplianceClient) => (
-              <div
+              <Link
                 key={client.id}
-                className="flex items-center justify-between"
+                to={`/dashboard/clients/${client.id}`}
+                className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer group"
               >
                 <div>
-                  <p className="font-medium">{client.name}</p>
+                  <p className="font-medium group-hover:text-primary transition-colors">{client.name}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-[60px] h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="w-[80px] h-3 bg-gray-200 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-green-500 rounded-full"
-                      style={{ width: `${client.compliance}%` }}
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{ 
+                        width: `${client.compliance}%`,
+                        backgroundColor: getComplianceColor(client.compliance)
+                      }}
                     />
                   </div>
-                  <span className="text-sm font-medium">
+                  <span 
+                    className="text-sm font-medium min-w-[40px]"
+                    style={{ color: getComplianceColor(client.compliance) }}
+                  >
                     {client.compliance}%
                   </span>
-                  <Link
-                    to={`/dashboard/clients/${client.id}`}
-                    className="ml-4 text-primary hover:underline text-sm"
+                  <svg
+                    className="w-4 h-4 text-gray-400 group-hover:text-primary transition-colors ml-2"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
                   >
-                    View
-                  </Link>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
                 </div>
-              </div>
+              </Link>
             ))
           )}
         </div>
