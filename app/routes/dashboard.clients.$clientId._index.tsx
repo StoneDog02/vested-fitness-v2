@@ -711,7 +711,7 @@ export default function ClientDetails() {
                       </button>
                     </div>
                   ) : (
-                    <div className="italic text-gray-400 text-sm">Add This Week's Check In.</div>
+                    <div className="italic text-gray-400 text-sm">Add This Week&apos;s Check In.</div>
                   )}
                 </div>
               </div>

@@ -3,7 +3,7 @@ import Card from "~/components/ui/Card";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import ViewWorkoutPlanModal from "~/components/coach/ViewWorkoutPlanModal";
 import CreateWorkoutModal from "~/components/coach/CreateWorkoutModal";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Modal from "~/components/ui/Modal";
 import { TrashIcon, PencilIcon } from "@heroicons/react/24/outline";
 import { json, redirect } from "@remix-run/node";
@@ -1192,7 +1192,7 @@ export default function ClientWorkouts() {
                   const isFuture = thisDate.getTime() > today.getTime();
                   
                   // Determine percentage for display
-                  let percentage = Math.round((complianceData[i] || 0) * 100);
+                  const percentage = Math.round((complianceData[i] || 0) * 100);
                   let displayPercentage = percentage;
                   
                   // For pending days, show 0% in the bar but don't show percentage text

@@ -18,23 +18,12 @@ export default function WorkoutCard({
   onCompletionChange,
   dayOffset,
 }: WorkoutCardProps) {
-  const [isCompleted, setIsCompleted] = useState(false);
-  const [notes, setNotes] = useState("");
   const [weights, setWeights] = useState<Record<string, string>>({});
 
   // Reset state when day changes
   useEffect(() => {
-    setIsCompleted(false);
-    setNotes("");
     setWeights({});
   }, [dayOffset]);
-
-  // Initialize completion state from props if available
-  useEffect(() => {
-    if (completionStates && completionStates.length > 0) {
-      setIsCompleted(completionStates[0]);
-    }
-  }, [completionStates]);
 
   useEffect(() => {
     // Initialize weights state only on the client side
@@ -62,16 +51,7 @@ export default function WorkoutCard({
     }));
   };
 
-  const handleCompletionChange = (checked: boolean) => {
-    if (isSubmitted) return;
-    setIsCompleted(checked);
-    if (onCompletionChange) {
-      onCompletionChange(
-        exercises.map((ex) => ex.id),
-        checked
-      );
-    }
-  };
+
 
   const getSetLabel = (
     type: "Super" | "Giant" | "Single",
@@ -86,6 +66,8 @@ export default function WorkoutCard({
         return `Set ${setNumber}`;
     }
   };
+
+
 
   return (
     <div className="space-y-6">
@@ -231,26 +213,7 @@ export default function WorkoutCard({
         </div>
       </div>
 
-      {/* Notes Field */}
-      <div>
-        <label
-          htmlFor={`notes-${exercises[0].id}`}
-          className="block text-sm font-medium text-secondary dark:text-alabaster mb-1"
-        >
-          Notes
-        </label>
-        <textarea
-          id={`notes-${exercises[0].id}`}
-          value={notes}
-          onChange={(e) => !isSubmitted && setNotes(e.target.value)}
-          disabled={isSubmitted}
-          className={`w-full px-3 py-2 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600 text-secondary dark:text-alabaster placeholder-gray-400 dark:placeholder-gray-400 focus:ring-1 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light ${
-            isSubmitted ? "cursor-not-allowed opacity-50" : ""
-          }`}
-          rows={2}
-          placeholder="Add any notes about this exercise..."
-        />
-      </div>
+
     </div>
   );
 }

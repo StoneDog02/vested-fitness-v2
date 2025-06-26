@@ -864,7 +864,7 @@ export default function ClientMeals() {
                     const isFuture = thisDate.getTime() > today.getTime();
                     
                     // Determine percentage for display
-                    let percentage = Math.round((compliancePercentages[i] || 0) * 100);
+                    const percentage = Math.round((compliancePercentages[i] || 0) * 100);
                     let displayPercentage = percentage;
                     
                     // For pending days, show 0% in the bar but don't show percentage text

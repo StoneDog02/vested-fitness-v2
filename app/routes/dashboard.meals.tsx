@@ -5,7 +5,7 @@ import Button from "~/components/ui/Button";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "~/lib/supabase";
+
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";

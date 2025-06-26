@@ -85,6 +85,7 @@ export const loader = async ({ request }: { request: Request }) => {
       .lte("completed_at", end);
     // Map: date -> [meal_id]
     const result: Record<string, string[]> = {};
+    const current = new Date().toISOString().slice(0, 10);
     for (const d of getDatesInRange(start, end)) {
       result[d] = [];
     }

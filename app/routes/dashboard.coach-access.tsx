@@ -1,7 +1,7 @@
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";

@@ -1,4 +1,4 @@
-import React from "react";
+import { useState } from "react";
 import { useFetcher } from "@remix-run/react";
 
 // Define the type for a workout plan template

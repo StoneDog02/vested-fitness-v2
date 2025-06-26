@@ -77,7 +77,7 @@ export const action = async ({ request }: { request: Request }) => {
       .eq("completed_at", date)
       .single();
     if (!existing) {
-      const { error: insertError, data: insertData } = await supabase.from("meal_completions").insert({
+      const { error: insertError } = await supabase.from("meal_completions").insert({
         user_id: user.id,
         meal_id: mealId,
         completed_at: date,

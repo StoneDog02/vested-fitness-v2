@@ -3,7 +3,7 @@ import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import WorkoutCard from "~/components/workout/WorkoutCard";
-import type { Exercise, WorkoutType } from "~/types/workout";
+import { DailyWorkout, Exercise } from "~/types/workout";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
@@ -794,7 +794,7 @@ export default function Workouts() {
                 // Determine status and display
                 let status: string;
                 let displayText: string;
-                let percentage = Math.round((complianceData[i] || 0) * 100);
+                const percentage = Math.round((complianceData[i] || 0) * 100);
                 
                 if (isFuture) {
                   status = "pending";

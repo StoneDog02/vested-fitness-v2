@@ -191,14 +191,14 @@ export const loader: LoaderFunction = async ({ request }) => {
         if (mealPlans && mealPlans.length > 0) {
           const planId = mealPlans[0].id;
           let mealsRaw = null;
-          let mealsError = null;
+  
           try {
             const result = await supabase
               .from("meals")
               .select("id, name, time")
               .eq("meal_plan_id", planId);
             mealsRaw = result.data;
-            mealsError = result.error;
+            
           } catch (err) {
             /* ignore */
           }
@@ -293,7 +293,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           timestamp: new Date(u.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
         }));
         // Fetch active workout plan and today's workout for the client
-        let todaysWorkouts: DailyWorkout[] = [];
+        const todaysWorkouts: DailyWorkout[] = [];
         let planName: string | null = null;
         let isRestDay: boolean | null = null;
         const { data: workoutPlans } = await supabase
@@ -691,7 +691,7 @@ export const loader: LoaderFunction = async ({ request }) => {
 };
 
 export default function Dashboard() {
-  const { clientData, coachId, totalClients, activeClients, inactiveClients, compliance, percentChange, clients, recentClients, recentActivity } = useLoaderData<LoaderData>();
+  const { clientData, coachId, totalClients, activeClients, inactiveClients, compliance, percentChange, recentClients, recentActivity } = useLoaderData<LoaderData>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const { checkedMeals, isHydrated } = useMealCompletion();
   const matches = useMatches();

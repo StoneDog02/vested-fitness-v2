@@ -1,7 +1,6 @@
-import React from "react";
 import { Link } from "@remix-run/react";
 
-export default function HelpAndSupport() {
+export default function Help() {
   const faqs = [
     {
       question: "How do I get started with my fitness journey?",
