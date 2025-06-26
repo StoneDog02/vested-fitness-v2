@@ -465,25 +465,30 @@ export const loader: LoaderFunction = async ({ request }) => {
         const twoWeeksAgo = new Date();
         twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
         
-        // Fetch all completions for the week
+        // Fetch all completions for the week (consistent date filtering)
+        const weekAgoISO = weekAgo.toISOString();
+        const nowISO = new Date().toISOString();
+        
         const { data: workoutCompletions } = await supabase
           .from("workout_completions")
           .select("id, user_id, completed_at")
           .in("user_id", clients.map((c) => c.id))
-          .gte("completed_at", weekAgo.toISOString().slice(0, 10));
+          .gte("completed_at", weekAgoISO)
+          .lt("completed_at", nowISO);
 
         const { data: mealCompletions } = await supabase
           .from("meal_completions")
           .select("id, user_id, completed_at")
           .in("user_id", clients.map((c) => c.id))
-          .gte("completed_at", weekAgo.toISOString())
-          .lt("completed_at", new Date().toISOString());
+          .gte("completed_at", weekAgoISO)
+          .lt("completed_at", nowISO);
 
         const { data: supplementCompletions } = await supabase
           .from("supplement_completions")
           .select("id, user_id, completed_at")
           .in("user_id", clients.map((c) => c.id))
-          .gte("completed_at", weekAgo.toISOString().slice(0, 10));
+          .gte("completed_at", weekAgoISO)
+          .lt("completed_at", nowISO);
         
         // Calculate expected activities for all clients
         let totalExpectedWorkouts = 0;
@@ -540,27 +545,29 @@ export const loader: LoaderFunction = async ({ request }) => {
         
         compliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
 
-        // Previous week compliance
+        // Previous week compliance (consistent date filtering)
+        const twoWeeksAgoISO = twoWeeksAgo.toISOString();
+        
         const { data: prevWorkoutCompletions } = await supabase
           .from("workout_completions")
           .select("id, user_id, completed_at")
           .in("user_id", clients.map((c) => c.id))
-          .gte("completed_at", twoWeeksAgo.toISOString().slice(0, 10))
-          .lt("completed_at", weekAgo.toISOString().slice(0, 10));
+          .gte("completed_at", twoWeeksAgoISO)
+          .lt("completed_at", weekAgoISO);
 
         const { data: prevMealCompletions } = await supabase
           .from("meal_completions")
           .select("id, user_id, completed_at")
           .in("user_id", clients.map((c) => c.id))
-          .gte("completed_at", twoWeeksAgo.toISOString())
-          .lt("completed_at", weekAgo.toISOString());
+          .gte("completed_at", twoWeeksAgoISO)
+          .lt("completed_at", weekAgoISO);
 
         const { data: prevSupplementCompletions } = await supabase
           .from("supplement_completions")
           .select("id, user_id, completed_at")
           .in("user_id", clients.map((c) => c.id))
-          .gte("completed_at", twoWeeksAgo.toISOString().slice(0, 10))
-          .lt("completed_at", weekAgo.toISOString().slice(0, 10));
+          .gte("completed_at", twoWeeksAgoISO)
+          .lt("completed_at", weekAgoISO);
         
         const prevTotalCompleted = (prevWorkoutCompletions ?? []).length + 
                                    (prevMealCompletions ?? []).length + 

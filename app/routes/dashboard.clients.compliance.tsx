@@ -77,25 +77,30 @@ export const loader: LoaderFunction = async ({ request }) => {
           const weekAgo = new Date();
           weekAgo.setDate(weekAgo.getDate() - 7);
           
-          // Fetch all completions for the week
+          // Fetch all completions for the week (consistent date filtering)
+          const weekAgoISO = weekAgo.toISOString();
+          const nowISO = new Date().toISOString();
+          
           const { data: workoutCompletions } = await supabase
             .from("workout_completions")
             .select("id, completed_at")
             .eq("user_id", client.id)
-            .gte("completed_at", weekAgo.toISOString().slice(0, 10));
+            .gte("completed_at", weekAgoISO)
+            .lt("completed_at", nowISO);
 
           const { data: mealCompletions } = await supabase
             .from("meal_completions")
             .select("id, completed_at")
             .eq("user_id", client.id)
-            .gte("completed_at", weekAgo.toISOString())
-            .lt("completed_at", new Date().toISOString());
+            .gte("completed_at", weekAgoISO)
+            .lt("completed_at", nowISO);
 
           const { data: supplementCompletions } = await supabase
             .from("supplement_completions")
             .select("id, completed_at")
             .eq("user_id", client.id)
-            .gte("completed_at", weekAgo.toISOString().slice(0, 10));
+            .gte("completed_at", weekAgoISO)
+            .lt("completed_at", nowISO);
           
           // Calculate expected activities for this client
           let expectedWorkoutDays = 0;

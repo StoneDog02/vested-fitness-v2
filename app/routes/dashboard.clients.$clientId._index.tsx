@@ -14,6 +14,7 @@ import type { Database } from "~/lib/supabase";
 import LineChart from "~/components/ui/LineChart";
 import { calculateMacros } from "~/lib/utils";
 import { ResponsiveContainer } from "recharts";
+import dayjs from "dayjs";
 
 export const meta: MetaFunction = () => {
   return [
@@ -101,6 +102,7 @@ interface CheckInNote {
 interface LoaderData {
   client: MinimalClient;
   updates: Update[];
+  allUpdates: Update[];
   checkIns: CheckIn[];
   mealPlans: MealPlan[];
   supplements: Supplement[];
@@ -178,14 +180,24 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     return json({
       client: fallbackClient,
       updates: [],
+      allUpdates: [],
       checkIns: [],
       mealPlans: [],
       supplements: [],
     });
   }
 
-  // Fetch updates (optional, can be empty)
+  // Fetch updates from the last 7 days for main display
+  const sevenDaysAgo = dayjs().subtract(7, 'day').toISOString();
   const { data: updates } = await supabase
+    .from("coach_updates")
+    .select("*")
+    .eq("client_id", client.id)
+    .gte("created_at", sevenDaysAgo)
+    .order("created_at", { ascending: false });
+
+  // Fetch ALL updates for history modal
+  const { data: allUpdates } = await supabase
     .from("coach_updates")
     .select("*")
     .eq("client_id", client.id)
@@ -266,6 +278,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   return json({
     client,
     updates: updates || [],
+    allUpdates: allUpdates || [],
     checkIns: checkIns || [],
     mealPlans: mealPlans || [],
     supplements: supplements || [],
@@ -382,14 +395,9 @@ export const action: import("@remix-run/node").ActionFunction = async ({ request
   return json({ error: "No valid data or intent provided" }, { status: 400 });
 };
 
-// Utility to get the start of the week (Sunday) for a given date
+// Utility to get the start of the week (Sunday) for a given date using dayjs
 function getWeekStart(dateStr: string) {
-  const date = new Date(dateStr);
-  const day = date.getDay(); // 0 (Sun) - 6 (Sat)
-  const diff = date.getDate() - day;
-  const weekStart = new Date(date.setDate(diff));
-  weekStart.setHours(0, 0, 0, 0);
-  return weekStart.getTime(); // Use timestamp for grouping
+  return dayjs(dateStr).startOf('week').valueOf(); // dayjs uses Sunday as start of week by default
 }
 
 // Helper to format date as mm/dd/yyyy
@@ -401,10 +409,24 @@ function formatDateMMDDYYYY(dateStr: string) {
   return `${mm}/${dd}/${yyyy}`;
 }
 
+// Helper to format week range (Sunday - Saturday)
+function formatWeekRange(weekStartTimestamp: number) {
+  const start = dayjs(weekStartTimestamp);
+  const end = start.add(6, 'day');
+  return `${start.format('MM/DD')} - ${end.format('MM/DD/YYYY')}`;
+}
+
+// Helper to filter updates that are within the last 7 days
+function filterUpdatesWithinSevenDays(updates: Update[]): Update[] {
+  const sevenDaysAgo = dayjs().subtract(7, 'day');
+  return updates.filter(update => dayjs(update.created_at).isAfter(sevenDaysAgo));
+}
+
 export default function ClientDetails() {
   const {
     client,
     updates: loaderUpdates,
+    allUpdates: loaderAllUpdates,
     checkIns: loaderCheckIns,
     weightLogs = [],
     activeMealPlan,
@@ -418,7 +440,8 @@ export default function ClientDetails() {
   const fetcher = useFetcher();
 
   // Local state for updates, checkIns, and supplements
-  const [updates, setUpdates] = useState<Update[]>(loaderUpdates);
+  const [updates, setUpdates] = useState<Update[]>(loaderUpdates); // Already filtered on server
+  const [allUpdates, setAllUpdates] = useState<Update[]>(loaderAllUpdates); // All updates for history
   const [checkIns, setCheckIns] = useState<CheckInNote[]>(
     ((loaderCheckIns as CheckIn[]) || []).map((c) => ({ id: c.id, date: c.created_at, notes: c.notes }))
   );
@@ -427,9 +450,21 @@ export default function ClientDetails() {
   // Sort checkIns by date descending
   const sortedCheckIns = [...checkIns].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  // Group check-ins by week start (Sunday)
+  // Anchor to current and previous week based on today's date
+  const now = dayjs();
+  const thisWeekStart = now.startOf('week').valueOf();
+  const lastWeekStart = now.subtract(1, 'week').startOf('week').valueOf();
+
+  // Filter check-ins to only include recent ones (within reasonable timeframe for processing)
+  const recentWeekBoundary = now.subtract(2, 'week').startOf('week').valueOf();
+  const recentCheckIns = sortedCheckIns.filter(checkIn => {
+    const checkInTime = dayjs(checkIn.date).valueOf();
+    return checkInTime >= recentWeekBoundary; // Only keep check-ins from the last 2+ weeks for "This/Last Week" consideration
+  });
+
+  // Group recent check-ins by week start (Sunday)
   const weekGroups: { [weekStart: number]: CheckInNote[] } = {};
-  for (const checkIn of sortedCheckIns) {
+  for (const checkIn of recentCheckIns) {
     const weekStart = getWeekStart(checkIn.date);
     if (!weekGroups[weekStart]) weekGroups[weekStart] = [];
     weekGroups[weekStart].push(checkIn);
@@ -438,18 +473,81 @@ export default function ClientDetails() {
     .map(Number)
     .sort((a, b) => b - a);
 
-  // Anchor to current and previous week based on today's date
-  const now = new Date();
-  const thisWeekStart = getWeekStart(now.toISOString());
-  const lastWeekStart = thisWeekStart - 7 * 24 * 60 * 60 * 1000;
+  // For history, use ALL check-ins that are older than 2 weeks
+  const allHistoryCheckIns = sortedCheckIns.filter(checkIn => {
+    const checkInTime = dayjs(checkIn.date).valueOf();
+    return checkInTime < recentWeekBoundary;
+  });
 
-  const thisWeekCheckIn = (weekGroups[thisWeekStart] && weekGroups[thisWeekStart][0]) || null;
-  const lastWeekCheckIn = (weekGroups[lastWeekStart] && weekGroups[lastWeekStart][0]) || null;
+  // More explicit filtering - only show check-ins that are exactly in the current or previous week
+  const thisWeekEnd = now.endOf('week').valueOf();
+  const lastWeekEnd = now.subtract(1, 'week').endOf('week').valueOf();
+  
+  // Find check-ins that fall exactly within this week's date range
+  const thisWeekCheckIn = sortedCheckIns.find(checkIn => {
+    const checkInTime = dayjs(checkIn.date).valueOf();
+    return checkInTime >= thisWeekStart && checkInTime <= thisWeekEnd;
+  }) || null;
+  
+  // Find check-ins that fall exactly within last week's date range
+  // But only show them if we're within 1 day of the end of that week
+  const lastWeekCheckIn = (() => {
+    const oneDayAfterLastWeek = dayjs(lastWeekEnd).add(1, 'day').valueOf();
+    
+    // If current date is more than 1 day past the end of last week, move to history
+    if (now.valueOf() > oneDayAfterLastWeek) {
+      return null;
+    }
+    
+    return sortedCheckIns.find(checkIn => {
+      const checkInTime = dayjs(checkIn.date).valueOf();
+      return checkInTime >= lastWeekStart && checkInTime <= lastWeekEnd;
+    }) || null;
+  })();
 
-  // For history, exclude this and last week
-  const historyCheckIns = weekStarts
-    .filter(ws => ws !== thisWeekStart && ws !== lastWeekStart)
-    .map(ws => weekGroups[ws][0]);
+  // For history, use check-ins that don't belong to this week or currently visible last week
+  const historyCheckIns = sortedCheckIns.filter(checkIn => {
+    const checkInTime = dayjs(checkIn.date).valueOf();
+    const oneDayAfterLastWeek = dayjs(lastWeekEnd).add(1, 'day').valueOf();
+    
+    // Exclude check-ins that fall within this week
+    const isInThisWeek = checkInTime >= thisWeekStart && checkInTime <= thisWeekEnd;
+    
+    // For last week check-ins, only exclude them if we're still within the cutoff period
+    const isInLastWeekAndStillVisible = (
+      checkInTime >= lastWeekStart && 
+      checkInTime <= lastWeekEnd && 
+      now.valueOf() <= oneDayAfterLastWeek
+    );
+    
+    return !isInThisWeek && !isInLastWeekAndStillVisible;
+  });
+
+  // Debug logging to help identify the issue
+  if (typeof window !== 'undefined') {
+    console.log('Debug Check-in Info:', {
+      currentDate: now.format('YYYY-MM-DD dddd'),
+      currentTimestamp: now.valueOf(),
+      thisWeekRange: `${dayjs(thisWeekStart).format('MM/DD')} - ${dayjs(thisWeekEnd).format('MM/DD/YYYY')}`,
+      thisWeekStart: thisWeekStart,
+      thisWeekEnd: thisWeekEnd,
+      lastWeekRange: `${dayjs(lastWeekStart).format('MM/DD')} - ${dayjs(lastWeekEnd).format('MM/DD/YYYY')}`,
+      lastWeekStart: lastWeekStart,
+      lastWeekEnd: lastWeekEnd,
+      lastWeekCutoffDate: dayjs(lastWeekEnd).add(1, 'day').format('MM/DD/YYYY'),
+      isCurrentDateBeyondCutoff: now.valueOf() > dayjs(lastWeekEnd).add(1, 'day').valueOf(),
+      allCheckIns: sortedCheckIns.map(c => ({ 
+        date: c.date, 
+        timestamp: dayjs(c.date).valueOf(),
+        notes: c.notes.substring(0, 20),
+        inThisWeek: dayjs(c.date).valueOf() >= thisWeekStart && dayjs(c.date).valueOf() <= thisWeekEnd,
+        inLastWeek: dayjs(c.date).valueOf() >= lastWeekStart && dayjs(c.date).valueOf() <= lastWeekEnd
+      })),
+      thisWeekCheckIn: thisWeekCheckIn ? { date: thisWeekCheckIn.date, notes: thisWeekCheckIn.notes.substring(0, 20) } : null,
+      lastWeekCheckIn: lastWeekCheckIn ? { date: lastWeekCheckIn.date, notes: lastWeekCheckIn.notes.substring(0, 20) } : null,
+      historyCount: historyCheckIns.length
+    });
+  }
 
   // History modal pagination (if needed)
   const [currentPage, setCurrentPage] = useState(1);
@@ -464,6 +562,30 @@ export default function ClientDetails() {
       setCurrentPage(1);
     }
   }, [checkIns, showHistory]);
+
+  // Periodically filter out updates older than 7 days from main display
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setUpdates((prev) => filterUpdatesWithinSevenDays(prev));
+    }, 60000); // Check every minute
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Force re-render when we cross into a new week to ensure check-ins move properly
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => dayjs().startOf('week').valueOf());
+  
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newWeekStart = dayjs().startOf('week').valueOf();
+      if (newWeekStart !== currentWeekStart) {
+        setCurrentWeekStart(newWeekStart);
+        // This will trigger a re-render and recalculate check-in positions
+      }
+    }, 60000); // Check every minute
+
+    return () => clearInterval(interval);
+  }, [currentWeekStart]);
 
   // Add check-in handler (submits to API, then updates state)
   const handleAddCheckIn = (notes: string) => {
@@ -491,10 +613,12 @@ export default function ClientDetails() {
         setCheckIns((prev) => [{ id: data.checkIn.id, date: data.checkIn.created_at, notes: data.checkIn.notes }, ...prev]);
       }
       if (data.update) {
-        setUpdates((prev) => [data.update, ...prev]);
+        setUpdates((prev) => filterUpdatesWithinSevenDays([data.update, ...prev]));
+        setAllUpdates((prev) => [data.update, ...prev]);
       }
       if (data.deletedUpdate) {
         setUpdates((prev) => prev.filter((u) => u.id !== data.deletedUpdate.id));
+        setAllUpdates((prev) => prev.filter((u) => u.id !== data.deletedUpdate.id));
       }
       if (data.deletedCheckIn) {
         setCheckIns((prev) => prev.filter((c) => c.id !== data.deletedCheckIn.id));
@@ -639,7 +763,7 @@ export default function ClientDetails() {
             <UpdateHistoryModal
               isOpen={showUpdateHistory}
               onClose={() => setShowUpdateHistory(false)}
-              updates={updates}
+              updates={allUpdates}
               emptyMessage="No updates yet."
             />
 
@@ -669,7 +793,7 @@ export default function ClientDetails() {
                 {/* Last Week Section */}
                 <div>
                   <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
-                    Last Week
+                    Last Week ({formatWeekRange(lastWeekStart)})
                   </h4>
                   {lastWeekCheckIn ? (
                     <div className="flex justify-between items-center mb-1">
@@ -693,7 +817,7 @@ export default function ClientDetails() {
                 {/* This Week Section */}
                 <div>
                   <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
-                    This Week
+                    This Week ({formatWeekRange(thisWeekStart)})
                   </h4>
                   {thisWeekCheckIn ? (
                     <div className="flex justify-between items-center mb-1">
@@ -752,7 +876,11 @@ export default function ClientDetails() {
         <CheckInHistoryModal
           isOpen={showHistory}
           onClose={() => setShowHistory(false)}
-          checkIns={displayedHistory.map((c) => ({ ...c, formattedDate: formatDateMMDDYYYY(c.date) }))}
+          checkIns={displayedHistory.map((c) => ({ 
+            ...c, 
+            formattedDate: formatDateMMDDYYYY(c.date),
+            weekRange: formatWeekRange(getWeekStart(c.date))
+          }))}
           onLoadMore={handleLoadMore}
           hasMore={hasMore}
           emptyMessage="No history yet."
