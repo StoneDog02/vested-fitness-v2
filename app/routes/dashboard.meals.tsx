@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { MetaFunction, LoaderFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
@@ -19,93 +19,105 @@ export const meta: MetaFunction = () => {
 };
 
 export const loader: LoaderFunction = async ({ request }) => {
-  // Get user auth from cookie (same as dashboard._index.tsx)
-  const cookies = parse(request.headers.get("cookie") || "");
-  const supabaseAuthCookieKey = Object.keys(cookies).find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-  let accessToken;
-  if (supabaseAuthCookieKey) {
-    try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
-    } catch (e) {
-      accessToken = undefined;
-    }
-  }
-  let authId;
-  if (accessToken) {
-    try {
-      const decoded = jwt.decode(accessToken);
-      authId = decoded && typeof decoded === "object" && "sub" in decoded ? decoded.sub : undefined;
-    } catch (e) {}
-  }
-  let mealPlan = null;
-  if (authId) {
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
+  try {
+    // Get user auth from cookie (same as dashboard._index.tsx)
+    const cookies = parse(request.headers.get("cookie") || "");
+    const supabaseAuthCookieKey = Object.keys(cookies).find(
+      (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
     );
-    // Get user
-    const { data: user } = await supabase
-      .from("users")
-      .select("id")
-      .eq("auth_id", authId)
-      .single();
-    if (user) {
-      // Get active meal plan
-      const { data: mealPlansRaw } = await supabase
-        .from("meal_plans")
-        .select("id, title, is_active, created_at")
-        .eq("user_id", user.id)
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
-      if (mealPlansRaw && mealPlansRaw.length > 0) {
-        const plan = mealPlansRaw[0];
-        const { data: mealsRaw } = await supabase
-          .from("meals")
-          .select("id, name, time, sequence_order")
-          .eq("meal_plan_id", plan.id)
-          .order("sequence_order", { ascending: true });
-        const meals = await Promise.all(
-          (mealsRaw || []).map(async (meal) => {
-            // Join foods to food_library for macros
-            const { data: foodsRaw } = await supabase
-              .from("foods")
-              .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
-              .eq("meal_id", meal.id);
-            const foods = (foodsRaw || []).map((food) => {
-              const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) : Number(food.protein) || 0;
-              const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) : Number(food.carbs) || 0;
-              const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) : Number(food.fat) || 0;
-              // Always calculate calories from macros
-              const calories = protein * 4 + carbs * 4 + fat * 9;
-              return {
-                id: food.id,
-                name: food.name,
-                portion: food.portion,
-                calories,
-                protein,
-                carbs,
-                fat,
-              };
-            });
-            return { ...meal, foods };
-          })
-        );
-        mealPlan = {
-          name: plan.title,
-          date: "", // Optionally format date range here
-          meals,
-        };
+    let accessToken;
+    if (supabaseAuthCookieKey) {
+      try {
+        const decoded = Buffer.from(
+          cookies[supabaseAuthCookieKey],
+          "base64"
+        ).toString("utf-8");
+        const [access] = JSON.parse(JSON.parse(decoded));
+        accessToken = access;
+      } catch (e) {
+        accessToken = undefined;
       }
     }
+    let authId;
+    if (accessToken) {
+      try {
+        const decoded = jwt.decode(accessToken);
+        authId = decoded && typeof decoded === "object" && "sub" in decoded ? decoded.sub : undefined;
+      } catch (e) {}
+    }
+    let mealPlan = null;
+    if (authId) {
+      const supabase = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_KEY!
+      );
+      // Get user
+      const { data: user } = await supabase
+        .from("users")
+        .select("id")
+        .eq("auth_id", authId)
+        .single();
+      if (user) {
+        // Get active meal plan
+        const { data: mealPlansRaw } = await supabase
+          .from("meal_plans")
+          .select("id, title, is_active, created_at")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .order("created_at", { ascending: false });
+        if (mealPlansRaw && mealPlansRaw.length > 0) {
+          const plan = mealPlansRaw[0];
+          const { data: mealsRaw } = await supabase
+            .from("meals")
+            .select("id, name, time, sequence_order")
+            .eq("meal_plan_id", plan.id)
+            .order("sequence_order", { ascending: true });
+          const meals = await Promise.all(
+            (mealsRaw || []).map(async (meal) => {
+              // Join foods to food_library for macros
+              const { data: foodsRaw } = await supabase
+                .from("foods")
+                .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+                .eq("meal_id", meal.id);
+              const foods = (foodsRaw || []).map((food) => {
+                // Ensure all values are serializable numbers
+                const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
+                const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
+                const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) || 0 : Number(food.fat) || 0;
+                // Always calculate calories from macros and ensure no NaN
+                const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
+                return {
+                  id: String(food.id || ''),
+                  name: String(food.name || ''),
+                  portion: String(food.portion || ''),
+                  calories: isFinite(calories) ? calories : 0,
+                  protein: isFinite(protein) ? Math.round(protein) : 0,
+                  carbs: isFinite(carbs) ? Math.round(carbs) : 0,
+                  fat: isFinite(fat) ? Math.round(fat) : 0,
+                };
+              });
+              return { 
+                id: String(meal.id || ''),
+                name: String(meal.name || ''),
+                time: String(meal.time || ''),
+                sequence_order: Number(meal.sequence_order) || 0,
+                foods 
+              };
+            })
+          );
+          mealPlan = {
+            name: String(plan.title || ''),
+            date: "", // Optionally format date range here
+            meals,
+          };
+        }
+      }
+    }
+    return json({ mealPlan });
+  } catch (error) {
+    console.error('Error in meals loader:', error);
+    return json({ mealPlan: null });
   }
-  return json({ mealPlan });
 };
 
 // Function to calculate the total macros from all foods in the meal plan
@@ -217,65 +229,110 @@ export default function Meals() {
   const [currentDayMealPlan, setCurrentDayMealPlan] = useState(todaysMealPlan);
   const [isLoadingMeals, setIsLoadingMeals] = useState(false);
 
+  // Use refs to prevent unnecessary re-renders
+  const isInitializedRef = useRef(false);
+  const lastDayOffsetRef = useRef(dayOffset);
+  const lastWeekStartRef = useRef(currentWeekStart.getTime());
+  const isMountedRef = useRef(true);
+
+  // Cleanup on unmount to prevent memory leaks and state updates after unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Function to fetch a week's worth of meal data
-  const fetchMealWeek = (weekStart: Date) => {
+  const fetchMealWeek = useCallback((weekStart: Date) => {
+    if (weekFetcher.state !== 'idle') return; // Prevent multiple simultaneous fetches
+    
     setIsLoadingMeals(true);
     const params = new URLSearchParams();
     params.set("weekStart", weekStart.toISOString());
     weekFetcher.load(`/api/get-meal-week?${params.toString()}`);
-  };
+  }, [weekFetcher]);
 
-  // Initialize week data on mount
+  // Initialize week data on mount - ONLY RUN ONCE
   useEffect(() => {
-    // Add today's meal plan to the week cache
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
-    if (todaysMealPlan) {
-      setWeekMeals(prev => ({
-        ...prev,
-        [todayStr]: todaysMealPlan
-      }));
-    }
+    if (isInitializedRef.current || !isMountedRef.current) return;
+    isInitializedRef.current = true;
     
-    // Fetch the rest of the week's data
-    fetchMealWeek(currentWeekStart);
-  }, []);
-
-  // Handle week fetcher data updates
-  useEffect(() => {
-    if (weekFetcher.data?.meals && weekFetcher.data?.completions) {
-      setWeekMeals(prev => ({ ...prev, ...weekFetcher.data!.meals }));
-      setWeekCompletions(prev => ({ ...prev, ...weekFetcher.data!.completions }));
-      setIsLoadingMeals(false);
-    }
-  }, [weekFetcher.data]);
-
-  // Update meal data when day offset changes
-  useEffect(() => {
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + dayOffset);
-    const dateStr = targetDate.toISOString().slice(0, 10);
-    
-    // Check if we have this day's data in our cache
-    const mealData = weekMeals[dateStr];
-    
-    if (mealData !== undefined) {
-      // We have the data cached
-      setCurrentDayMealPlan(mealData);
-      setIsLoadingMeals(false);
-    } else {
-      // Need to fetch this week's data
-      const weekStart = new Date(targetDate);
-      const dayOfWeek = weekStart.getDay();
-      weekStart.setDate(weekStart.getDate() - dayOfWeek);
-      weekStart.setHours(0, 0, 0, 0);
-      
-      if (weekStart.getTime() !== currentWeekStart.getTime()) {
-        setCurrentWeekStart(weekStart);
-        fetchMealWeek(weekStart);
+    try {
+      // Add today's meal plan to the week cache
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0, 10);
+      if (todaysMealPlan) {
+        setWeekMeals(prev => ({
+          ...prev,
+          [todayStr]: todaysMealPlan
+        }));
       }
+      
+      // Fetch the rest of the week's data
+      fetchMealWeek(currentWeekStart);
+    } catch (error) {
+      console.error('Error initializing meal data:', error);
     }
-  }, [dayOffset, weekMeals, currentWeekStart]);
+  }, []); // Empty dependency array - only run once
+
+  // Handle week fetcher data updates - SIMPLIFIED
+  useEffect(() => {
+    if (!isMountedRef.current) return;
+    
+    try {
+      if (weekFetcher.data?.meals && weekFetcher.data?.completions) {
+        setWeekMeals(prev => ({ ...prev, ...weekFetcher.data!.meals }));
+        setWeekCompletions(prev => ({ ...prev, ...weekFetcher.data!.completions }));
+        setIsLoadingMeals(false);
+      } else if (weekFetcher.state === 'idle' && weekFetcher.data === undefined) {
+        setIsLoadingMeals(false);
+      }
+    } catch (error) {
+      console.error('Error handling week fetcher data:', error);
+      setIsLoadingMeals(false);
+    }
+  }, [weekFetcher.data, weekFetcher.state]);
+
+  // Update meal data when day offset changes - SIMPLIFIED AND DEBOUNCED
+  useEffect(() => {
+    if (!isMountedRef.current) return;
+    
+    // Only run if day offset actually changed
+    if (lastDayOffsetRef.current === dayOffset) return;
+    lastDayOffsetRef.current = dayOffset;
+    
+    try {
+      const targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + dayOffset);
+      const dateStr = targetDate.toISOString().slice(0, 10);
+      
+      // Check if we have this day's data in our cache
+      const mealData = weekMeals[dateStr];
+      
+      if (mealData !== undefined) {
+        // We have the data cached
+        setCurrentDayMealPlan(mealData);
+        setIsLoadingMeals(false);
+      } else {
+        // Need to fetch this week's data
+        const weekStart = new Date(targetDate);
+        const dayOfWeek = weekStart.getDay();
+        weekStart.setDate(weekStart.getDate() - dayOfWeek);
+        weekStart.setHours(0, 0, 0, 0);
+        
+        const weekStartTime = weekStart.getTime();
+        if (weekStartTime !== lastWeekStartRef.current) {
+          lastWeekStartRef.current = weekStartTime;
+          setCurrentWeekStart(weekStart);
+          fetchMealWeek(weekStart);
+        }
+      }
+    } catch (error) {
+      console.error('Error updating meal data for day offset:', error);
+      setIsLoadingMeals(false);
+    }
+  }, [dayOffset, weekMeals, fetchMealWeek]);
 
   // Calculate the current date with offset
   const today = new Date();
@@ -292,33 +349,47 @@ export default function Meals() {
   // Format for API (YYYY-MM-DD)
   const currentDateApi = currentDate.toISOString().slice(0, 10);
 
-  // Update completion status when day changes or week data loads
+  // Update completion status when day changes or week data loads - OPTIMIZED
   useEffect(() => {
-    const dateStr = currentDate.toISOString().slice(0, 10);
-    const dayCompletions = weekCompletions[dateStr] || [];
+    if (!isHydrated || !isMountedRef.current) return; // Wait for hydration and check if mounted
     
-    if (dayCompletions.length > 0) {
-      // Convert meal IDs from backend to meal keys for frontend consistency
-      const mealKeys = dayCompletions.map(String).map(getMealKeyFromId).filter(Boolean) as string[];
-      setCheckedMeals(mealKeys);
-      setIsDaySubmitted(true);
-    } else {
-      setIsDaySubmitted(false);
-      // For today, check the backend for real-time data
-      if (dayOffset === 0 && isHydrated) {
-        fetchCompletedMealsForToday();
+    try {
+      const dateStr = currentDate.toISOString().slice(0, 10);
+      const dayCompletions = weekCompletions[dateStr] || [];
+      
+      if (dayCompletions.length > 0) {
+        // Convert meal IDs from backend to meal keys for frontend consistency
+        const mealKeys = dayCompletions.map(String).map(getMealKeyFromId).filter(Boolean) as string[];
+        setCheckedMeals(mealKeys);
+        setIsDaySubmitted(true);
+      } else {
+        setIsDaySubmitted(false);
+        // For today, check the backend for real-time data - but only once per day change
+        if (dayOffset === 0) {
+          fetchCompletedMealsForToday();
+        } else {
+          // For other days, clear the checked meals if no completions found
+          setCheckedMeals([]);
+        }
       }
+    } catch (error) {
+      console.error('Error updating completion status:', error);
     }
-  }, [currentDate, weekCompletions, dayOffset, isHydrated]);
+  }, [currentDateApi, weekCompletions, dayOffset, isHydrated]); // Removed setCheckedMeals from dependencies
 
-  // Fetch completed meals for today from backend (for real-time updates)
-  const fetchCompletedMealsForToday = async () => {
+  // Fetch completed meals for today from backend (for real-time updates) - MEMOIZED
+  const fetchCompletedMealsForToday = useCallback(async () => {
+    if (!isMountedRef.current) return; // Prevent updates after unmount
+    
     try {
       const res = await fetch(`/api/get-meal-completions?date=${currentDateApi}`);
-      if (res.ok) {
+      if (res.ok && isMountedRef.current) {
         const data = await res.json();
         if (Array.isArray(data.completedMealIds) && data.completedMealIds.length > 0) {
-          const mealKeys = data.completedMealIds.map(String).map(getMealKeyFromId).filter(Boolean) as string[];
+          const mealKeys = data.completedMealIds.map(String).map((mealId: string) => {
+            const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
+            return meal ? createMealKey(meal) : null;
+          }).filter(Boolean) as string[];
           setCheckedMeals(mealKeys);
           setIsDaySubmitted(true);
         }
@@ -326,15 +397,22 @@ export default function Meals() {
     } catch (e) {
       // Ignore errors, use cached data
     }
-  };
+  }, [currentDateApi, currentDayMealPlan]); // Removed setCheckedMeals from dependencies
 
-  // --- Compliance Calendar Backend Integration ---
+  // --- Compliance Calendar Backend Integration --- STABLE VERSION
   useEffect(() => {
+    let isCancelled = false;
+    
     async function fetchWeekCompletions() {
+      if (!isMountedRef.current) return;
+      
       if (!currentDayMealPlan || !currentDayMealPlan.meals || currentDayMealPlan.meals.length === 0) {
-        setCalendarData(generateCalendarData());
+        if (!isCancelled) {
+          setCalendarData(generateCalendarData());
+        }
         return;
       }
+      
       // Get start and end of week (Sunday to Saturday)
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -344,9 +422,10 @@ export default function Meals() {
       endOfWeek.setDate(startOfWeek.getDate() + 6);
       const startStr = startOfWeek.toISOString().slice(0, 10);
       const endStr = endOfWeek.toISOString().slice(0, 10);
+      
       try {
         const res = await fetch(`/api/get-meal-completions?start=${startStr}&end=${endStr}`);
-        if (res.ok) {
+        if (res.ok && !isCancelled && isMountedRef.current) {
           const data = await res.json();
           const completionsByDate = data.completionsByDate || {};
           setCalendarData(
@@ -403,12 +482,18 @@ export default function Meals() {
           );
         }
       } catch (e) {
-        setCalendarData(generateCalendarData());
+        if (!isCancelled) {
+          setCalendarData(generateCalendarData());
+        }
       }
     }
+    
     fetchWeekCompletions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDayMealPlan]);
+    
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentDayMealPlan]); // Removed weekCompletions dependency to prevent circular updates
 
   // Format the date with relative labels
   const getFormattedDate = (date: Date, today: Date) => {
@@ -434,8 +519,21 @@ export default function Meals() {
 
   const formattedDate = getFormattedDate(currentDate, today);
 
+  // Helper function to convert between meal keys and IDs - MOVED UP
+  const createMealKey = (meal: { name: string; time: string }) => String(meal.name) + String(meal.time);
+  
+  const getMealIdFromKey = useCallback((mealKey: string) => {
+    const meal = currentDayMealPlan?.meals?.find((m: any) => createMealKey(m) === mealKey);
+    return meal ? String(meal.id) : null;
+  }, [currentDayMealPlan]);
+
+  const getMealKeyFromId = useCallback((mealId: string) => {
+    const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
+    return meal ? createMealKey(meal) : null;
+  }, [currentDayMealPlan]);
+
   // Function to handle "checked" state for meals
-  const toggleMealCheck = (meal: { id: string | number; name: string; time: string }) => {
+  const toggleMealCheck = useCallback((meal: { id: string | number; name: string; time: string }) => {
     const mealKey = createMealKey(meal);
     
     if (checkedMeals.includes(mealKey)) {
@@ -443,20 +541,82 @@ export default function Meals() {
     } else {
       addCheckedMeal(mealKey);
     }
-  };
+  }, [checkedMeals, addCheckedMeal, removeCheckedMeal]);
 
-  // Helper function to convert between meal keys and IDs
-  const createMealKey = (meal: { name: string; time: string }) => String(meal.name) + String(meal.time);
-  
-  const getMealIdFromKey = (mealKey: string) => {
-    const meal = currentDayMealPlan?.meals?.find((m: any) => createMealKey(m) === mealKey);
-    return meal ? String(meal.id) : null;
-  };
-
-  const getMealKeyFromId = (mealId: string) => {
-    const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
-    return meal ? createMealKey(meal) : null;
-  };
+  // Handle meal submission - MEMOIZED AND OPTIMIZED
+  const handleSubmitMeals = useCallback(async () => {
+    if (isSubmitting || isDaySubmitted) return; // Prevent double submission
+    
+    setIsSubmitting(true);
+    setSubmitError(null);
+    
+    try {
+      // Convert meal keys back to meal IDs for backend submission
+      const mealIdsForBackend = checkedMeals.map(getMealIdFromKey).filter(Boolean) as string[];
+      
+      const body = {
+        completedMealIds: mealIdsForBackend,
+        date: currentDateApi,
+      };
+      
+      const res = await fetch("/api/submit-meal-completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      
+      let responseJson = null;
+      try {
+        responseJson = await res.json();
+      } catch (e) {
+        // Ignore JSON parse errors
+      }
+      
+      if (res.ok) {
+        // Update local state to reflect submission
+        setIsDaySubmitted(true);
+        
+        // Update week completions cache to prevent re-fetching
+        setWeekCompletions(prev => ({
+          ...prev,
+          [currentDateApi]: mealIdsForBackend
+        }));
+        
+        // Update compliance calendar immediately for today
+        setCalendarData(prev => 
+          prev.map(day => {
+            if (day.date === currentDate.toLocaleDateString("en-US", {
+              weekday: "short",
+              month: "short",
+              day: "numeric",
+            })) {
+              const total = currentDayMealPlan?.meals?.length || 0;
+              const percentage = total > 0 ? Math.round((mealIdsForBackend.length / total) * 100) : 0;
+              return {
+                ...day,
+                status: "completed",
+                percentage
+              };
+            }
+            return day;
+          })
+        );
+        
+        // Show success message
+        setShowSuccess(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        setTimeout(() => setShowSuccess(false), 3000);
+        
+        // Don't reset checked meals - keep them visible for user feedback
+      } else {
+        setSubmitError(responseJson?.error || 'Submission failed.');
+      }
+    } catch (err) {
+      setSubmitError('Submission failed.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [isSubmitting, isDaySubmitted, checkedMeals, currentDateApi, getMealIdFromKey]);
 
   // Calculate the macros based on the food items - need to convert keys back to check against meal IDs
   const completedMealIds = checkedMeals.map(getMealIdFromKey).filter(Boolean) as string[];
@@ -703,40 +863,7 @@ export default function Meals() {
                 <Button
                   variant="primary"
                   disabled={isSubmitting || isDaySubmitted}
-                  onClick={async () => {
-                    setIsSubmitting(true);
-                    setSubmitError(null);
-                    try {
-                      // Convert meal keys back to meal IDs for backend submission
-                      const mealIdsForBackend = checkedMeals.map(getMealIdFromKey).filter(Boolean) as string[];
-                      const body = {
-                        completedMealIds: mealIdsForBackend,
-                        date: currentDateApi,
-                      };
-                      const res = await fetch("/api/submit-meal-completions", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(body),
-                      });
-                      let responseJson = null;
-                      try {
-                        responseJson = await res.json();
-                      } catch (e) {}
-                      if (res.ok) {
-                        setIsDaySubmitted(true);
-                        setShowSuccess(true);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                        setTimeout(() => setShowSuccess(false), 3000);
-                        resetCheckedMeals();
-                      } else {
-                        setSubmitError(responseJson?.error || 'Submission failed.');
-                      }
-                    } catch (err) {
-                      setSubmitError('Submission failed.');
-                    } finally {
-                      setIsSubmitting(false);
-                    }
-                  }}
+                  onClick={handleSubmitMeals}
                 >
                   <span className="flex items-center gap-2">
                     {isSubmitting ? (

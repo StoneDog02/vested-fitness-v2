@@ -41,7 +41,13 @@ export function MealCompletionProvider({ children }: { children: React.ReactNode
   }, [checkedMeals, isHydrated]);
 
   const setCheckedMeals = (meals: string[]) => {
-    setCheckedMealsState(meals);
+    setCheckedMealsState(prevMeals => {
+      // Only update if the arrays are actually different
+      if (prevMeals.length !== meals.length || prevMeals.some((meal, index) => meal !== meals[index])) {
+        return meals;
+      }
+      return prevMeals;
+    });
   };
 
   const addCheckedMeal = (mealKey: string) => {
