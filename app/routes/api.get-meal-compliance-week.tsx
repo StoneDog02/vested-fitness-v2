@@ -76,7 +76,7 @@ export const loader = async ({ request }: { request: Request }) => {
     .gte("completed_at", weekStart.toISOString())
     .lt("completed_at", weekEnd.toISOString());
 
-  console.log(`Meal API DB Query took: ${performance.now() - dbStart}ms`);
+
 
   // For each day in the week, find the plan that was active on that day
   const complianceData: number[] = [];

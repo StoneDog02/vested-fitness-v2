@@ -116,14 +116,12 @@ export const loader = async ({
   weekEnd.setDate(weekStart.getDate() + 7);
 
   // Fetch workout completions for this client for the week
-  const dbStart = performance.now();
   const { data: completions } = await supabase
     .from("workout_completions")
     .select("completed_at")
     .eq("user_id", client.id)
     .gte("completed_at", weekStart.toISOString().slice(0, 10))
     .lt("completed_at", weekEnd.toISOString().slice(0, 10));
-  console.log(`DB Query took: ${performance.now() - dbStart}ms`);
 
   // Build complianceData: for each day, check if there's a completion
   const complianceData: number[] = [];

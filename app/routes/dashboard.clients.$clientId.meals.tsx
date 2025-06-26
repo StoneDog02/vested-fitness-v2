@@ -598,7 +598,6 @@ export default function ClientMeals() {
   // Update compliance data when fetcher returns
   useEffect(() => {
     if (complianceFetcher.data?.complianceData) {
-      console.timeEnd('Meal Week Navigation');
       setCompliancePercentages(complianceFetcher.data.complianceData);
     }
   }, [complianceFetcher.data]);
@@ -815,7 +814,6 @@ export default function ClientMeals() {
                     <button
                       className="p-1 rounded hover:bg-gray-100"
                       onClick={() => {
-                        console.time('Meal Week Navigation');
                         const prev = new Date(calendarStart);
                         prev.setDate(prev.getDate() - 7);
                         setCalendarStart(prev);
@@ -838,7 +836,6 @@ export default function ClientMeals() {
                     <button
                       className="p-1 rounded hover:bg-gray-100"
                       onClick={() => {
-                        console.time('Meal Week Navigation');
                         const next = new Date(calendarStart);
                         next.setDate(next.getDate() + 7);
                         setCalendarStart(next);

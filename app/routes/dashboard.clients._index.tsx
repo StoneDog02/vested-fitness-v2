@@ -58,14 +58,7 @@ export const meta: MetaFunction = () => {
 };
 
 export const loader: LoaderFunction = async ({ request }) => {
-  // Debug: log Supabase config
-  console.log("SUPABASE_URL:", process.env.SUPABASE_URL);
-  console.log(
-    "SUPABASE_SERVICE_KEY:",
-    process.env.SUPABASE_SERVICE_KEY?.slice(0, 6),
-    "...",
-    process.env.SUPABASE_SERVICE_KEY?.slice(-6)
-  );
+
 
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
@@ -213,7 +206,6 @@ export const loader: LoaderFunction = async ({ request }) => {
       );
     }
     clients = clientsWithWeightLogs;
-    console.log("[LOADER] Filtered client users from Supabase:", clients);
   }
 
   return json({ coachId, clients });
