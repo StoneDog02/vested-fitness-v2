@@ -480,9 +480,28 @@ export default function Workouts() {
 
   // Compliance calendar helpers
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // Bright color scaling from theme green to red with smooth transitions
   const getBarColor = (percent: number) => {
-    if (percent === 0) return "#dc2626"; // red-600
-    return "#16a34a"; // green-600
+    const percentage = percent * 100; // Convert to percentage
+    if (percentage >= 95) return "#00CC03"; // Theme green - perfect
+    if (percentage >= 90) return "#00E804"; // Bright theme green - excellent
+    if (percentage >= 85) return "#32E135"; // Theme light green - very good
+    if (percentage >= 80) return "#65E668"; // Lighter green - good
+    if (percentage >= 75) return "#98EB9B"; // Very light green - above average
+    if (percentage >= 70) return "#B8F0BA"; // Pale green - decent
+    if (percentage >= 65) return "#D4F5D6"; // Very pale green - okay
+    if (percentage >= 60) return "#F0FAF0"; // Almost white green - needs improvement
+    if (percentage >= 55) return "#FFF8DC"; // Cream - concerning
+    if (percentage >= 50) return "#FFE135"; // Bright yellow - poor
+    if (percentage >= 45) return "#FFD700"; // Gold - very poor
+    if (percentage >= 40) return "#FFA500"; // Orange - critical
+    if (percentage >= 35) return "#FF6347"; // Tomato - very critical
+    if (percentage >= 30) return "#FF4500"; // Red orange - extremely poor
+    if (percentage >= 25) return "#FF0000"; // Pure red - critical
+    if (percentage >= 20) return "#DC143C"; // Crimson - very critical
+    if (percentage >= 15) return "#B22222"; // Fire brick - extremely poor
+    if (percentage >= 10) return "#8B0000"; // Dark red - needs immediate attention
+    return "#660000"; // Very dark red - emergency
   };
 
   // Week navigation

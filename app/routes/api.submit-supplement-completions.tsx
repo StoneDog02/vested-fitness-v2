@@ -80,8 +80,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       .from("supplement_completions")
       .delete()
       .eq("user_id", user.id)
-      .gte("completed_at", dateString)
-      .lt("completed_at", new Date(completionDate.getTime() + 86400000).toISOString().split('T')[0]);
+      .gte("completed_at", `${dateString}T00:00:00.000Z`)
+      .lt("completed_at", `${dateString}T23:59:59.999Z`);
 
     if (deleteError) {
       return json({ error: deleteError.message }, { status: 500 });
@@ -92,7 +92,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const completions = supplementIds.map(supplementId => ({
         user_id: user.id,
         supplement_id: supplementId,
-        completed_at: completionDate.toISOString()
+        completed_at: new Date().toISOString() // Use current timestamp instead of date
       }));
 
       const { error: insertError } = await supabase

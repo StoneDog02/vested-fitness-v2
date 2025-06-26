@@ -66,28 +66,67 @@ export const action = async ({ request }: { request: Request }) => {
   if (!Array.isArray(completedMealIds) || !date) {
     return json({ error: "Missing completedMealIds or date" }, { status: 400 });
   }
+  // Log the submission attempt
+  console.log(`📝 Meal submission attempt:`, {
+    userId: user.id,
+    date,
+    completedMealIds,
+    timestamp: new Date().toISOString()
+  });
+
   // Insert meal completions (avoid duplicates)
+  let insertCount = 0;
+  let skipCount = 0;
+  
   for (const mealId of completedMealIds) {
-    // Check if already exists
-    const { data: existing } = await supabase
-      .from("meal_completions")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("meal_id", mealId)
-      .eq("completed_at", date)
-      .single();
-    if (!existing) {
-      const { error: insertError } = await supabase.from("meal_completions").insert({
-        user_id: user.id,
-        meal_id: mealId,
-        completed_at: date,
-      });
-      if (insertError) {
-        return json({ error: insertError.message }, { status: 500 });
+    try {
+      // Check if already exists (by date, not exact timestamp)
+      const { data: existing, error: selectError } = await supabase
+        .from("meal_completions")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("meal_id", mealId)
+        .gte("completed_at", `${date}T00:00:00.000Z`)
+        .lt("completed_at", `${date}T23:59:59.999Z`)
+        .single();
+        
+      if (selectError && selectError.code !== 'PGRST116') {
+        // PGRST116 is "not found" which is expected, other errors are problems
+        console.error('Error checking existing completion:', selectError);
+        return json({ error: `Database query error: ${selectError.message}` }, { status: 500 });
       }
+      
+      if (!existing) {
+        const { error: insertError } = await supabase.from("meal_completions").insert({
+          user_id: user.id,
+          meal_id: mealId,
+          completed_at: new Date().toISOString(), // Use current timestamp instead of just date
+        });
+        
+        if (insertError) {
+          console.error('Error inserting meal completion:', {
+            userId: user.id,
+            mealId,
+            date,
+            error: insertError
+          });
+          return json({ error: `Insert failed: ${insertError.message}` }, { status: 500 });
+        }
+        
+        insertCount++;
+        console.log(`✅ Inserted meal completion: user=${user.id}, meal=${mealId}, date=${date}`);
+      } else {
+        skipCount++;
+        console.log(`⏭️ Skipped duplicate: user=${user.id}, meal=${mealId}, date=${date}`);
+      }
+    } catch (error) {
+      console.error('Unexpected error during meal completion submission:', error);
+      return json({ error: 'Unexpected database error' }, { status: 500 });
     }
   }
-  return json({ success: true });
+  
+  console.log(`✅ Meal submission completed: ${insertCount} inserted, ${skipCount} skipped`);
+  return json({ success: true, inserted: insertCount, skipped: skipCount });
 };
 
 export const loader = async () => json({ error: "Not found" }, { status: 404 }); 

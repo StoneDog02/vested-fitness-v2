@@ -6,6 +6,7 @@ interface MealCompletionContextType {
   addCheckedMeal: (mealKey: string) => void;
   removeCheckedMeal: (mealKey: string) => void;
   resetCheckedMeals: () => void;
+  clearCorruptedData: () => void;
   isHydrated: boolean;
 }
 
@@ -24,9 +25,16 @@ export function MealCompletionProvider({ children }: { children: React.ReactNode
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
-          setCheckedMealsState(parsed);
+          // Validate that it's an array of strings
+          if (Array.isArray(parsed) && parsed.every(item => typeof item === 'string')) {
+            setCheckedMealsState(parsed);
+          } else {
+            console.warn("Invalid meal completion data in localStorage, clearing...");
+            localStorage.removeItem(STORAGE_KEY);
+          }
         } catch (error) {
           console.warn("Failed to parse stored meal completion state:", error);
+          localStorage.removeItem(STORAGE_KEY);
         }
       }
       setIsHydrated(true);
@@ -42,9 +50,11 @@ export function MealCompletionProvider({ children }: { children: React.ReactNode
 
   const setCheckedMeals = (meals: string[]) => {
     setCheckedMealsState(prevMeals => {
+      // Remove duplicates from the input
+      const uniqueMeals = [...new Set(meals)];
       // Only update if the arrays are actually different
-      if (prevMeals.length !== meals.length || prevMeals.some((meal, index) => meal !== meals[index])) {
-        return meals;
+      if (prevMeals.length !== uniqueMeals.length || prevMeals.some((meal, index) => meal !== uniqueMeals[index])) {
+        return uniqueMeals;
       }
       return prevMeals;
     });
@@ -65,8 +75,24 @@ export function MealCompletionProvider({ children }: { children: React.ReactNode
     }
   };
 
+  const clearCorruptedData = () => {
+    console.log("Clearing potentially corrupted meal completion data...");
+    setCheckedMealsState([]);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  };
+
   return (
-    <MealCompletionContext.Provider value={{ checkedMeals, setCheckedMeals, addCheckedMeal, removeCheckedMeal, resetCheckedMeals, isHydrated }}>
+    <MealCompletionContext.Provider value={{ 
+      checkedMeals, 
+      setCheckedMeals, 
+      addCheckedMeal, 
+      removeCheckedMeal, 
+      resetCheckedMeals, 
+      clearCorruptedData,
+      isHydrated 
+    }}>
       {children}
     </MealCompletionContext.Provider>
   );

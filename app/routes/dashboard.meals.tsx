@@ -212,7 +212,7 @@ export default function Meals() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [isDaySubmitted, setIsDaySubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const { checkedMeals, setCheckedMeals, addCheckedMeal, removeCheckedMeal, resetCheckedMeals, isHydrated } = useMealCompletion();
+  const { checkedMeals, setCheckedMeals, addCheckedMeal, removeCheckedMeal, resetCheckedMeals, clearCorruptedData, isHydrated } = useMealCompletion();
   const weekFetcher = useFetcher<{ meals: Record<string, any>, completions: Record<string, string[]> }>();
   
   // Track current week and cached meal data
@@ -357,18 +357,29 @@ export default function Meals() {
       const dateStr = currentDate.toISOString().slice(0, 10);
       const dayCompletions = weekCompletions[dateStr] || [];
       
+      console.log(`🔍 Checking completions for ${dateStr} (offset: ${dayOffset}):`, {
+        dayCompletions,
+        weekCompletions: Object.keys(weekCompletions),
+        isHydrated,
+        dayOffset
+      });
+      
       if (dayCompletions.length > 0) {
         // Convert meal IDs from backend to meal keys for frontend consistency
         const mealKeys = dayCompletions.map(String).map(getMealKeyFromId).filter(Boolean) as string[];
+        console.log(`✅ Found ${dayCompletions.length} completions, converted to ${mealKeys.length} meal keys:`, mealKeys);
         setCheckedMeals(mealKeys);
         setIsDaySubmitted(true);
       } else {
+        console.log(`❌ No completions found in cache for ${dateStr}`);
         setIsDaySubmitted(false);
         // For today, check the backend for real-time data - but only once per day change
         if (dayOffset === 0) {
+          console.log('📡 Fetching real-time data for today...');
           fetchCompletedMealsForToday();
         } else {
           // For other days, clear the checked meals if no completions found
+          console.log(`🧹 Clearing checked meals for day offset ${dayOffset}`);
           setCheckedMeals([]);
         }
       }
@@ -386,10 +397,10 @@ export default function Meals() {
       if (res.ok && isMountedRef.current) {
         const data = await res.json();
         if (Array.isArray(data.completedMealIds) && data.completedMealIds.length > 0) {
-          const mealKeys = data.completedMealIds.map(String).map((mealId: string) => {
-            const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
-            return meal ? createMealKey(meal) : null;
-          }).filter(Boolean) as string[];
+                  const mealKeys = data.completedMealIds.map(String).map((mealId: string) => {
+          const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
+          return meal ? createMealKey({ id: meal.id, name: meal.name, time: meal.time }) : null;
+        }).filter(Boolean) as string[];
           setCheckedMeals(mealKeys);
           setIsDaySubmitted(true);
         }
@@ -440,8 +451,15 @@ export default function Meals() {
                 day: "numeric",
               });
               const completed = completionsByDate[dateStr] || [];
+              // Deduplicate completed meal IDs to prevent inflated percentages
+              const uniqueCompleted = [...new Set(completed)];
+              
+              // Debug logging in development
+              if (process.env.NODE_ENV === 'development' && completed.length !== uniqueCompleted.length) {
+                console.warn(`Duplicates detected for ${dateStr}: ${completed.length} total, ${uniqueCompleted.length} unique`, completed);
+              }
               const total = currentDayMealPlan.meals.length;
-              const percentage = total > 0 ? Math.round((completed.length / total) * 100) : 0;
+              const percentage = total > 0 ? Math.round((uniqueCompleted.length / total) * 100) : 0;
               const todayDate = new Date();
               todayDate.setHours(0, 0, 0, 0);
               let status;
@@ -454,7 +472,7 @@ export default function Meals() {
                 };
               } else if (date.getTime() === todayDate.getTime()) {
                 // Today
-                if (completed.length === 0) {
+                if (uniqueCompleted.length === 0) {
                   status = "pending";
                   return {
                     date: prettyDate,
@@ -520,16 +538,22 @@ export default function Meals() {
   const formattedDate = getFormattedDate(currentDate, today);
 
   // Helper function to convert between meal keys and IDs - MOVED UP
-  const createMealKey = (meal: { name: string; time: string }) => String(meal.name) + String(meal.time);
+  const createMealKey = (meal: { id: number | string; name: string; time: string }) => `${meal.id}-${meal.name}-${meal.time}`;
   
   const getMealIdFromKey = useCallback((mealKey: string) => {
-    const meal = currentDayMealPlan?.meals?.find((m: any) => createMealKey(m) === mealKey);
+    // Extract meal ID from the key - UUID is first 5 segments when split by dash (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx-name-time)
+    const parts = mealKey.split('-');
+    if (parts.length < 5) return null;
+    
+    // Reconstruct the UUID (first 5 parts)
+    const mealId = parts.slice(0, 5).join('-');
+    const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
     return meal ? String(meal.id) : null;
   }, [currentDayMealPlan]);
 
   const getMealKeyFromId = useCallback((mealId: string) => {
     const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
-    return meal ? createMealKey(meal) : null;
+    return meal ? createMealKey({ id: meal.id, name: meal.name, time: meal.time }) : null;
   }, [currentDayMealPlan]);
 
   // Function to handle "checked" state for meals
@@ -551,13 +575,15 @@ export default function Meals() {
     setSubmitError(null);
     
     try {
-      // Convert meal keys back to meal IDs for backend submission
-      const mealIdsForBackend = checkedMeals.map(getMealIdFromKey).filter(Boolean) as string[];
+      // Convert meal keys back to meal IDs for backend submission - with deduplication
+      const mealIdsForBackend = [...new Set(checkedMeals.map(getMealIdFromKey).filter(Boolean))] as string[];
       
       const body = {
         completedMealIds: mealIdsForBackend,
         date: currentDateApi,
       };
+      
+      console.log('🚀 Submitting meal completions:', body);
       
       const res = await fetch("/api/submit-meal-completions", {
         method: "POST",
@@ -568,8 +594,9 @@ export default function Meals() {
       let responseJson = null;
       try {
         responseJson = await res.json();
+        console.log('📨 Submission response:', { status: res.status, data: responseJson });
       } catch (e) {
-        // Ignore JSON parse errors
+        console.error('Failed to parse response JSON:', e);
       }
       
       if (res.ok) {
@@ -618,8 +645,31 @@ export default function Meals() {
     }
   }, [isSubmitting, isDaySubmitted, checkedMeals, currentDateApi, getMealIdFromKey]);
 
-  // Calculate the macros based on the food items - need to convert keys back to check against meal IDs
-  const completedMealIds = checkedMeals.map(getMealIdFromKey).filter(Boolean) as string[];
+  // Calculate the macros based on the food items - need to convert keys back to check against meal IDs with deduplication
+  const completedMealIds = [...new Set(checkedMeals.map(getMealIdFromKey).filter(Boolean))] as string[];
+  
+  // Debug the meal ID conversion
+  if (process.env.NODE_ENV === 'development' && checkedMeals.length > 0) {
+    console.log('🔍 Meal ID Conversion Debug:', {
+      checkedMeals,
+      convertedIds: checkedMeals.map(key => ({
+        key,
+        id: getMealIdFromKey(key),
+        meal: currentDayMealPlan?.meals?.find((m: any) => String(m.id) === getMealIdFromKey(key))
+      })),
+      finalCompletedIds: completedMealIds,
+      currentDayMealPlan: currentDayMealPlan?.meals?.map((m: any) => ({ id: m.id, name: m.name, time: m.time }))
+    });
+  }
+  
+  // Error detection: If completed meals exceed total meals, clear corrupted data
+  useEffect(() => {
+    if (isHydrated && currentDayMealPlan?.meals && completedMealIds.length > currentDayMealPlan.meals.length) {
+      console.error(`Data corruption detected: ${completedMealIds.length} completed meals > ${currentDayMealPlan.meals.length} total meals. Clearing data.`);
+      clearCorruptedData();
+    }
+  }, [completedMealIds.length, currentDayMealPlan?.meals?.length, isHydrated, clearCorruptedData]);
+  
   const calculatedMacros = calculateMacros(currentDayMealPlan?.meals || [], completedMealIds);
 
   // Use the current day's meal plan
@@ -651,6 +701,43 @@ export default function Meals() {
         Meals
       </h1>
 
+      {/* Debug Info in Development */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="mb-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+          <div className="text-sm text-yellow-800 dark:text-yellow-200 space-y-1">
+            <div><strong>Debug Info:</strong></div>
+            <div>• Day Offset: {dayOffset} (0 = today)</div>
+            <div>• Current Date: {currentDateApi}</div>
+            <div>• Completed Meals: {completedMealIds.length} / {mealPlan?.meals?.length || 0}</div>
+            <div>• Is Day Submitted: {isDaySubmitted ? 'Yes' : 'No'}</div>
+            <div>• Is Hydrated: {isHydrated ? 'Yes' : 'No'}</div>
+            <div>• Checked Meals: [{checkedMeals.join(', ')}]</div>
+            <div>• Week Completions for this date: [{(weekCompletions[currentDateApi] || []).join(', ')}]</div>
+            {completedMealIds.length > (mealPlan?.meals?.length || 0) && (
+              <div className="text-red-600 dark:text-red-400 font-bold">⚠️ DATA CORRUPTION DETECTED</div>
+            )}
+          </div>
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={clearCorruptedData}
+              className="px-3 py-1 bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 rounded text-xs hover:bg-yellow-300 dark:hover:bg-yellow-700"
+            >
+              Clear localStorage
+            </button>
+            <button
+              onClick={async () => {
+                const res = await fetch(`/api/get-meal-completions?date=${currentDateApi}`);
+                const data = await res.json();
+                console.log(`API Response for ${currentDateApi}:`, data);
+              }}
+              className="px-3 py-1 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded text-xs hover:bg-blue-300 dark:hover:bg-blue-700"
+            >
+              Test API
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-2">
           {/* Today's Meals */}
@@ -658,8 +745,9 @@ export default function Meals() {
             <div className="flex justify-between items-center mb-6">
               <button
                 onClick={() => {
+                  console.log(`Navigating to day offset: ${dayOffset - 1}`);
                   setDayOffset(dayOffset - 1);
-                  setCheckedMeals([]);
+                  // Don't clear checked meals here - let the effect handle it
                 }}
                 disabled={isLoadingMeals}
                 className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1 disabled:opacity-50"
@@ -693,8 +781,9 @@ export default function Meals() {
                 {dayOffset !== 0 && (
                   <button
                     onClick={() => {
+                      console.log('Navigating back to today');
                       setDayOffset(0);
-                      setCheckedMeals([]);
+                      // Don't clear checked meals here - let the effect handle it
                     }}
                     className="text-xs text-primary hover:text-primary-dark transition-colors duration-200 mt-1"
                   >
@@ -704,8 +793,9 @@ export default function Meals() {
               </div>
               <button
                 onClick={() => {
+                  console.log(`Navigating to day offset: ${dayOffset + 1}`);
                   setDayOffset(dayOffset + 1);
-                  setCheckedMeals([]);
+                  // Don't clear checked meals here - let the effect handle it
                 }}
                 disabled={isLoadingMeals}
                 className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1 disabled:opacity-50"
@@ -796,7 +886,7 @@ export default function Meals() {
                           {!isHydrated
                             ? "Loading..."
                             : (() => {
-                                const mealKey = createMealKey(meal);
+                                const mealKey = createMealKey({ id: meal.id, name: meal.name, time: meal.time });
                                 return (isDaySubmitted && checkedMeals.includes(mealKey)) ||
                                        (!isDaySubmitted && checkedMeals.includes(mealKey))
                                   ? "Completed"
@@ -810,7 +900,7 @@ export default function Meals() {
                           id={`meal-${meal.id}`}
                           value={meal.id}
                           checked={(() => {
-                            const mealKey = createMealKey(meal);
+                            const mealKey = createMealKey({ id: meal.id, name: meal.name, time: meal.time });
                             const isChecked = isHydrated && checkedMeals.includes(mealKey);
                             return isChecked;
                           })()}

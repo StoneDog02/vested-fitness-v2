@@ -99,49 +99,49 @@ export default function Supplements() {
   }, [currentDateString]);
 
   // Load compliance data for the current week
-  useEffect(() => {
-    const loadComplianceData = async () => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const startOfWeek = new Date(today);
-      startOfWeek.setDate(today.getDate() - today.getDay()); // Get Sunday
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 6); // Get Saturday
+  const loadComplianceData = async () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay()); // Get Sunday
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6); // Get Saturday
 
-      try {
-        const response = await fetch(`/api/get-supplement-completions?startDate=${startOfWeek.toISOString().split('T')[0]}&endDate=${endOfWeek.toISOString().split('T')[0]}`);
-        if (response.ok) {
-          const data = await response.json();
+    try {
+      const response = await fetch(`/api/get-supplement-completions?startDate=${startOfWeek.toISOString().split('T')[0]}&endDate=${endOfWeek.toISOString().split('T')[0]}`);
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Process compliance data for the week
+        const weekComplianceData = [];
+        for (let i = 0; i < 7; i++) {
+          const date = new Date(startOfWeek);
+          date.setDate(startOfWeek.getDate() + i);
+          const dateStr = date.toISOString().split('T')[0];
           
-          // Process compliance data for the week
-          const weekComplianceData = [];
-          for (let i = 0; i < 7; i++) {
-            const date = new Date(startOfWeek);
-            date.setDate(startOfWeek.getDate() + i);
-            const dateStr = date.toISOString().split('T')[0];
-            
-            const dayCompletions = data.completions.filter((c: any) => 
-              c.completed_at.startsWith(dateStr)
-            );
-            
-            const totalSupplements = supplements.length;
-            const completedCount = dayCompletions.length;
-            const percentage = totalSupplements > 0 ? Math.round((completedCount / totalSupplements) * 100) : 0;
-            
-            weekComplianceData.push({
-              date: date,
-              percentage: percentage,
-              status: percentage > 0 ? "completed" : "pending"
-            });
-          }
+          const dayCompletions = data.completions.filter((c: any) => 
+            c.completed_at.startsWith(dateStr)
+          );
           
-          setComplianceData(weekComplianceData);
+          const totalSupplements = supplements.length;
+          const completedCount = dayCompletions.length;
+          const percentage = totalSupplements > 0 ? Math.round((completedCount / totalSupplements) * 100) : 0;
+          
+          weekComplianceData.push({
+            date: date,
+            percentage: percentage,
+            status: percentage > 0 ? "completed" : "pending"
+          });
         }
-      } catch (error) {
-        console.error('Error loading compliance data:', error);
+        
+        setComplianceData(weekComplianceData);
       }
-    };
+    } catch (error) {
+      console.error('Error loading compliance data:', error);
+    }
+  };
 
+  useEffect(() => {
     if (supplements.length > 0) {
       loadComplianceData();
     }
@@ -347,6 +347,10 @@ export default function Supplements() {
                       if (response.ok) {
                         setIsDaySubmitted(true);
                         setShowSuccess(true);
+                        
+                        // Refresh compliance data to update the calendar
+                        await loadComplianceData();
+                        
                         window.scrollTo({ top: 0, behavior: "smooth" });
                         setTimeout(() => setShowSuccess(false), 3000);
                       } else {

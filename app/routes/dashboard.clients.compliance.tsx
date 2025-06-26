@@ -8,11 +8,14 @@ import jwt from "jsonwebtoken";
 import type { Database } from "~/lib/supabase";
 import { Buffer } from "buffer";
 
-// Type for compliance client
+// Type for compliance client with separate tracking
 type ComplianceClient = {
   id: string;
   name: string;
-  compliance: number;
+  workoutCompliance: number;
+  mealCompliance: number;
+  supplementCompliance: number;
+  overallCompliance: number;
 };
 
 export const loader: LoaderFunction = async ({ request }) => {
@@ -70,7 +73,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         .eq("role", "client");
       if (clients) {
         for (const client of clients) {
-          // Comprehensive compliance: % of workouts, meals, and supplements completed in last 7 days
+          // Get compliance data for last 7 days
           const weekAgo = new Date();
           weekAgo.setDate(weekAgo.getDate() - 7);
           
@@ -142,41 +145,93 @@ export const loader: LoaderFunction = async ({ request }) => {
           const completedMeals = (mealCompletions ?? []).length;
           const completedSupplements = (supplementCompletions ?? []).length;
           
+          // Calculate individual compliance percentages
+          const workoutCompliance = expectedWorkoutDays > 0 ? Math.round((completedWorkouts / expectedWorkoutDays) * 100) : 0;
+          const mealCompliance = expectedMeals > 0 ? Math.round((completedMeals / expectedMeals) * 100) : 0;
+          const supplementCompliance = expectedSupplements > 0 ? Math.round((completedSupplements / expectedSupplements) * 100) : 0;
+          
+          // Calculate overall compliance
           const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
           const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
-          
-          const compliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
+          const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
           
           complianceClients.push({
             id: client.id,
             name: client.name,
-            compliance,
+            workoutCompliance,
+            mealCompliance,
+            supplementCompliance,
+            overallCompliance,
           });
         }
-        // Sort by compliance desc
-        complianceClients.sort((a, b) => b.compliance - a.compliance);
+        // Sort by overall compliance desc
+        complianceClients.sort((a, b) => b.overallCompliance - a.overallCompliance);
       }
     }
   }
   return json({ complianceClients });
 };
 
-// Function to get color based on compliance percentage
+// Bright color scaling from theme green to red with smooth transitions
 function getComplianceColor(percentage: number): string {
-  if (percentage >= 90) return "#22c55e"; // Green (Tailwind green-500)
-  if (percentage >= 80) return "#84cc16"; // Light green (Tailwind lime-500)
-  if (percentage >= 70) return "#eab308"; // Yellow (Tailwind yellow-500)
-  if (percentage >= 60) return "#f59e0b"; // Orange (Tailwind amber-500)
-  if (percentage >= 50) return "#f97316"; // Dark orange (Tailwind orange-500)
-  if (percentage >= 40) return "#ef4444"; // Red (Tailwind red-500)
-  if (percentage >= 30) return "#dc2626"; // Dark red (Tailwind red-600)
-  if (percentage >= 20) return "#b91c1c"; // Darker red (Tailwind red-700)
-  if (percentage >= 10) return "#991b1b"; // Very dark red (Tailwind red-800)
-  return "#7f1d1d"; // Deep red (Tailwind red-900)
+  if (percentage >= 95) return "#00CC03"; // Theme green - perfect
+  if (percentage >= 90) return "#00E804"; // Bright theme green - excellent
+  if (percentage >= 85) return "#32E135"; // Theme light green - very good
+  if (percentage >= 80) return "#65E668"; // Lighter green - good
+  if (percentage >= 75) return "#98EB9B"; // Very light green - above average
+  if (percentage >= 70) return "#B8F0BA"; // Pale green - decent
+  if (percentage >= 65) return "#D4F5D6"; // Very pale green - okay
+  if (percentage >= 60) return "#F0FAF0"; // Almost white green - needs improvement
+  if (percentage >= 55) return "#FFF8DC"; // Cream - concerning
+  if (percentage >= 50) return "#FFE135"; // Bright yellow - poor
+  if (percentage >= 45) return "#FFD700"; // Gold - very poor
+  if (percentage >= 40) return "#FFA500"; // Orange - critical
+  if (percentage >= 35) return "#FF6347"; // Tomato - very critical
+  if (percentage >= 30) return "#FF4500"; // Red orange - extremely poor
+  if (percentage >= 25) return "#FF0000"; // Pure red - critical
+  if (percentage >= 20) return "#DC143C"; // Crimson - very critical
+  if (percentage >= 15) return "#B22222"; // Fire brick - extremely poor
+  if (percentage >= 10) return "#8B0000"; // Dark red - needs immediate attention
+  return "#660000"; // Very dark red - emergency
+}
+
+// Component for individual compliance bar
+function ComplianceBar({ 
+  label, 
+  percentage
+}: { 
+  label: string; 
+  percentage: number;
+}) {
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-1 min-w-0">
+        <span className="text-xs text-gray-600 dark:text-gray-400 truncate">{label}</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <div className="w-16 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-300"
+            style={{ 
+              width: `${Math.min(percentage, 100)}%`,
+              backgroundColor: getComplianceColor(percentage)
+            }}
+          />
+        </div>
+        <span 
+          className="text-xs font-medium min-w-[32px] text-right"
+          style={{ color: getComplianceColor(percentage) }}
+        >
+          {percentage}%
+        </span>
+      </div>
+    </div>
+  );
 }
 
 export default function ComplianceClients() {
   const { complianceClients } = useLoaderData<typeof loader>();
+  
   return (
     <div className="p-6 space-y-6">
       <h1 className="text-2xl font-bold mb-4">Client Compliance</h1>
@@ -204,29 +259,15 @@ export default function ComplianceClients() {
               <Link
                 key={client.id}
                 to={`/dashboard/clients/${client.id}`}
-                className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer group"
+                className="block p-4 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer group border border-gray-200 dark:border-gray-700"
               >
-                <div>
-                  <p className="font-medium group-hover:text-primary transition-colors">{client.name}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-[80px] h-3 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{ 
-                        width: `${client.compliance}%`,
-                        backgroundColor: getComplianceColor(client.compliance)
-                      }}
-                    />
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <p className="font-semibold text-lg group-hover:text-primary transition-colors">{client.name}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Overall: {client.overallCompliance}%</p>
                   </div>
-                  <span 
-                    className="text-sm font-medium min-w-[40px]"
-                    style={{ color: getComplianceColor(client.compliance) }}
-                  >
-                    {client.compliance}%
-                  </span>
                   <svg
-                    className="w-4 h-4 text-gray-400 group-hover:text-primary transition-colors ml-2"
+                    className="w-5 h-5 text-gray-400 group-hover:text-primary transition-colors"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -238,6 +279,23 @@ export default function ComplianceClients() {
                       d="M9 5l7 7-7 7"
                     />
                   </svg>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <ComplianceBar
+                    label="Workouts"
+                    percentage={client.workoutCompliance}
+                  />
+                  
+                  <ComplianceBar
+                    label="Meals"
+                    percentage={client.mealCompliance}
+                  />
+                  
+                  <ComplianceBar
+                    label="Supplements"
+                    percentage={client.supplementCompliance}
+                  />
                 </div>
               </Link>
             ))

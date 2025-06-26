@@ -84,8 +84,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         .select("id")
         .eq("user_id", user.id)
         .eq("supplement_id", supplementId)
-        .gte("completed_at", dateString)
-        .lt("completed_at", new Date(completionDate.getTime() + 86400000).toISOString().split('T')[0])
+        .gte("completed_at", `${dateString}T00:00:00.000Z`)
+        .lt("completed_at", `${dateString}T23:59:59.999Z`)
         .single();
 
       if (existingCompletion) {
@@ -98,7 +98,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         .insert({
           user_id: user.id,
           supplement_id: supplementId,
-          completed_at: completionDate.toISOString()
+          completed_at: new Date().toISOString() // Use current timestamp instead of date
         });
 
       if (insertError) {
@@ -113,8 +113,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         .delete()
         .eq("user_id", user.id)
         .eq("supplement_id", supplementId)
-        .gte("completed_at", dateString)
-        .lt("completed_at", new Date(completionDate.getTime() + 86400000).toISOString().split('T')[0]);
+        .gte("completed_at", `${dateString}T00:00:00.000Z`)
+        .lt("completed_at", `${dateString}T23:59:59.999Z`);
 
       if (deleteError) {
         return json({ error: deleteError.message }, { status: 500 });

@@ -12,6 +12,13 @@ import type { LoaderFunction } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import { useMealCompletion } from "../context/MealCompletionContext";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+// Configure dayjs
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 type LoaderData = {
   clientData?: ClientDashboardData;
@@ -45,6 +52,7 @@ type Food = {
 
 // Update Meal type
 type Meal = {
+  id?: string | number; // Add optional id field
   name: string;
   time: string;
   completed: boolean;
@@ -69,6 +77,7 @@ type ClientDashboardData = {
   supplements: Supplement[];
   workoutCompliance: number;
   mealCompliance: number;
+  supplementCompliance: number;
   weightChange: number;
   planName?: string | null;
   isRestDay?: boolean | null;
@@ -225,6 +234,7 @@ export const loader: LoaderFunction = async ({ request }) => {
                 fat += Number(food.fat) || 0;
               }
               meals.push({
+                id: meal.id, // Add the meal ID
                 name: meal.name,
                 time: meal.time || "",
                 foods: foodsRaw,
@@ -249,7 +259,7 @@ export const loader: LoaderFunction = async ({ request }) => {
               .lt("completed_at", endOfDay.toISOString());
             const mealIdToKey: Record<string, string> = {};
             for (const meal of mealsRaw) {
-              mealIdToKey[String(meal.id)] = String(meal.name) + String(meal.time);
+              mealIdToKey[String(meal.id)] = `${meal.id}-${meal.name}-${meal.time}`;
             }
             completedMealIds = (todayCompletions ?? []).map((c: any) => mealIdToKey[String(c.meal_id)]).filter(Boolean);
           }
@@ -368,6 +378,17 @@ export const loader: LoaderFunction = async ({ request }) => {
         const supplements = (supplementsRaw ?? []).map((s: any) => ({
           name: s.name,
         }));
+
+        // Calculate supplement compliance for the week
+        const { data: supplementCompletions } = await supabase
+          .from("supplement_completions")
+          .select("supplement_id, completed_at")
+          .eq("user_id", user.id)
+          .gte("completed_at", weekStart.toISOString())
+          .lt("completed_at", weekEnd.toISOString());
+        const completedSupplements = (supplementCompletions ?? []).length;
+        const totalPossibleSupplements = supplements.length * 7; // 7 days worth
+        const supplementCompliance = totalPossibleSupplements > 0 ? Math.round((completedSupplements / totalPossibleSupplements) * 100) : 0;
         const clientData: ClientDashboardData & { planName?: string | null; isRestDay?: boolean | null; completedMealIds?: string[] } = {
           updates,
           meals,
@@ -375,6 +396,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           supplements,
           workoutCompliance,
           mealCompliance,
+          supplementCompliance,
           weightChange,
           planName,
           isRestDay,
@@ -546,33 +568,48 @@ export const loader: LoaderFunction = async ({ request }) => {
         const prevCompliance = totalExpected > 0 ? Math.round((prevTotalCompleted / totalExpected) * 100) : 0;
         percentChange = compliance - prevCompliance;
       }
-      // Recent Activity: today only
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + 1);
+      // Recent Activity: today only (last 24 hours for more relevant activity)
+      const now = new Date();
+      const todayDateString = now.toISOString().slice(0, 10); // YYYY-MM-DD format
+      const tomorrow = new Date(now);
+      tomorrow.setDate(now.getDate() + 1);
+      const tomorrowDateString = tomorrow.toISOString().slice(0, 10);
       
-      // Fetch all activity data
-      const { data: workoutsToday } = await supabase
-        .from("workout_completions")
-        .select("id, user_id, completed_at")
-        .in("user_id", clients.map((c) => c.id))
-        .gte("completed_at", today.toISOString().slice(0, 10))
-        .lt("completed_at", tomorrow.toISOString().slice(0, 10));
+      // For more relevant "recent" activity, also consider last 6 hours
+      const sixHoursAgo = new Date(now.getTime() - (6 * 60 * 60 * 1000));
+      
+      // Only fetch activity data if we have clients
+      let workoutsToday = null;
+      let mealsLogged = null;
+      let suppsLogged = null;
+      
+      if (clients.length > 0) {
+        // Fetch all activity data for today only
+        // For workouts, use created_at for more recent activity (last 6 hours)
+        const { data: workouts } = await supabase
+          .from("workout_completions")
+          .select("id, user_id, completed_at, created_at")
+          .in("user_id", clients.map((c) => c.id))
+          .gte("created_at", sixHoursAgo.toISOString());
 
-      const { data: mealsLogged } = await supabase
-        .from("meal_completions")
-        .select("id, user_id, completed_at")
-        .in("user_id", clients.map((c) => c.id))
-        .gte("completed_at", today.toISOString().slice(0, 10))
-        .lt("completed_at", tomorrow.toISOString().slice(0, 10));
+        const { data: meals } = await supabase
+          .from("meal_completions")
+          .select("id, user_id, completed_at")
+          .in("user_id", clients.map((c) => c.id))
+          .gte("completed_at", `${todayDateString}T00:00:00.000Z`)
+          .lt("completed_at", `${tomorrowDateString}T00:00:00.000Z`);
 
-      const { data: suppsLogged } = await supabase
-        .from("supplement_completions")
-        .select("id, user_id, completed_at")
-        .in("user_id", clients.map((c) => c.id))
-        .gte("completed_at", today.toISOString().slice(0, 10))
-        .lt("completed_at", tomorrow.toISOString().slice(0, 10));
+        const { data: supplements } = await supabase
+          .from("supplement_completions")
+          .select("id, user_id, completed_at")
+          .in("user_id", clients.map((c) => c.id))
+          .gte("completed_at", `${todayDateString}T00:00:00.000Z`)
+          .lt("completed_at", `${tomorrowDateString}T00:00:00.000Z`);
+
+        workoutsToday = workouts;
+        mealsLogged = meals;
+        suppsLogged = supplements;
+      }
 
       // Group activities by client and type
       const activityGroups: { [key: string]: { 
@@ -595,14 +632,39 @@ export const loader: LoaderFunction = async ({ request }) => {
               clientName,
               action: "Completed workout",
               count: 0,
-              latestTime: w.completed_at,
+              latestTime: w.created_at || w.completed_at, // Use created_at for better time ordering
+              id: w.id,
+            };
+          }
+          activityGroups[key].count++;
+          // Keep the latest time - use created_at when available
+          const currentTime = w.created_at || w.completed_at;
+          if (new Date(currentTime) > new Date(activityGroups[key].latestTime)) {
+            activityGroups[key].latestTime = currentTime;
+          }
+        }
+      }
+
+      // Process workouts
+      if (workoutsToday) {
+        for (const w of workoutsToday) {
+          const client = clients.find((c) => c.id === w.user_id);
+          const clientName = client ? client.name : "Unknown";
+          const key = `${w.user_id}-workout`;
+          
+          if (!activityGroups[key]) {
+            activityGroups[key] = {
+              clientName,
+              action: "Completed workout",
+              count: 0,
+              latestTime: w.created_at, // Use created_at for workouts
               id: w.id,
             };
           }
           activityGroups[key].count++;
           // Keep the latest time
-          if (new Date(w.completed_at) > new Date(activityGroups[key].latestTime)) {
-            activityGroups[key].latestTime = w.completed_at;
+          if (new Date(w.created_at) > new Date(activityGroups[key].latestTime)) {
+            activityGroups[key].latestTime = w.created_at;
           }
         }
       }
@@ -617,7 +679,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           if (!activityGroups[key]) {
             activityGroups[key] = {
               clientName,
-              action: "Logged meals",
+              action: "Completed meals",
               count: 0,
               latestTime: m.completed_at,
               id: m.id,
@@ -670,10 +732,28 @@ export const loader: LoaderFunction = async ({ request }) => {
         });
       });
 
-      // Sort activity by time desc
+      // Sort activity by time desc (most recent first)
       recentActivity.sort(
         (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()
       );
+
+      // Debug logging in development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Recent Activity Debug:', {
+          todayDateString,
+          tomorrowDateString,
+          workoutsCount: workoutsToday?.length || 0,
+          mealsCount: mealsLogged?.length || 0,
+          supplementsCount: suppsLogged?.length || 0,
+          activityGroupsCount: Object.keys(activityGroups).length,
+          recentActivityCount: recentActivity.length,
+          recentActivity: recentActivity.map(a => ({
+            clientName: a.clientName,
+            action: a.action,
+            time: a.time
+          }))
+        });
+      }
     }
   }
 
@@ -838,10 +918,7 @@ export default function Dashboard() {
                           {activity.action}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(activity.time).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {dayjs(activity.time).local().format('h:mm A')}
                         </p>
                       </div>
                     </div>
@@ -867,7 +944,7 @@ export default function Dashboard() {
           </div>
 
           {/* Client Metrics Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-2">Workout Compliance</h3>
               <p className="text-4xl font-bold">
@@ -883,6 +960,16 @@ export default function Dashboard() {
               <p className="text-4xl font-bold">
                 {typeof clientData?.mealCompliance === "number" && !isNaN(clientData.mealCompliance)
                   ? `${clientData.mealCompliance}%`
+                  : "-%"}
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
+            </Card>
+
+            <Card className="p-6">
+              <h3 className="font-semibold text-lg mb-2">Supplement Compliance</h3>
+              <p className="text-4xl font-bold">
+                {typeof clientData?.supplementCompliance === "number" && !isNaN(clientData.supplementCompliance)
+                  ? `${clientData.supplementCompliance}%`
                   : "-%"}
               </p>
               <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
@@ -934,7 +1021,16 @@ export default function Dashboard() {
                 ) : (!clientData?.meals || clientData.meals.length === 0) ? (
                   <div className="text-gray-500">No meals planned for today.</div>
                 ) : (() => {
-                    const nextMeal = (clientData.meals ?? []).find((meal) => !checkedMeals.includes(String(meal.name) + String(meal.time)));
+                    // Create meal key function to match the one used in meals page
+                    const createMealKey = (meal: { id?: string | number; name: string; time: string }) => {
+                      return `${meal.id}-${meal.name}-${meal.time}`;
+                    };
+                    
+                    const nextMeal = (clientData.meals ?? []).find((meal) => {
+                      const mealKey = createMealKey(meal);
+                      return !checkedMeals.includes(mealKey);
+                    });
+                    
                     if (!nextMeal) {
                       return <div className="text-green-600 font-semibold">All meals completed for today!</div>;
                     }
