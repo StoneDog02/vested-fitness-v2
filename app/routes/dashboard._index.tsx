@@ -568,6 +568,45 @@ export const loader: LoaderFunction = async ({ request }) => {
         const prevCompliance = totalExpected > 0 ? Math.round((prevTotalCompleted / totalExpected) * 100) : 0;
         percentChange = compliance - prevCompliance;
       }
+      // Create a map of clients with their meal plans and supplements for activity processing
+      const clientsWithPlans = await Promise.all(
+        clients.map(async (client) => {
+          // Active meal plan with meals
+          const { data: mealPlansRaw } = await supabase
+            .from("meal_plans")
+            .select("id, title, is_active")
+            .eq("user_id", client.id)
+            .eq("is_active", true)
+            .limit(1);
+          
+          let activeMealPlan = null;
+          if (mealPlansRaw && mealPlansRaw.length > 0) {
+            const { data: mealsRaw } = await supabase
+              .from("meals")
+              .select("id, name, time, sequence_order")
+              .eq("meal_plan_id", mealPlansRaw[0].id)
+              .order("sequence_order", { ascending: true });
+            activeMealPlan = {
+              ...mealPlansRaw[0],
+              meals: mealsRaw || []
+            };
+          }
+          
+          // Supplements
+          const { data: supplementsRaw } = await supabase
+            .from("supplements")
+            .select("id, name")
+            .eq("user_id", client.id);
+          const supplements = supplementsRaw || [];
+          
+          return {
+            ...client,
+            activeMealPlan,
+            supplements,
+          };
+        })
+      );
+
       // Recent Activity: today only (last 24 hours for more relevant activity)
       const now = new Date();
       const todayDateString = now.toISOString().slice(0, 10); // YYYY-MM-DD format
@@ -589,20 +628,20 @@ export const loader: LoaderFunction = async ({ request }) => {
         const { data: workouts } = await supabase
           .from("workout_completions")
           .select("id, user_id, completed_at, created_at")
-          .in("user_id", clients.map((c) => c.id))
+          .in("user_id", clientsWithPlans.map((c) => c.id))
           .gte("created_at", sixHoursAgo.toISOString());
 
         const { data: meals } = await supabase
           .from("meal_completions")
           .select("id, user_id, completed_at")
-          .in("user_id", clients.map((c) => c.id))
+          .in("user_id", clientsWithPlans.map((c) => c.id))
           .gte("completed_at", `${todayDateString}T00:00:00.000Z`)
           .lt("completed_at", `${tomorrowDateString}T00:00:00.000Z`);
 
         const { data: supplements } = await supabase
           .from("supplement_completions")
           .select("id, user_id, completed_at")
-          .in("user_id", clients.map((c) => c.id))
+          .in("user_id", clientsWithPlans.map((c) => c.id))
           .gte("completed_at", `${todayDateString}T00:00:00.000Z`)
           .lt("completed_at", `${tomorrowDateString}T00:00:00.000Z`);
 
@@ -618,12 +657,13 @@ export const loader: LoaderFunction = async ({ request }) => {
         count: number; 
         latestTime: string;
         id: string;
+        totalExpected?: number;
       } } = {};
 
       // Process workouts
       if (workoutsToday) {
         for (const w of workoutsToday) {
-          const client = clients.find((c) => c.id === w.user_id);
+          const client = clientsWithPlans.find((c) => c.id === w.user_id);
           const clientName = client ? client.name : "Unknown";
           const key = `${w.user_id}-workout`;
           
@@ -645,44 +685,28 @@ export const loader: LoaderFunction = async ({ request }) => {
         }
       }
 
-      // Process workouts
-      if (workoutsToday) {
-        for (const w of workoutsToday) {
-          const client = clients.find((c) => c.id === w.user_id);
-          const clientName = client ? client.name : "Unknown";
-          const key = `${w.user_id}-workout`;
-          
-          if (!activityGroups[key]) {
-            activityGroups[key] = {
-              clientName,
-              action: "Completed workout",
-              count: 0,
-              latestTime: w.created_at, // Use created_at for workouts
-              id: w.id,
-            };
-          }
-          activityGroups[key].count++;
-          // Keep the latest time
-          if (new Date(w.created_at) > new Date(activityGroups[key].latestTime)) {
-            activityGroups[key].latestTime = w.created_at;
-          }
-        }
-      }
-
       // Process meals
       if (mealsLogged) {
         for (const m of mealsLogged) {
-          const client = clients.find((c) => c.id === m.user_id);
+          const client = clientsWithPlans.find((c) => c.id === m.user_id);
           const clientName = client ? client.name : "Unknown";
           const key = `${m.user_id}-meal`;
           
           if (!activityGroups[key]) {
+            // Get total expected meals for this client today
+            let totalExpectedMeals = 0;
+            const clientMealPlan = client ? client.activeMealPlan : null;
+            if (clientMealPlan && clientMealPlan.meals) {
+              totalExpectedMeals = clientMealPlan.meals.length;
+            }
+            
             activityGroups[key] = {
               clientName,
               action: "Completed meals",
               count: 0,
               latestTime: m.completed_at,
               id: m.id,
+              totalExpected: totalExpectedMeals,
             };
           }
           activityGroups[key].count++;
@@ -696,17 +720,25 @@ export const loader: LoaderFunction = async ({ request }) => {
       // Process supplements
       if (suppsLogged) {
         for (const s of suppsLogged) {
-          const client = clients.find((c) => c.id === s.user_id);
+          const client = clientsWithPlans.find((c) => c.id === s.user_id);
           const clientName = client ? client.name : "Unknown";
           const key = `${s.user_id}-supplement`;
           
           if (!activityGroups[key]) {
+            // Get total expected supplements for this client today
+            let totalExpectedSupplements = 0;
+            const clientSupplements = client ? client.supplements : null;
+            if (clientSupplements && Array.isArray(clientSupplements)) {
+              totalExpectedSupplements = clientSupplements.length;
+            }
+            
             activityGroups[key] = {
               clientName,
               action: "Completed supplements",
               count: 0,
               latestTime: s.completed_at,
               id: s.id,
+              totalExpected: totalExpectedSupplements,
             };
           }
           activityGroups[key].count++;
@@ -720,7 +752,9 @@ export const loader: LoaderFunction = async ({ request }) => {
       // Convert to recentActivity array with proper formatting
       Object.values(activityGroups).forEach((group) => {
         let actionText = group.action;
-        if (group.count > 1) {
+        if (group.totalExpected && group.totalExpected > 0) {
+          actionText = `${group.action} (${group.count}/${group.totalExpected})`;
+        } else if (group.count > 1) {
           actionText = `${group.action} (${group.count})`;
         }
         
@@ -737,23 +771,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()
       );
 
-      // Debug logging in development
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Recent Activity Debug:', {
-          todayDateString,
-          tomorrowDateString,
-          workoutsCount: workoutsToday?.length || 0,
-          mealsCount: mealsLogged?.length || 0,
-          supplementsCount: suppsLogged?.length || 0,
-          activityGroupsCount: Object.keys(activityGroups).length,
-          recentActivityCount: recentActivity.length,
-          recentActivity: recentActivity.map(a => ({
-            clientName: a.clientName,
-            action: a.action,
-            time: a.time
-          }))
-        });
-      }
+
     }
   }
 
