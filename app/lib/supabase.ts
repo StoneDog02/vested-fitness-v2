@@ -139,3 +139,9 @@ export const getMockUser = (role: UserRole = "coach"): User => {
 export const switchRole = (currentRole: UserRole): UserRole => {
   return currentRole === "coach" ? "client" : "coach";
 };
+
+// Mock resetPassword function to fix build
+export const resetPassword = async (email: string) => {
+  // Mock implementation for now
+  return { error: null };
+};

@@ -1020,14 +1020,14 @@ export default function Meals() {
                     style={{
                       width: mealPlan && mealPlan.meals && mealPlan.meals.length > 0
                         ? `${(completedMealIds.length / mealPlan.meals.length) * 100}%`
-                        : "0%",
+                        : "100%",
                     }}
                   ></div>
                 </div>
                 <div className="text-xs text-gray-dark dark:text-gray-light text-right">
                   {mealPlan && mealPlan.meals && mealPlan.meals.length > 0
                     ? Math.round((completedMealIds.length / mealPlan.meals.length) * 100)
-                    : 0}
+                    : 100}
                   % complete
                 </div>
               </div>

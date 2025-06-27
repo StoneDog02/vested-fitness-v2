@@ -476,7 +476,7 @@ export default function Workouts() {
   // Calculate daily progress
   const totalGroups = currentDayWorkout?.groups?.length || 0;
   const completedGroupCount = Object.values(completedGroups).filter(Boolean).length;
-  const progressPercentage = totalGroups > 0 ? (completedGroupCount / totalGroups) * 100 : 0;
+  const progressPercentage = totalGroups > 0 ? (completedGroupCount / totalGroups) * 100 : 100;
 
   // Compliance calendar helpers
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -810,6 +810,11 @@ export default function Workouts() {
                 const isToday = thisDate.getTime() === today.getTime();
                 const isFuture = thisDate.getTime() > today.getTime();
                 
+                // Check if there are workouts assigned for this day
+                const dateStr = thisDate.toISOString().slice(0, 10);
+                const dayWorkout = weekWorkouts[dateStr];
+                const hasWorkoutsAssigned = dayWorkout && !dayWorkout.isRest && dayWorkout.groups && dayWorkout.groups.length > 0;
+                
                 // Determine status and display
                 let status: string;
                 let displayText: string;
@@ -822,14 +827,28 @@ export default function Workouts() {
                   if (complianceData[i] > 0) {
                     status = "completed";
                     displayText = `${percentage}%`;
+                  } else if (!hasWorkoutsAssigned) {
+                    // No workouts assigned for today = 100% complete
+                    status = "completed";
+                    displayText = "100%";
                   } else {
                     status = "pending";
                     displayText = "Pending";
                   }
                 } else {
                   // Past day
-                  status = "completed";
-                  displayText = `${percentage}%`;
+                  if (complianceData[i] > 0) {
+                    status = "completed";
+                    displayText = `${percentage}%`;
+                  } else if (!hasWorkoutsAssigned) {
+                    // No workouts assigned for past day = 100% complete
+                    status = "completed";
+                    displayText = "100%";
+                  } else {
+                    // Past day with workouts assigned but not completed = 0%
+                    status = "completed";
+                    displayText = "0%";
+                  }
                 }
                 
                 return (
@@ -851,6 +870,8 @@ export default function Workouts() {
                             ? isToday
                               ? "bg-green-500"
                               : "bg-gray-light dark:bg-davyGray"
+                            : displayText === "100%"
+                            ? "bg-primary"
                             : percentage >= 80
                             ? "bg-primary"
                             : percentage > 0
