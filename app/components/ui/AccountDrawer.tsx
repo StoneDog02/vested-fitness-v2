@@ -18,14 +18,34 @@ interface AccountDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   userRole: "coach" | "client";
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar_url?: string;
+  } | null;
 }
 
 export default function AccountDrawer({
   isOpen,
   onClose,
   userRole,
+  user,
 }: AccountDrawerProps) {
   const navigate = useNavigate();
+  
+  // Helper function to get initials from full name (same as settings page)
+  const getInitials = (fullName: string): string => {
+    const nameParts = fullName.trim().split(' ');
+    if (nameParts.length === 1) {
+      return nameParts[0].charAt(0).toUpperCase();
+    }
+    // Get first letter of first name and first letter of last name
+    const firstInitial = nameParts[0].charAt(0).toUpperCase();
+    const lastInitial = nameParts[nameParts.length - 1].charAt(0).toUpperCase();
+    return firstInitial + lastInitial;
+  };
+
   const menuItems: MenuSection[] = [
     {
       section: "Settings",
@@ -103,11 +123,19 @@ export default function AccountDrawer({
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center text-2xl text-white">
-              U
+              {user?.avatar_url ? (
+                <img
+                  src={user.avatar_url}
+                  alt="Profile"
+                  className="w-full h-full rounded-full object-cover"
+                />
+              ) : (
+                <span>{user ? getInitials(user.name) : "U"}</span>
+              )}
             </div>
             <div>
               <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
-                User Name
+                {user ? user.name : "User Name"}
               </h3>
               <p className="text-sm text-muted-foreground capitalize">
                 {userRole}

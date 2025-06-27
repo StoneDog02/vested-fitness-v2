@@ -1,9 +1,15 @@
-import { useState } from "react";
-import type { MetaFunction } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { useState, useEffect } from "react";
+import type { MetaFunction, LoaderFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { Link, useLoaderData, useFetcher } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import ThemeToggle from "~/components/ui/ThemeToggle";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "~/lib/supabase";
+import { parse } from "cookie";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
 
 export const meta: MetaFunction = () => {
   return [
@@ -12,24 +18,126 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-// Mock user data
-const mockUser = {
-  name: "John Smith",
-  email: "john@example.com",
-  profilePicture: null,
+type LoaderData = {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar_url?: string;
+    font_size?: string;
+    email_notifications?: boolean;
+    app_notifications?: boolean;
+    weekly_summary?: boolean;
+  };
+};
+
+export const loader: LoaderFunction = async ({ request }) => {
+  // Get user from auth cookie
+  const cookies = parse(request.headers.get("cookie") || "");
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  
+  let accessToken;
+  if (supabaseAuthCookieKey) {
+    try {
+      const decoded = Buffer.from(
+        cookies[supabaseAuthCookieKey],
+        "base64"
+      ).toString("utf-8");
+      const [access] = JSON.parse(JSON.parse(decoded));
+      accessToken = access;
+    } catch (e) {
+      accessToken = undefined;
+    }
+  }
+
+  let authId: string | undefined;
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+      authId =
+        decoded && typeof decoded === "object" && "sub" in decoded
+          ? (decoded.sub as string)
+          : undefined;
+    } catch (e) {
+      authId = undefined;
+    }
+  }
+
+  if (!authId) {
+    throw new Response("Unauthorized", { status: 401 });
+  }
+
+  const supabase = createClient<Database>(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
+
+  // Get user data
+  const { data: user, error } = await supabase
+    .from("users")
+    .select("id, name, email, avatar_url, font_size, email_notifications, app_notifications, weekly_summary")
+    .eq("auth_id", authId)
+    .single();
+
+  if (error || !user) {
+    throw new Response("User not found", { status: 404 });
+  }
+
+  return json({ user });
 };
 
 export default function Settings() {
-  const [name, setName] = useState(mockUser.name);
-  const [email, setEmail] = useState(mockUser.email);
+  const { user } = useLoaderData<LoaderData>();
+  const profileFetcher = useFetcher();
+  const passwordFetcher = useFetcher();
+  const avatarFetcher = useFetcher();
+  
+  // Success popup state (same pattern as meals/workouts/supplements)
+  const [showSuccess, setShowSuccess] = useState(false);
+  
+  // Helper function to get initials from full name
+  const getInitials = (fullName: string): string => {
+    const nameParts = fullName.trim().split(' ');
+    if (nameParts.length === 1) {
+      return nameParts[0].charAt(0).toUpperCase();
+    }
+    // Get first letter of first name and first letter of last name
+    const firstInitial = nameParts[0].charAt(0).toUpperCase();
+    const lastInitial = nameParts[nameParts.length - 1].charAt(0).toUpperCase();
+    return firstInitial + lastInitial;
+  };
+
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [fontSize, setFontSize] = useState(user.font_size || "medium");
+  const [emailNotifications, setEmailNotifications] = useState(user.email_notifications ?? true);
+  const [appNotifications, setAppNotifications] = useState(user.app_notifications ?? true);
+  const [weeklySummary, setWeeklySummary] = useState(user.weekly_summary ?? true);
+  const [avatarUrl, setAvatarUrl] = useState(user.avatar_url);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, this would save to Supabase
-    alert("Profile updated successfully");
+    profileFetcher.submit(
+      {
+        name,
+        email,
+        font_size: fontSize,
+        email_notifications: emailNotifications,
+        app_notifications: appNotifications,
+        weekly_summary: weeklySummary,
+      },
+      {
+        method: "POST",
+        action: "/api/update-profile",
+        encType: "application/json",
+      }
+    );
   };
 
   const handleChangePassword = (e: React.FormEvent) => {
@@ -38,15 +146,128 @@ export default function Settings() {
       alert("New passwords don't match");
       return;
     }
-    // In a real app, this would save to Supabase
-    alert("Password changed successfully");
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
+    passwordFetcher.submit(
+      {
+        currentPassword,
+        newPassword,
+      },
+      {
+        method: "POST",
+        action: "/api/change-password",
+        encType: "application/json",
+      }
+    );
   };
+
+  const handleAvatarUpload = async (file: File) => {
+    if (!file) return;
+    
+    if (file.size > 5 * 1024 * 1024) {
+      alert("File size must be less than 5MB");
+      return;
+    }
+    
+    if (!file.type.startsWith('image/')) {
+      alert("Please select an image file");
+      return;
+    }
+    
+    setIsUploadingAvatar(true);
+    
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result as string;
+        
+        avatarFetcher.submit(
+          JSON.stringify({
+            imageData: base64,
+            fileName: file.name,
+            contentType: file.type,
+          }),
+          {
+            method: "POST",
+            action: "/api/upload-avatar",
+            encType: "application/json",
+          }
+        );
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      alert("Failed to upload avatar");
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  // Handle successful responses
+  useEffect(() => {
+    if (profileFetcher.data && profileFetcher.state === "idle") {
+      const data = profileFetcher.data as { success?: boolean; error?: string };
+      if (data.success) {
+        setShowSuccess(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        setTimeout(() => setShowSuccess(false), 3000);
+      } else if (data.error) {
+        alert(data.error);
+      }
+    }
+  }, [profileFetcher.data, profileFetcher.state]);
+  
+  useEffect(() => {
+    if (passwordFetcher.data && passwordFetcher.state === "idle") {
+      const data = passwordFetcher.data as { success?: boolean; error?: string };
+      if (data.success) {
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setShowSuccess(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        setTimeout(() => setShowSuccess(false), 3000);
+      } else if (data.error) {
+        alert(data.error);
+      }
+    }
+  }, [passwordFetcher.data, passwordFetcher.state]);
+  
+  useEffect(() => {
+    if (avatarFetcher.data && avatarFetcher.state === "idle") {
+      setIsUploadingAvatar(false);
+      const data = avatarFetcher.data as { success?: boolean; error?: string; avatar_url?: string };
+      if (data.success) {
+        if (data.avatar_url) {
+          setAvatarUrl(data.avatar_url);
+        }
+        setShowSuccess(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        setTimeout(() => setShowSuccess(false), 3000);
+      } else if (data.error) {
+        alert(data.error);
+      }
+    }
+  }, [avatarFetcher.data, avatarFetcher.state]);
 
   return (
     <div className="p-6">
+      {/* Success Message */}
+      {showSuccess && (
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-primary text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-fade-in">
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+          <span>Profile Updated Successfully</span>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-secondary dark:text-alabaster">
           Settings
@@ -121,38 +342,49 @@ export default function Settings() {
               </label>
               <div className="flex items-center">
                 <div className="w-16 h-16 rounded-full bg-gray-light flex items-center justify-center text-gray-dark mr-4">
-                  {mockUser.profilePicture ? (
+                  {avatarUrl ? (
                     <img
-                      src={mockUser.profilePicture}
+                      src={avatarUrl}
                       alt="Profile"
                       className="w-full h-full rounded-full object-cover"
                     />
                   ) : (
-                    <span className="text-xl">{mockUser.name.charAt(0)}</span>
+                    <span className="text-xl">{getInitials(user.name)}</span>
                   )}
                 </div>
-                <input
-                  id="profile-picture"
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    document.getElementById("profile-picture")?.click()
-                  }
-                >
-                  Change Picture
-                </Button>
+                                  <input
+                    id="profile-picture"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        handleAvatarUpload(file);
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      document.getElementById("profile-picture")?.click()
+                    }
+                    disabled={isUploadingAvatar}
+                  >
+                    {isUploadingAvatar ? "Uploading..." : "Change Picture"}
+                  </Button>
               </div>
             </div>
 
             <div>
-              <Button type="submit" variant="primary">
-                Save Changes
+              <Button 
+                type="submit" 
+                variant="primary"
+                disabled={profileFetcher.state !== "idle"}
+              >
+                {profileFetcher.state !== "idle" ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           </form>
@@ -213,8 +445,12 @@ export default function Settings() {
             </div>
 
             <div>
-              <Button type="submit" variant="primary">
-                Change Password
+              <Button 
+                type="submit" 
+                variant="primary"
+                disabled={passwordFetcher.state !== "idle"}
+              >
+                {passwordFetcher.state !== "idle" ? "Changing..." : "Change Password"}
               </Button>
             </div>
           </form>
@@ -269,13 +505,28 @@ export default function Settings() {
                 Adjust the size of text throughout the application
               </p>
               <div className="flex items-center space-x-2">
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant={fontSize === "small" ? "primary" : "outline"} 
+                  size="sm"
+                  type="button"
+                  onClick={() => setFontSize("small")}
+                >
                   Small
                 </Button>
-                <Button variant="primary" size="sm">
+                <Button 
+                  variant={fontSize === "medium" ? "primary" : "outline"} 
+                  size="sm"
+                  type="button"
+                  onClick={() => setFontSize("medium")}
+                >
                   Medium
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant={fontSize === "large" ? "primary" : "outline"} 
+                  size="sm"
+                  type="button"
+                  onClick={() => setFontSize("large")}
+                >
                   Large
                 </Button>
               </div>
@@ -348,7 +599,8 @@ export default function Settings() {
                   <input
                     type="checkbox"
                     className="sr-only peer"
-                    defaultChecked
+                    checked={emailNotifications}
+                    onChange={(e) => setEmailNotifications(e.target.checked)}
                     id="email-notifications"
                   />
                   <div className="w-11 h-6 bg-gray-light dark:bg-davyGray peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
@@ -374,7 +626,8 @@ export default function Settings() {
                   <input
                     type="checkbox"
                     className="sr-only peer"
-                    defaultChecked
+                    checked={appNotifications}
+                    onChange={(e) => setAppNotifications(e.target.checked)}
                     id="app-notifications"
                   />
                   <div className="w-11 h-6 bg-gray-light dark:bg-davyGray peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
@@ -400,7 +653,8 @@ export default function Settings() {
                   <input
                     type="checkbox"
                     className="sr-only peer"
-                    defaultChecked
+                    checked={weeklySummary}
+                    onChange={(e) => setWeeklySummary(e.target.checked)}
                     id="weekly-summary"
                   />
                   <div className="w-11 h-6 bg-gray-light dark:bg-davyGray peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>

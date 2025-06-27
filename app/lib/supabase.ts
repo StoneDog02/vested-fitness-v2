@@ -17,6 +17,10 @@ export interface User {
   last_login?: string;
   auth_id: string;
   goal?: string;
+  font_size?: string;
+  email_notifications?: boolean;
+  app_notifications?: boolean;
+  weekly_summary?: boolean;
 }
 
 // Define the database schema
@@ -40,6 +44,10 @@ export interface Database {
           last_login?: string;
           updated_at: string;
           goal?: string;
+          font_size?: string;
+          email_notifications?: boolean;
+          app_notifications?: boolean;
+          weekly_summary?: boolean;
         };
         Insert: {
           id?: string;
@@ -57,6 +65,10 @@ export interface Database {
           last_login?: string;
           updated_at?: string;
           goal?: string;
+          font_size?: string;
+          email_notifications?: boolean;
+          app_notifications?: boolean;
+          weekly_summary?: boolean;
         };
         Update: {
           id?: string;
@@ -74,6 +86,10 @@ export interface Database {
           last_login?: string;
           updated_at?: string;
           goal?: string;
+          font_size?: string;
+          email_notifications?: boolean;
+          app_notifications?: boolean;
+          weekly_summary?: boolean;
         };
       };
       coach_updates: {
@@ -141,7 +157,8 @@ export const switchRole = (currentRole: UserRole): UserRole => {
 };
 
 // Mock resetPassword function to fix build
-export const resetPassword = async (email: string) => {
+export const resetPassword = async (email: string): Promise<{ error: Error | null }> => {
   // Mock implementation for now
+  // In a real implementation, this would call Supabase auth.resetPasswordForEmail
   return { error: null };
 };

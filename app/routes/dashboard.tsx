@@ -28,6 +28,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
   let role = "coach";
+  let user = null;
   let authId: string | undefined;
   if (accessToken) {
     try {
@@ -45,23 +46,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
     );
-    const { data: user } = await supabase
+    const { data: userData } = await supabase
       .from("users")
-      .select("role")
+      .select("id, name, email, role, avatar_url")
       .eq("auth_id", authId)
       .single();
-    if (user && user.role) {
-      role = user.role;
+    if (userData) {
+      role = userData.role;
+      user = userData;
     }
   }
-  return json({ role });
+  return json({ role, user });
 };
 
 export default function Dashboard() {
-  const { role } = useLoaderData<typeof loader>();
+  const { role, user } = useLoaderData<typeof loader>();
 
   return (
-    <DashboardLayout userRole={role as UserRole}>
+    <DashboardLayout userRole={role as UserRole} user={user}>
       <Outlet />
     </DashboardLayout>
   );

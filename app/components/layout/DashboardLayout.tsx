@@ -13,11 +13,18 @@ interface NavItem {
 interface DashboardLayoutProps {
   children: React.ReactNode;
   userRole: UserRole;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar_url?: string;
+  } | null;
 }
 
 export default function DashboardLayout({
   children,
   userRole,
+  user,
 }: DashboardLayoutProps) {
   const location = useLocation();
   const [isAccountDrawerOpen, setIsAccountDrawerOpen] = useState(false);
@@ -77,6 +84,18 @@ export default function DashboardLayout({
       clientsNavItem.subItems = clientSubItems;
     }
   }
+
+  // Helper function to get initials from full name (same as settings page)
+  const getInitials = (fullName: string): string => {
+    const nameParts = fullName.trim().split(' ');
+    if (nameParts.length === 1) {
+      return nameParts[0].charAt(0).toUpperCase();
+    }
+    // Get first letter of first name and first letter of last name
+    const firstInitial = nameParts[0].charAt(0).toUpperCase();
+    const lastInitial = nameParts[nameParts.length - 1].charAt(0).toUpperCase();
+    return firstInitial + lastInitial;
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-alabaster dark:bg-davyGray transition-colors duration-200">
@@ -145,7 +164,15 @@ export default function DashboardLayout({
             >
               <span className="sr-only">Open user menu</span>
               <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
-                U
+                {user?.avatar_url ? (
+                  <img
+                    src={user.avatar_url}
+                    alt="Profile"
+                    className="w-full h-full rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="text-sm">{user ? getInitials(user.name) : "U"}</span>
+                )}
               </div>
               <span className="hidden sm:inline text-secondary dark:text-white transition-colors duration-200">
                 Profile
@@ -164,6 +191,7 @@ export default function DashboardLayout({
         isOpen={isAccountDrawerOpen}
         onClose={() => setIsAccountDrawerOpen(false)}
         userRole={userRole}
+        user={user}
       />
 
       <MenuDrawer
