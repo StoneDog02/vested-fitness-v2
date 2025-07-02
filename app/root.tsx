@@ -14,9 +14,14 @@ import styles from "./tailwind.css?url";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: styles },
-  { rel: "icon", type: "image/png", href: "/KAVA-black.png" },
-  { rel: "shortcut icon", type: "image/png", href: "/KAVA-black.png" },
-  { rel: "apple-touch-icon", type: "image/png", href: "/KAVA-black.png" },
+  // Traditional favicon for broad compatibility
+  { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
+  { rel: "shortcut icon", type: "image/x-icon", href: "/favicon.ico" },
+  // Modern favicon with size specification
+  { rel: "icon", type: "image/png", sizes: "32x32", href: "/KAVA-black.png" },
+  { rel: "icon", type: "image/png", sizes: "16x16", href: "/KAVA-black.png" },
+  // Apple touch icon for iOS devices
+  { rel: "apple-touch-icon", sizes: "180x180", href: "/KAVA-black.png" },
 ];
 
 // This script detects the saved theme from localStorage and applies it immediately to prevent flash

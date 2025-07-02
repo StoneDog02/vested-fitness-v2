@@ -66,13 +66,7 @@ export const action = async ({ request }: { request: Request }) => {
   if (!Array.isArray(completedMealIds) || !date) {
     return json({ error: "Missing completedMealIds or date" }, { status: 400 });
   }
-  // Log the submission attempt
-  console.log(`📝 Meal submission attempt:`, {
-    userId: user.id,
-    date,
-    completedMealIds,
-    timestamp: new Date().toISOString()
-  });
+
 
   // Insert meal completions (avoid duplicates)
   let insertCount = 0;
@@ -114,10 +108,8 @@ export const action = async ({ request }: { request: Request }) => {
         }
         
         insertCount++;
-        console.log(`✅ Inserted meal completion: user=${user.id}, meal=${mealId}, date=${date}`);
       } else {
         skipCount++;
-        console.log(`⏭️ Skipped duplicate: user=${user.id}, meal=${mealId}, date=${date}`);
       }
     } catch (error) {
       console.error('Unexpected error during meal completion submission:', error);
@@ -125,7 +117,6 @@ export const action = async ({ request }: { request: Request }) => {
     }
   }
   
-  console.log(`✅ Meal submission completed: ${insertCount} inserted, ${skipCount} skipped`);
   return json({ success: true, inserted: insertCount, skipped: skipCount });
 };
 

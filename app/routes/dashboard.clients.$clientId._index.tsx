@@ -11,6 +11,10 @@ import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import { Resend } from "resend";
+
+// Create a Resend instance
+const resend = new Resend(process.env.RESEND_API_KEY);
 import LineChart from "~/components/ui/LineChart";
 import { calculateMacros } from "~/lib/utils";
 import { ResponsiveContainer } from "recharts";
@@ -320,6 +324,19 @@ export const action: import("@remix-run/node").ActionFunction = async ({ request
 
   // CRUD for coach_updates
   if (intent === "addUpdate" && message) {
+    // Get client's information including email notification preference and coach information
+    const { data: clientData } = await supabase
+      .from("users")
+      .select("id, name, email, email_notifications")
+      .eq("id", client.id)
+      .single();
+
+    const { data: coachData } = await supabase
+      .from("users")
+      .select("id, name")
+      .eq("id", coach_id)
+      .single();
+
     const { data, error } = await supabase
       .from("coach_updates")
       .insert({ coach_id, client_id: client.id, message })
@@ -328,6 +345,61 @@ export const action: import("@remix-run/node").ActionFunction = async ({ request
     if (error || !data) {
       return json({ error: error?.message || "Failed to add update" }, { status: 500 });
     }
+
+    // Send email notification if client has email notifications enabled
+    if (clientData?.email_notifications && clientData.email && coachData?.name) {
+      try {
+        await resend.emails.send({
+          from: "Vested Fitness <updates@resend.dev>",
+          to: clientData.email,
+          subject: `New update from your coach ${coachData.name}!`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+              <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; padding: 24px; border-radius: 12px 12px 0 0;">
+                <h1 style="margin: 0; font-size: 24px; font-weight: bold;">New Update from Your Coach!</h1>
+              </div>
+              
+              <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 24px;">
+                <p style="margin: 0 0 16px 0; color: #374151; font-size: 16px;">Hi ${clientData.name},</p>
+                
+                <p style="margin: 0 0 20px 0; color: #374151; font-size: 16px;">
+                  Your coach <strong>${coachData.name}</strong> has sent you a new update!
+                </p>
+                
+                <div style="background: #f3f4f6; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
+                  <p style="margin: 0; color: #374151; font-style: italic;">"${message}"</p>
+                </div>
+                
+                <p style="margin: 20px 0; color: #374151; font-size: 16px;">
+                  Log in to your Vested Fitness dashboard to see this update and respond to your coach.
+                </p>
+                
+                <div style="text-align: center; margin: 32px 0;">
+                  <a href="${process.env.NODE_ENV === 'production' ? 'https://your-domain.com' : 'http://localhost:3000'}/dashboard" 
+                     style="display: inline-block; background-color: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
+                    View Update
+                  </a>
+                </div>
+                
+                <div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 24px; text-align: center;">
+                  <p style="margin: 0; color: #6b7280; font-size: 14px;">
+                    Keep crushing your fitness goals! 💪
+                  </p>
+                  <p style="margin: 8px 0 0 0; color: #6b7280; font-size: 12px;">
+                    You can manage your notification preferences in your dashboard settings.
+                  </p>
+                </div>
+              </div>
+            </div>
+          `,
+        });
+      } catch (emailError) {
+        // Log the email error but don't fail the request
+        console.error("Failed to send email notification:", emailError);
+        // The coach update was still created successfully
+      }
+    }
+
     return json({ update: data });
   }
   if (intent === "editUpdate" && id && message) {

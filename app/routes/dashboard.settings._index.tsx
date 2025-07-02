@@ -5,7 +5,7 @@ import { Link, useLoaderData, useFetcher, useNavigate } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import Modal from "~/components/ui/Modal";
-import ThemeToggle from "~/components/ui/ThemeToggle";
+
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
@@ -28,7 +28,6 @@ type LoaderData = {
     font_size?: string;
     email_notifications?: boolean;
     app_notifications?: boolean;
-    weekly_summary?: boolean;
   };
 };
 
@@ -78,7 +77,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Get user data
   const { data: user, error } = await supabase
     .from("users")
-    .select("id, name, email, avatar_url, font_size, email_notifications, app_notifications, weekly_summary")
+    .select("id, name, email, avatar_url, font_size, email_notifications, app_notifications")
     .eq("auth_id", authId)
     .single();
 
@@ -126,7 +125,7 @@ export default function Settings() {
   const [fontSize, setFontSize] = useState(user.font_size || "medium");
   const [emailNotifications, setEmailNotifications] = useState(user.email_notifications ?? true);
   const [appNotifications, setAppNotifications] = useState(user.app_notifications ?? true);
-  const [weeklySummary, setWeeklySummary] = useState(user.weekly_summary ?? true);
+
   const [avatarUrl, setAvatarUrl] = useState(user.avatar_url);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
@@ -139,7 +138,6 @@ export default function Settings() {
         font_size: fontSize,
         email_notifications: emailNotifications,
         app_notifications: appNotifications,
-        weekly_summary: weeklySummary,
       },
       {
         method: "POST",
@@ -219,7 +217,6 @@ export default function Settings() {
         font_size: newSize,
         email_notifications: emailNotifications,
         app_notifications: appNotifications,
-        weekly_summary: weeklySummary,
       },
       {
         method: "POST",
@@ -540,43 +537,7 @@ export default function Settings() {
         {/* Appearance */}
         <Card title="Appearance">
           <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-medium text-secondary dark:text-alabaster mb-1">
-                Theme
-              </h3>
-              <p className="text-sm text-gray-dark dark:text-gray-light mb-4">
-                Choose between light and dark mode for your dashboard
-              </p>
-              <div className="flex items-center justify-between p-4 border border-gray-light dark:border-davyGray rounded-md">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-white border border-gray-light flex items-center justify-center">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5 text-night"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-night border border-davyGray flex items-center justify-center">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5 text-alabaster"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                    </svg>
-                  </div>
-                </div>
-                <ThemeToggle />
-              </div>
-            </div>
+
 
             <div>
               <h3 className="text-sm font-medium text-secondary dark:text-alabaster mb-1">
@@ -658,17 +619,7 @@ export default function Settings() {
               </Button>
             </div>
 
-            <div>
-              <h3 className="text-sm font-medium text-secondary dark:text-alabaster mb-1">
-                Connected Applications
-              </h3>
-              <p className="text-sm text-gray-dark dark:text-gray-light mb-2">
-                Manage apps that have access to your account
-              </p>
-              <Button variant="outline" size="sm">
-                Manage Applications
-              </Button>
-            </div>
+
 
             <div className="pt-4 border-t border-gray-light dark:border-davyGray">
               <h3 className="text-sm font-medium text-red-500 mb-1">
@@ -746,34 +697,7 @@ export default function Settings() {
               </div>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-medium text-secondary dark:text-alabaster">
-                    Weekly Progress Summary
-                  </h3>
-                  <p className="text-sm text-gray-dark dark:text-gray-light">
-                    Receive a weekly email with your progress summary
-                  </p>
-                </div>
-                <label
-                  className="relative inline-flex items-center cursor-pointer"
-                  htmlFor="weekly-summary"
-                >
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={weeklySummary}
-                    onChange={(e) => setWeeklySummary(e.target.checked)}
-                    id="weekly-summary"
-                  />
-                  <div className="w-11 h-6 bg-gray-light dark:bg-davyGray peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                  <span className="sr-only">
-                    Toggle weekly progress summary
-                  </span>
-                </label>
-              </div>
-            </div>
+
           </div>
         </Card>
       </div>
