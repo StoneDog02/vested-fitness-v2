@@ -64,14 +64,14 @@ export const loader: LoaderFunction = async ({ request }) => {
       coachId = user.role === "coach" ? user.id : user.coach_id;
     }
     if (coachId) {
-      // Get all clients for this coach
+      // Get all active clients for this coach
       const { data: clients } = await supabase
         .from("users")
-        .select("id, name, created_at, updated_at")
+        .select("id, name, created_at, updated_at, status")
         .eq("coach_id", coachId)
-        .eq("role", "client");
+        .eq("role", "client")
+        .neq("status", "inactive"); // Only get active clients
       if (clients) {
-        // TEMP: For testing, treat all clients as active (simulate all are subscribed)
         for (const client of clients) {
           // Compliance: % of workouts completed in last 7 days
           const weekAgo = new Date();

@@ -133,7 +133,8 @@ export const loader: LoaderFunction = async ({ request }) => {
         "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
       )
       .eq("coach_id", coachId)
-      .eq("role", "client");
+      .eq("role", "client")
+      .neq("status", "inactive"); // Only show active clients
     if (error) console.log("[LOADER] Supabase error:", error);
     let clientsWithWeightLogs: typeof clients = [];
     if (data) {

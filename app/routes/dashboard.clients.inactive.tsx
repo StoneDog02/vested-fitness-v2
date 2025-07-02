@@ -1,6 +1,8 @@
 import { json } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
 import Card from "~/components/ui/Card";
+import Button from "~/components/ui/Button";
+import ReactivateClientModal from "~/components/coach/ReactivateClientModal";
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import type { LoaderFunction } from "@remix-run/node";
@@ -12,7 +14,7 @@ import { Buffer } from "buffer";
 type InactiveClient = {
   id: string;
   name: string;
-  lastActive: string;
+  email: string;
   compliance: number;
   inactiveSince: string;
 };
@@ -64,16 +66,31 @@ export const loader: LoaderFunction = async ({ request }) => {
       coachId = user.role === "coach" ? user.id : user.coach_id;
     }
     if (coachId) {
-      // Get all clients for this coach
+      // Get all inactive clients for this coach
       const { data: clients } = await supabase
         .from("users")
-        .select("id, name, created_at, updated_at")
+        .select("id, name, email, created_at, updated_at, status, inactive_since")
         .eq("coach_id", coachId)
-        .eq("role", "client");
+        .eq("role", "client")
+        .eq("status", "inactive"); // Only get inactive clients
       if (clients) {
-        // TEMP: For testing, treat all clients as active (simulate all are subscribed)
-        // Do not include any clients in inactiveClients
-        // (leave inactiveClients as empty array)
+        for (const client of clients) {
+          // Simple compliance calculation - just show 0% for inactive clients
+          const compliance = 0;
+          
+          inactiveClients.push({
+            id: client.id,
+            name: client.name,
+            email: client.email,
+            compliance,
+            inactiveSince: client.inactive_since || client.updated_at, // Use inactive_since if available
+          });
+        }
+        // Sort by inactiveSince desc (most recently inactive first)
+        inactiveClients.sort(
+          (a, b) =>
+            new Date(b.inactiveSince).getTime() - new Date(a.inactiveSince).getTime()
+        );
       }
     }
   }
@@ -83,9 +100,22 @@ export const loader: LoaderFunction = async ({ request }) => {
 export default function InactiveClients() {
   const { inactiveClients } = useLoaderData<typeof loader>();
   const [search, setSearch] = useState("");
+  const [selectedClient, setSelectedClient] = useState<InactiveClient | null>(null);
+  const [isReactivateModalOpen, setIsReactivateModalOpen] = useState(false);
+  
   const filteredClients = inactiveClients.filter((client: InactiveClient) =>
     client.name.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleReactivateClick = (client: InactiveClient) => {
+    setSelectedClient(client);
+    setIsReactivateModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setSelectedClient(null);
+    setIsReactivateModalOpen(false);
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -146,9 +176,6 @@ export default function InactiveClients() {
                 <div>
                   <p className="font-medium">{client.name}</p>
                   <p className="text-sm text-muted-foreground">
-                    Last active {new Date(client.lastActive).toLocaleString()}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
                     Inactive since{" "}
                     {new Date(client.inactiveSince).toLocaleDateString()}
                   </p>
@@ -163,9 +190,17 @@ export default function InactiveClients() {
                   <span className="text-sm font-medium">
                     {client.compliance}%
                   </span>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleReactivateClick(client)}
+                    className="ml-4 bg-green-600 hover:bg-green-700"
+                  >
+                    Reactivate
+                  </Button>
                   <Link
                     to={`/dashboard/clients/${client.id}`}
-                    className="ml-4 text-primary hover:underline text-sm"
+                    className="ml-2 text-primary hover:underline text-sm"
                   >
                     View
                   </Link>
@@ -175,6 +210,16 @@ export default function InactiveClients() {
           )}
         </div>
       </Card>
+
+      <ReactivateClientModal
+        isOpen={isReactivateModalOpen}
+        onClose={handleCloseModal}
+        client={selectedClient ? {
+          id: selectedClient.id,
+          name: selectedClient.name,
+          email: selectedClient.email
+        } : null}
+      />
     </div>
   );
 }

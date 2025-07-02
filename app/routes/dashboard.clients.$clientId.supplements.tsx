@@ -8,6 +8,10 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { useLoaderData, useFetcher, useSearchParams } from "@remix-run/react";
 import { useState, useEffect } from "react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from "@heroicons/react/24/outline";
 
 interface Supplement {
   id: string;
@@ -289,30 +293,7 @@ export default function ClientSupplements() {
   function formatDateShort(date: Date) {
     return `${date.getMonth() + 1}/${date.getDate()}`;
   }
-  function handlePrevWeek() {
-    const prev = new Date(calendarStart);
-    prev.setDate(prev.getDate() - 7);
-    prev.setHours(0, 0, 0, 0);
-    setCurrentWeekStart(prev.toISOString());
-    
-    // Use fetcher for fast data loading
-    const params = new URLSearchParams();
-    params.set("weekStart", prev.toISOString());
-    params.set("clientId", client?.id || "");
-    complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
-  }
-  function handleNextWeek() {
-    const next = new Date(calendarStart);
-    next.setDate(next.getDate() + 7);
-    next.setHours(0, 0, 0, 0);
-    setCurrentWeekStart(next.toISOString());
-    
-    // Use fetcher for fast data loading
-    const params = new URLSearchParams();
-    params.set("weekStart", next.toISOString());
-    params.set("clientId", client?.id || "");
-    complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
-  }
+
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   // Bright color scaling from theme green to red with smooth transitions
   function getBarColor(percent: number) {
@@ -442,23 +423,21 @@ export default function ClientSupplements() {
                   <div className="flex items-center gap-2 text-sm text-gray-500">
                     <button
                       className="p-1 rounded hover:bg-gray-100"
-                      onClick={handlePrevWeek}
+                      onClick={() => {
+                        const prev = new Date(calendarStart);
+                        prev.setDate(prev.getDate() - 7);
+                        setCurrentWeekStart(prev.toISOString());
+                        
+                        // Use fetcher for fast data loading
+                        const params = new URLSearchParams();
+                        params.set("weekStart", prev.toISOString());
+                        params.set("clientId", client?.id || "");
+                        complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
+                      }}
                       aria-label="Previous week"
                       type="button"
                     >
-                      <svg
-                        className="h-5 w-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 19l-7-7 7-7"
-                        />
-                      </svg>
+                      <ChevronLeftIcon className="h-5 w-5" />
                     </button>
                     <span>
                       Week of {formatDateShort(calendarStart)} -{" "}
@@ -466,55 +445,81 @@ export default function ClientSupplements() {
                     </span>
                     <button
                       className="p-1 rounded hover:bg-gray-100"
-                      onClick={handleNextWeek}
+                      onClick={() => {
+                        const next = new Date(calendarStart);
+                        next.setDate(next.getDate() + 7);
+                        setCurrentWeekStart(next.toISOString());
+                        
+                        // Use fetcher for fast data loading
+                        const params = new URLSearchParams();
+                        params.set("weekStart", next.toISOString());
+                        params.set("clientId", client?.id || "");
+                        complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
+                      }}
                       aria-label="Next week"
                       type="button"
                     >
-                      <svg
-                        className="h-5 w-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 5l7 7-7 7"
-                        />
-                      </svg>
+                      <ChevronRightIcon className="h-5 w-5" />
                     </button>
                   </div>
                 </div>
                 <div className="flex flex-col gap-2">
-                  {dayLabels.map((label, i) => (
-                    <div key={label} className="flex items-center gap-3">
-                      <span className="text-xs text-gray-500 w-10 text-left flex-shrink-0">
-                        {label}
-                      </span>
-                      <div className="flex-1" />
-                      <div className="flex items-center w-1/3 min-w-[80px] max-w-[180px]">
-                        <div className="relative w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className="absolute left-0 top-0 h-2 rounded-full"
-                            style={{
-                              width: `${Math.round(
-                                (complianceData[i] || 0) * 100
-                              )}%`,
-                              background: getBarColor(complianceData[i] || 0),
-                              transition: "width 0.3s, background 0.3s",
-                            }}
-                          />
-                        </div>
-                        <span
-                          className="ml-3 text-xs font-medium min-w-[32px] text-right"
-                          style={{ color: getBarColor(complianceData[i] || 0) }}
-                        >
-                          {Math.round((complianceData[i] || 0) * 100)}%
+                  {dayLabels.map((label, i) => {
+                    // Determine if this is today or future/past
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const thisDate = new Date(calendarStart);
+                    thisDate.setDate(calendarStart.getDate() + i);
+                    thisDate.setHours(0, 0, 0, 0);
+                    const isToday = thisDate.getTime() === today.getTime();
+                    const isFuture = thisDate.getTime() > today.getTime();
+                    
+                    // Determine percentage for display
+                    const percentage = Math.round((complianceData[i] || 0) * 100);
+                    let displayPercentage = percentage;
+                    
+                    // For pending days, show 0% in the bar but don't show percentage text
+                    if (isFuture || (isToday && complianceData[i] === 0)) {
+                      displayPercentage = 0;
+                    }
+                    
+                    return (
+                      <div key={label} className="flex items-center gap-4">
+                        <span className="text-xs text-gray-500 w-10 text-left flex-shrink-0">
+                          {label}
                         </span>
+                        <div className="flex-1" />
+                        <div className="flex items-center min-w-[120px] max-w-[200px] w-2/5">
+                          <div className="relative flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="absolute left-0 top-0 h-2 rounded-full"
+                              style={{
+                                width: `${displayPercentage}%`,
+                                background: displayPercentage > 0 ? getBarColor(complianceData[i] || 0) : 'transparent',
+                                transition: "width 0.3s, background 0.3s",
+                              }}
+                            />
+                          </div>
+                          <span
+                            className={`ml-4 text-xs font-medium text-right whitespace-nowrap ${
+                              isToday && complianceData[i] === 0 
+                                ? 'bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20' 
+                                : isFuture || (isToday && complianceData[i] === 0)
+                                ? 'text-gray-500 min-w-[60px]'
+                                : 'min-w-[40px]'
+                            }`}
+                            style={{ 
+                              color: !(isFuture || (isToday && complianceData[i] === 0)) 
+                                ? getBarColor(complianceData[i] || 0)
+                                : undefined
+                            }}
+                          >
+                            {isFuture || (isToday && complianceData[i] === 0) ? 'Pending' : `${percentage}%`}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </Card>

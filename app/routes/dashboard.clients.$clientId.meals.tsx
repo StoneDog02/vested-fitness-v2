@@ -874,13 +874,13 @@ export default function ClientMeals() {
                     }
                     
                     return (
-                      <div key={label} className="flex items-center gap-3">
+                      <div key={label} className="flex items-center gap-4">
                         <span className="text-xs text-gray-500 w-10 text-left flex-shrink-0">
                           {label}
                         </span>
                         <div className="flex-1" />
-                        <div className="flex items-center w-1/3 min-w-[80px] max-w-[180px]">
-                          <div className="relative w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="flex items-center min-w-[120px] max-w-[200px] w-2/5">
+                          <div className="relative flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div
                               className="absolute left-0 top-0 h-2 rounded-full"
                               style={{
@@ -891,12 +891,12 @@ export default function ClientMeals() {
                             />
                           </div>
                           <span
-                            className={`ml-3 text-xs font-medium text-right ${
+                            className={`ml-4 text-xs font-medium text-right whitespace-nowrap ${
                               isToday && compliancePercentages[i] === 0 
-                                ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20' 
+                                ? 'bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20' 
                                 : isFuture || (isToday && compliancePercentages[i] === 0)
-                                ? 'text-gray-500 min-w-[32px]'
-                                : 'min-w-[32px]'
+                                ? 'text-gray-500 min-w-[60px]'
+                                : 'min-w-[40px]'
                             }`}
                             style={{ 
                               color: !(isFuture || (isToday && compliancePercentages[i] === 0)) 

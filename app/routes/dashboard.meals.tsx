@@ -1082,7 +1082,7 @@ export default function Meals() {
                   return (
                     <div
                       key={index}
-                      className="flex items-center justify-between py-3 border-b dark:border-davyGray last:border-0"
+                      className="flex items-center justify-between py-3 px-4 border-b dark:border-davyGray last:border-0"
                     >
                       <div className="text-sm font-medium text-secondary dark:text-alabaster">
                         {day.date}

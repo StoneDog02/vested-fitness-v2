@@ -90,6 +90,7 @@ type Client = {
   updated_at: string;
   created_at: string;
   role: string;
+  status?: string;
 };
 
 type Activity = {
@@ -441,14 +442,14 @@ export const loader: LoaderFunction = async ({ request }) => {
     if (coachId) {
       const { data: clientRows } = await supabase
         .from("users")
-        .select("id, name, updated_at, created_at, role")
+        .select("id, name, updated_at, created_at, role, status")
         .eq("coach_id", coachId)
         .eq("role", "client");
       clients = clientRows ?? [];
       totalClients = clients.length;
-      // TEMP: For testing, treat all clients as active (simulate all are subscribed)
-      activeClients = totalClients;
-      inactiveClients = 0;
+      // Properly categorize clients based on status
+      activeClients = clients.filter(c => c.status !== 'inactive').length;
+      inactiveClients = clients.filter(c => c.status === 'inactive').length;
       
       // Extract client IDs for bulk queries
       const clientIds = clients.map(c => c.id);

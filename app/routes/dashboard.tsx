@@ -48,7 +48,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
     const { data: userData } = await supabase
       .from("users")
-      .select("id, name, email, role, avatar_url")
+      .select("id, name, email, role, avatar_url, font_size")
       .eq("auth_id", authId)
       .single();
     if (userData) {

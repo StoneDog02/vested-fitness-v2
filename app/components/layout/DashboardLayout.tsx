@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "@remix-run/react";
 import { UserRole } from "~/lib/supabase";
 import AccountDrawer from "../ui/AccountDrawer";
@@ -18,6 +18,7 @@ interface DashboardLayoutProps {
     name: string;
     email: string;
     avatar_url?: string;
+    font_size?: string;
   } | null;
 }
 
@@ -29,6 +30,25 @@ export default function DashboardLayout({
   const location = useLocation();
   const [isAccountDrawerOpen, setIsAccountDrawerOpen] = useState(false);
   const [isMenuDrawerOpen, setIsMenuDrawerOpen] = useState(false);
+
+  // Apply font size preference globally
+  useEffect(() => {
+    const fontSizeMap = {
+      small: '0.8125rem', // 13px (was 14px)
+      medium: '1rem',     // 16px (unchanged)
+      large: '1.25rem'    // 20px (was 18px)
+    };
+    
+    const userFontSize = user?.font_size || 'medium';
+    const fontSize = fontSizeMap[userFontSize as keyof typeof fontSizeMap] || '1rem';
+    
+    // Set CSS custom property for font size
+    document.documentElement.style.setProperty('--app-font-size', fontSize);
+    
+    // Also set a class for conditional styles
+    document.body.className = document.body.className.replace(/font-size-\w+/g, '');
+    document.body.classList.add(`font-size-${userFontSize}`);
+  }, [user?.font_size]);
 
   const isActive = (path: string) => {
     // For dashboard path, only match exact

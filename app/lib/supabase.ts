@@ -21,6 +21,8 @@ export interface User {
   email_notifications?: boolean;
   app_notifications?: boolean;
   weekly_summary?: boolean;
+  status?: string;
+  inactive_since?: string;
 }
 
 // Define the database schema
@@ -48,6 +50,8 @@ export interface Database {
           email_notifications?: boolean;
           app_notifications?: boolean;
           weekly_summary?: boolean;
+          status?: string;
+          inactive_since?: string;
         };
         Insert: {
           id?: string;
@@ -69,6 +73,8 @@ export interface Database {
           email_notifications?: boolean;
           app_notifications?: boolean;
           weekly_summary?: boolean;
+          status?: string;
+          inactive_since?: string;
         };
         Update: {
           id?: string;
@@ -90,6 +96,8 @@ export interface Database {
           email_notifications?: boolean;
           app_notifications?: boolean;
           weekly_summary?: boolean;
+          status?: string;
+          inactive_since?: string;
         };
       };
       coach_updates: {

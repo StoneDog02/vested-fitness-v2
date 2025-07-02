@@ -129,6 +129,7 @@ export const action: ActionFunction = async ({ request }) => {
     email,
     name,
     role,
+    status: 'active', // Explicitly set status for new users
     ...(coach_id ? { coach_id } : {}),
     ...(goal ? { goal } : {}),
     slug,
