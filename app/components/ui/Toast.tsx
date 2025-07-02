@@ -137,7 +137,13 @@ interface ToastContainerProps {
 }
 
 export function ToastContainer({ toasts, onRemove }: ToastContainerProps) {
-  if (typeof window === "undefined") return null;
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  if (!isMounted) return null;
 
   return createPortal(
     <div className="fixed top-0 right-0 z-50 p-6 space-y-4 pointer-events-none">
