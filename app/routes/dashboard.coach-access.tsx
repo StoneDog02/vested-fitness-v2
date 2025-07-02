@@ -413,7 +413,36 @@ export default function CoachAccess() {
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData} />
                 </ResponsiveContainer>
-              ) : null}
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full">
+                  <div className="text-center p-8">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 dark:bg-davyGray rounded-full flex items-center justify-center">
+                      <svg
+                        className="w-8 h-8 text-gray-400 dark:text-gray-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                        />
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-medium text-secondary dark:text-alabaster mb-2">
+                      Track Your Progress
+                    </h3>
+                    <p className="text-gray-dark dark:text-gray-light mb-6 max-w-sm">
+                      Start tracking your weight to see your progress over time with visual charts and statistics.
+                    </p>
+                    <Button variant="primary" onClick={() => setShowAddWeight(true)}>
+                      Set Starting Weight
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
             {/* Add Weight button below the graph, centered */}
             {hasWeightLogs && !showAddWeight && (
