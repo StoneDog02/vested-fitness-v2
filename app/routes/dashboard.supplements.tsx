@@ -4,6 +4,11 @@ import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export const meta: MetaFunction = () => {
   return [
@@ -60,10 +65,10 @@ export default function Supplements() {
   const [isDaySubmitted, setIsDaySubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Get current date with offset
-  const currentDate = new Date();
-  currentDate.setDate(currentDate.getDate() + dayOffset);
-  const currentDateString = currentDate.toISOString().split('T')[0];
+  // TODO: In the future, use user-specific timezone from profile if available
+  const userTz = "America/Denver"; // Northern Utah timezone
+  const currentDate = dayjs().tz(userTz).startOf("day");
+  const currentDateString = currentDate.format("YYYY-MM-DD");
 
   // Load supplement completions for the current date
   useEffect(() => {
@@ -101,24 +106,20 @@ export default function Supplements() {
 
   // Load compliance data for the current week
   const loadComplianceData = async () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay()); // Get Sunday
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6); // Get Saturday
+    const today = dayjs().tz(userTz).startOf("day");
+    const startOfWeek = today.startOf("week");
+    const endOfWeek = startOfWeek.endOf("week");
 
     try {
-      const response = await fetch(`/api/get-supplement-completions?startDate=${startOfWeek.toISOString().split('T')[0]}&endDate=${endOfWeek.toISOString().split('T')[0]}`);
+      const response = await fetch(`/api/get-supplement-completions?startDate=${startOfWeek.format("YYYY-MM-DD")}&endDate=${endOfWeek.format("YYYY-MM-DD")}`);
       if (response.ok) {
         const data = await response.json();
         
         // Process compliance data for the week
         const weekComplianceData = [];
         for (let i = 0; i < 7; i++) {
-          const date = new Date(startOfWeek);
-          date.setDate(startOfWeek.getDate() + i);
-          const dateStr = date.toISOString().split('T')[0];
+          const date = startOfWeek.add(i, "day");
+          const dateStr = date.format("YYYY-MM-DD");
           
           const dayCompletions = data.completions.filter((c: any) => 
             c.completed_at.startsWith(dateStr)
@@ -168,17 +169,13 @@ export default function Supplements() {
       case -1:
         return "Yesterday";
       default:
-        return currentDate.toLocaleDateString("en-US", { weekday: "long" });
+        return currentDate.add(offset, "day").format("dddd");
     }
   };
 
   const dateDisplay = {
     title: getRelativeDay(dayOffset),
-    subtitle: currentDate.toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    }),
+    subtitle: currentDate.add(dayOffset, "day").format("MMMM D, YYYY"),
   };
 
   // Optimistic supplement submission handler
@@ -198,11 +195,9 @@ export default function Supplements() {
     setTimeout(() => setShowSuccess(false), 3000);
 
     // Optionally, update complianceData optimistically for today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
-    const todayIdx = (today.getDay() + 7 - startOfWeek.getDay()) % 7;
+    const today = dayjs().tz(userTz).startOf("day");
+    const startOfWeek = today.startOf("week");
+    const todayIdx = (today.day() + 7 - startOfWeek.day()) % 7;
     setComplianceData(prev => {
       const newData = [...prev];
       if (newData[todayIdx]) {
@@ -457,22 +452,19 @@ export default function Supplements() {
               <span className="text-sm font-medium">This Week</span>
               <div className="text-xs text-gray-500">
                 {(() => {
-                  const today = new Date();
-                  const startOfWeek = new Date(today);
-                  startOfWeek.setDate(today.getDate() - today.getDay());
-                  const endOfWeek = new Date(startOfWeek);
-                  endOfWeek.setDate(startOfWeek.getDate() + 6);
-                  return `${startOfWeek.getMonth() + 1}/${startOfWeek.getDate()} - ${endOfWeek.getMonth() + 1}/${endOfWeek.getDate()}`;
+                  const today = dayjs().tz(userTz).startOf("day");
+                  const startOfWeek = today.startOf("week");
+                  const endOfWeek = startOfWeek.endOf("week");
+                  return `${startOfWeek.format("MMM D")} - ${endOfWeek.format("MMM D")}`;
                 })()}
               </div>
             </div>
             <div className="space-y-3">
               {complianceData.map((day: any, index: number) => {
                 // Determine if this is today or future/past
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const isToday = day.date.getTime() === today.getTime();
-                const isFuture = day.date.getTime() > today.getTime();
+                const today = dayjs().tz(userTz).startOf("day");
+                const isToday = day.date.isSame(today, "day");
+                const isFuture = day.date.isAfter(today, "day");
                 
                 // Determine status and display
                 let status: string;
@@ -501,11 +493,7 @@ export default function Supplements() {
                     className="flex items-center justify-between py-2 border-b dark:border-davyGray last:border-0"
                   >
                     <div className="text-sm font-medium text-secondary dark:text-alabaster">
-                      {day.date.toLocaleDateString("en-US", {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                      })}
+                      {day.date.format("ddd, MMM D")}
                     </div>
                     <div className="flex items-center gap-2">
                       <span

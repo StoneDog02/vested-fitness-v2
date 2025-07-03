@@ -115,6 +115,9 @@ interface LoaderData {
   activeWorkoutPlan?: WorkoutPlan | null;
 }
 
+// In-memory cache for client details (expires after 30s)
+const clientDetailCache: Record<string, { data: any; expires: number }> = {};
+
 export const loader: import("@remix-run/node").LoaderFunction = async ({
   params,
 }) => {
@@ -122,6 +125,12 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
+  const clientIdParam = params.clientId;
+
+  // Check cache (per client)
+  if (clientIdParam && clientDetailCache[clientIdParam] && clientDetailCache[clientIdParam].expires > Date.now()) {
+    return json(clientDetailCache[clientIdParam].data);
+  }
 
   // Try to find client by slug first
   let { data: client, error } = await supabase
@@ -129,7 +138,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     .select(
       "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
     )
-    .eq("slug", params.clientId)
+    .eq("slug", clientIdParam)
     .single();
 
   if (client) {
@@ -150,7 +159,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
       .select(
         "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
       )
-      .eq("id", params.clientId)
+      .eq("id", clientIdParam)
       .single();
     if (clientById) {
       clientById.id = String(clientById.id);
@@ -169,8 +178,8 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   }
 
   if (error || !client) {
-    const fallbackClient: MinimalClient = {
-      id: params.clientId || "",
+    const fallbackClient = {
+      id: clientIdParam || "",
       name: "Unknown Client",
       email: "",
       goal: "",
@@ -191,105 +200,117 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     });
   }
 
-  // Fetch updates from the last 7 days for main display
-  const sevenDaysAgo = dayjs().subtract(7, 'day').toISOString();
-  const { data: updates } = await supabase
-    .from("coach_updates")
-    .select("*")
-    .eq("client_id", client.id)
-    .gte("created_at", sevenDaysAgo)
-    .order("created_at", { ascending: false });
+  // Fetch all data in parallel
+  const [
+    updatesRaw,
+    allUpdatesRaw,
+    checkInsRaw,
+    mealPlansRaw,
+    workoutPlansRaw,
+    supplementsRaw,
+    weightLogsRaw
+  ] = await Promise.all([
+    // Updates from last 7 days
+    supabase
+      .from("coach_updates")
+      .select("*")
+      .eq("client_id", client.id)
+      .gte("created_at", dayjs().subtract(7, 'day').toISOString())
+      .order("created_at", { ascending: false }),
+    // All updates
+    supabase
+      .from("coach_updates")
+      .select("*")
+      .eq("client_id", client.id)
+      .order("created_at", { ascending: false }),
+    // Check-ins
+    supabase
+      .from("check_ins")
+      .select("id, notes, created_at")
+      .eq("client_id", client.id)
+      .order("created_at", { ascending: false }),
+    // Meal plans
+    supabase
+      .from("meal_plans")
+      .select("id, title, description, is_active, created_at")
+      .eq("user_id", client.id)
+      .order("created_at", { ascending: false }),
+    // Workout plans
+    supabase
+      .from("workout_plans")
+      .select("id, title, is_active")
+      .eq("user_id", client.id)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false }),
+    // Supplements
+    supabase
+      .from("supplements")
+      .select("id, name, user_id")
+      .eq("user_id", client.id)
+      .order("created_at", { ascending: false }),
+    // Weight logs
+    supabase
+      .from("weight_logs")
+      .select("id, weight, logged_at")
+      .eq("user_id", client.id)
+      .order("logged_at", { ascending: true })
+  ]);
 
-  // Fetch ALL updates for history modal
-  const { data: allUpdates } = await supabase
-    .from("coach_updates")
-    .select("*")
-    .eq("client_id", client.id)
-    .order("created_at", { ascending: false });
-
-  // Fetch check-ins
-  const { data: checkIns } = await supabase
-    .from("check_ins")
-    .select("id, notes, created_at")
-    .eq("client_id", client.id)
-    .order("created_at", { ascending: false });
-
-  // Fetch meal plans (with meals and foods)
-  const { data: mealPlansRaw } = await supabase
-    .from("meal_plans")
-    .select("id, title, description, is_active, created_at")
-    .eq("user_id", client.id)
-    .order("created_at", { ascending: false });
-
+  // Batch fetch all meals for all meal plans
   let mealPlans: any[] = [];
   let activeMealPlan = null;
-  if (mealPlansRaw && mealPlansRaw.length > 0) {
-    mealPlans = await Promise.all(
-      mealPlansRaw.map(
-        async (plan: {
-          id: string;
-          title: string;
-          description: string;
-          is_active: boolean;
-          created_at: string;
-        }) => {
-          const { data: mealsRaw } = await supabase
-            .from("meals")
-            .select("id, name, time, sequence_order")
-            .eq("meal_plan_id", plan.id)
-            .order("sequence_order", { ascending: true });
-          const meals = await Promise.all(
-            (mealsRaw || []).map(async (meal) => {
-              const { data: foods } = await supabase
-                .from("foods")
-                .select("id, name, portion, calories, protein, carbs, fat")
-                .eq("meal_id", meal.id);
-              return { ...meal, foods: foods || [] };
-            })
-          );
-          return { ...plan, meals };
-        }
-      )
-    );
-    activeMealPlan = mealPlans.find((p) => p.is_active) || null;
+  if (mealPlansRaw?.data && mealPlansRaw.data.length > 0) {
+    const mealPlanIds = mealPlansRaw.data.map((plan: any) => plan.id);
+    const { data: mealsRaw } = await supabase
+      .from("meals")
+      .select("id, name, time, sequence_order, meal_plan_id")
+      .in("meal_plan_id", mealPlanIds);
+    const mealIds = (mealsRaw || []).map((meal: any) => meal.id);
+    const { data: foodsRaw } = await supabase
+      .from("foods")
+      .select("id, name, portion, calories, protein, carbs, fat, meal_id")
+      .in("meal_id", mealIds);
+    // Group foods by meal
+    const foodsByMeal: Record<number, Food[]> = {};
+    (foodsRaw || []).forEach((food: any) => {
+      if (!foodsByMeal[food.meal_id]) foodsByMeal[food.meal_id] = [];
+      foodsByMeal[food.meal_id].push(food);
+    });
+    // Group meals by meal plan
+    const mealsByPlan: Record<string, Meal[]> = {};
+    (mealsRaw || []).forEach((meal: any) => {
+      if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
+      mealsByPlan[meal.meal_plan_id].push({ ...meal, foods: foodsByMeal[meal.id] || [] });
+    });
+    // Attach meals to meal plans
+    mealPlans = mealPlansRaw.data.map((plan: any) => ({
+      ...plan,
+      meals: mealsByPlan[plan.id] || []
+    }));
+    activeMealPlan = mealPlans.find((p: any) => p.is_active) || null;
   }
 
-  // Fetch active workout plan
-  const { data: workoutPlansRaw } = await supabase
-    .from("workout_plans")
-    .select("id, title, is_active")
-    .eq("user_id", client.id)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false });
   const activeWorkoutPlan =
-    workoutPlansRaw && workoutPlansRaw.length > 0 ? workoutPlansRaw[0] : null;
+    workoutPlansRaw?.data && workoutPlansRaw.data.length > 0 ? workoutPlansRaw.data[0] : null;
+  const supplements = supplementsRaw?.data || [];
+  const weightLogs = weightLogsRaw?.data || [];
 
-  // Fetch supplements (normal query)
-  const { data: supplements } = await supabase
-    .from("supplements")
-    .select("id, name, user_id")
-    .eq("user_id", client.id)
-    .order("created_at", { ascending: false });
-
-  // Fetch weight logs for the client
-  const { data: weightLogsRaw } = await supabase
-    .from("weight_logs")
-    .select("id, weight, logged_at")
-    .eq("user_id", client.id)
-    .order("logged_at", { ascending: true });
-  const weightLogs = weightLogsRaw || [];
-
-  return json({
+  const result = {
     client,
-    updates: updates || [],
-    allUpdates: allUpdates || [],
-    checkIns: checkIns || [],
+    updates: updatesRaw?.data || [],
+    allUpdates: allUpdatesRaw?.data || [],
+    checkIns: checkInsRaw?.data || [],
     mealPlans: mealPlans || [],
-    supplements: supplements || [],
+    supplements,
     weightLogs,
     activeMealPlan,
     activeWorkoutPlan,
-  });
+  };
+  // Cache result
+  if (clientIdParam) {
+    clientDetailCache[clientIdParam] = { data: result, expires: Date.now() + 30_000 };
+  }
+  return json(result);
 };
 
 export const action: import("@remix-run/node").ActionFunction = async ({ request, params }) => {

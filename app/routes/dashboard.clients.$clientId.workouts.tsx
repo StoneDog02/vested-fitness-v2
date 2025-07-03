@@ -75,6 +75,9 @@ interface WorkoutPlan {
   days: WorkoutPlanDay[];
 }
 
+// In-memory cache for client workout plans (expires after 30s)
+const clientWorkoutsCache: Record<string, { data: any; expires: number }> = {};
+
 export const meta: MetaFunction = () => {
   return [
     { title: "Client Workouts | Vested Fitness" },
@@ -89,26 +92,32 @@ export const loader = async ({
   params: { clientId: string };
   request: Request;
 }) => {
+  const clientIdParam = params.clientId;
+  // Check cache (per client)
+  if (clientIdParam && clientWorkoutsCache[clientIdParam] && clientWorkoutsCache[clientIdParam].expires > Date.now()) {
+    return json(clientWorkoutsCache[clientIdParam].data);
+  }
+
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  // Try to find client by slug first
-  const { data: initialClient, error } = await supabase
-    .from("users")
-    .select("id, name")
-    .eq("slug", params.clientId)
-    .single();
-  let client = initialClient;
-  if (error || !client) {
-    const { data: clientById } = await supabase
+  // Try to find client by slug first, then by id
+  let client: { id: string; name: string } | null = null;
+  const [initialClientResult, clientByIdResult] = await Promise.all([
+    supabase
       .from("users")
       .select("id, name")
-      .eq("id", params.clientId)
-      .single();
-    client = clientById;
-  }
+      .eq("slug", clientIdParam)
+      .single(),
+    supabase
+      .from("users")
+      .select("id, name")
+      .eq("id", clientIdParam)
+      .single(),
+  ]);
+  client = initialClientResult.data || clientByIdResult.data;
   if (!client)
     return json({
       workoutPlans: [],
@@ -118,7 +127,6 @@ export const loader = async ({
       weekStart: null,
     });
 
-  // --- Workout Compliance Calendar Logic ---
   // Get week start from query param, default to current week
   const url = new URL(request.url);
   const weekStartParam = url.searchParams.get("weekStart");
@@ -135,144 +143,159 @@ export const loader = async ({
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  // Fetch workout completions for this client for the week
-  const { data: completions } = await supabase
-    .from("workout_completions")
-    .select("completed_at")
-    .eq("user_id", client.id)
-    .gte("completed_at", weekStart.toISOString().slice(0, 10))
-    .lt("completed_at", weekEnd.toISOString().slice(0, 10));
+  // Step 1: Fetch plans and completions in parallel
+  const [plansRaw, libraryPlansRaw, completionsRaw] = await Promise.all([
+    supabase
+      .from("workout_plans")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
+      .eq("user_id", client.id)
+      .eq("is_template", false)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("workout_plans")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
+      .eq("is_template", true)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("workout_completions")
+      .select("completed_at")
+      .eq("user_id", client.id)
+      .gte("completed_at", weekStart.toISOString().slice(0, 10))
+      .lt("completed_at", weekEnd.toISOString().slice(0, 10)),
+  ]);
+
+  // Collect all plan ids
+  const allPlanIds = [
+    ...(plansRaw?.data?.map((p: any) => p.id) || []),
+    ...(libraryPlansRaw?.data?.map((p: any) => p.id) || []),
+  ];
+
+  // Step 2: Fetch all days for all plans
+  const { data: daysRawData } = await supabase
+    .from("workout_days")
+    .select("id, workout_plan_id, day_of_week, is_rest, workout_name, workout_type")
+    .in("workout_plan_id", allPlanIds.length > 0 ? allPlanIds : [""]);
+
+  // Step 3: Fetch all exercises for all days
+  const allDayIds = (daysRawData || []).map((d: any) => d.id);
+  const { data: exercisesRawData } = await supabase
+    .from("workout_exercises")
+    .select("id, workout_day_id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
+    .in("workout_day_id", allDayIds.length > 0 ? allDayIds : [""]);
+
+  // Group exercises by workout_day_id
+  const exercisesByDay: Record<string, any[]> = {};
+  (exercisesRawData || []).forEach((ex: any) => {
+    if (!exercisesByDay[ex.workout_day_id]) exercisesByDay[ex.workout_day_id] = [];
+    exercisesByDay[ex.workout_day_id].push(ex);
+  });
+
+  // Group days by plan
+  const daysByPlan: Record<string, any[]> = {};
+  (daysRawData || []).forEach((day: any) => {
+    if (!daysByPlan[day.workout_plan_id]) daysByPlan[day.workout_plan_id] = [];
+    daysByPlan[day.workout_plan_id].push(day);
+  });
+
+  // Helper to build days array for a plan
+  const buildDays = (planId: string, planTitle: string, planCreatedAt: string) => {
+    const daysOfWeek = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+    const planDays = daysByPlan[planId] || [];
+    return daysOfWeek.map((day) => {
+      const dayRow = planDays.find((d: any) => d.day_of_week === day);
+      if (!dayRow) return { day, isRest: true, workout: null };
+      if (dayRow.is_rest) return { day, isRest: true, workout: null };
+      // Group exercises for this day
+      const exercisesRaw = exercisesByDay[dayRow.id] || [];
+      const groupsMap = new Map();
+      (exercisesRaw || []).forEach((exercise: any) => {
+        const groupKey = `${exercise.sequence_order}-${exercise.group_type}`;
+        if (!groupsMap.has(groupKey)) {
+          groupsMap.set(groupKey, {
+            type: exercise.group_type,
+            notes: exercise.group_notes,
+            exercises: []
+          });
+        }
+        // Parse sets data from JSONB
+        const setsData = exercise.sets_data || [];
+        const setsCount = setsData.length || 3;
+        const reps = setsData.length > 0 ? (setsData[0].reps || 10) : 10;
+        groupsMap.get(groupKey).exercises.push({
+          name: exercise.exercise_name,
+          videoUrl: exercise.video_url,
+          sets: setsCount,
+          reps: reps,
+          notes: exercise.exercise_description || undefined,
+        });
+      });
+      const groups = Array.from(groupsMap.values());
+      return {
+        day,
+        isRest: false,
+        workout: {
+          id: dayRow.id,
+          title: dayRow.workout_name || `${planTitle} - ${day}`,
+          createdAt: planCreatedAt,
+          exercises: groups,
+        },
+      };
+    });
+  };
+
+  // Attach days to plans
+  const workoutPlans = (plansRaw?.data || []).map((plan: any) => ({
+    id: plan.id,
+    title: plan.title,
+    description: plan.description,
+    createdAt: plan.created_at,
+    isActive: plan.is_active,
+    activatedAt: plan.activated_at,
+    deactivatedAt: plan.deactivated_at,
+    days: buildDays(plan.id, plan.title, plan.created_at),
+  }));
+  const libraryPlans = (libraryPlansRaw?.data || []).map((plan: any) => ({
+    id: plan.id,
+    title: plan.title,
+    description: plan.description,
+    createdAt: plan.created_at,
+    isActive: plan.is_active,
+    activatedAt: plan.activated_at,
+    deactivatedAt: plan.deactivated_at,
+    days: buildDays(plan.id, plan.title, plan.created_at),
+  }));
 
   // Build complianceData: for each day, check if there's a completion
+  const completions = completionsRaw?.data || [];
   const complianceData: number[] = [];
   for (let i = 0; i < 7; i++) {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
     const dayStr = day.toISOString().slice(0, 10);
-    
-    const hasCompletion = (completions || []).some((c: any) => c.completed_at === dayStr);
+    const hasCompletion = completions.some((c: any) => c.completed_at === dayStr);
     complianceData.push(hasCompletion ? 1 : 0);
   }
 
-  // Fetch all workout plans for the client
-  const { data: plansRaw } = await supabase
-    .from("workout_plans")
-    .select(
-      "id, title, description, is_active, created_at, activated_at, deactivated_at"
-    )
-    .eq("user_id", client.id)
-    .eq("is_template", false)
-    .order("created_at", { ascending: false });
-
-  // Fetch library workout plans (templates)
-  const { data: libraryPlansRaw } = await supabase
-    .from("workout_plans")
-    .select(
-      "id, title, description, is_active, created_at, activated_at, deactivated_at"
-    )
-    .eq("is_template", true)
-    .order("created_at", { ascending: false });
-
-  // For each plan, fetch days and workouts (for both client and library plans)
-  const daysOfWeek = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-  ];
-  const fetchDaysAndWorkouts = async (plans: any[]) => {
-    return Promise.all(
-      (plans || []).map(async (plan: any) => {
-        // Fetch days for this plan using new workout_days table
-        const { data: daysRaw } = await supabase
-          .from("workout_days")
-          .select("id, day_of_week, is_rest, workout_name, workout_type")
-          .eq("workout_plan_id", plan.id);
-        
-        // For each day, fetch workout details if not rest
-        const days = await Promise.all(
-          daysOfWeek.map(async (day) => {
-            const dayRow = (daysRaw || []).find((d) => d.day_of_week === day);
-            if (!dayRow) return { day, isRest: true, workout: null };
-            if (dayRow.is_rest) {
-              return { day, isRest: true, workout: null };
-            }
-            
-            // Fetch exercises for this workout day using new workout_exercises table
-            const { data: exercisesRaw } = await supabase
-              .from("workout_exercises")
-              .select("id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
-              .eq("workout_day_id", dayRow.id)
-              .order("sequence_order", { ascending: true });
-            
-            // Group exercises by their sequence order and group type
-            const groupsMap = new Map();
-            (exercisesRaw || []).forEach((exercise) => {
-              const groupKey = `${exercise.sequence_order}-${exercise.group_type}`;
-              if (!groupsMap.has(groupKey)) {
-                groupsMap.set(groupKey, {
-                  type: exercise.group_type,
-                  notes: exercise.group_notes,
-                  exercises: []
-                });
-              }
-              
-              // Parse sets data from JSONB
-              const setsData = exercise.sets_data || [];
-              const setsCount = setsData.length || 3;
-              const reps = setsData.length > 0 ? (setsData[0].reps || 10) : 10;
-              
-              groupsMap.get(groupKey).exercises.push({
-                name: exercise.exercise_name,
-                videoUrl: exercise.video_url,
-                sets: setsCount,
-                reps: reps,
-                notes: exercise.exercise_description || undefined,
-              });
-            });
-            
-            const groups = Array.from(groupsMap.values());
-            
-            return {
-              day,
-              isRest: false,
-              workout: {
-                id: dayRow.id, // Using workout_day id instead of old workout id
-                title: dayRow.workout_name || `${plan.title} - ${day}`,
-                createdAt: plan.created_at, // Use plan creation date
-                exercises: groups,
-              },
-            };
-          })
-        );
-        
-        return {
-          id: plan.id,
-          title: plan.title,
-          description: plan.description,
-          createdAt: plan.created_at,
-          isActive: plan.is_active,
-          activatedAt: plan.activated_at,
-          deactivatedAt: plan.deactivated_at,
-          days,
-        };
-      })
-    );
-  };
-
-  const workoutPlans = await fetchDaysAndWorkouts(plansRaw || []);
-  const libraryPlans = await fetchDaysAndWorkouts(libraryPlansRaw || []);
-
-  return json({
+  const result = {
     workoutPlans,
     libraryPlans,
     client,
     complianceData,
     weekStart: weekStart.toISOString(),
-  });
+  };
+  // Cache result
+  if (clientIdParam) {
+    clientWorkoutsCache[clientIdParam] = { data: result, expires: Date.now() + 30_000 };
+  }
+  return json(result);
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {

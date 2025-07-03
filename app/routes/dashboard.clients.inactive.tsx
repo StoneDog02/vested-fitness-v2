@@ -19,6 +19,9 @@ type InactiveClient = {
   inactiveSince: string;
 };
 
+// In-memory cache for inactive clients (expires after 30s)
+const inactiveClientsCache: Record<string, { data: any; expires: number }> = {};
+
 export const loader: LoaderFunction = async ({ request }) => {
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
@@ -49,6 +52,10 @@ export const loader: LoaderFunction = async ({ request }) => {
     } catch (e) {
       /* ignore */
     }
+  }
+  // Check cache (per coach)
+  if (coachId && inactiveClientsCache[coachId] && inactiveClientsCache[coachId].expires > Date.now()) {
+    return json({ inactiveClients: inactiveClientsCache[coachId].data });
   }
   const inactiveClients: InactiveClient[] = [];
   if (authId) {
@@ -91,6 +98,10 @@ export const loader: LoaderFunction = async ({ request }) => {
           (a, b) =>
             new Date(b.inactiveSince).getTime() - new Date(a.inactiveSince).getTime()
         );
+        // Cache result
+        if (coachId) {
+          inactiveClientsCache[coachId] = { data: inactiveClients, expires: Date.now() + 30_000 };
+        }
       }
     }
   }
@@ -169,42 +180,45 @@ export default function InactiveClients() {
             </div>
           ) : (
             filteredClients.map((client: InactiveClient) => (
-              <div
-                key={client.id}
-                className="flex items-center justify-between"
-              >
-                <div>
-                  <p className="font-medium">{client.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Inactive since{" "}
-                    {new Date(client.inactiveSince).toLocaleDateString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-[60px] h-2 bg-red-500 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-red-500 rounded-full"
-                      style={{ width: `${client.compliance}%` }}
-                    />
+              <div key={client.id} className="relative">
+                <Link
+                  to={`/dashboard/clients/${client.id}`}
+                  className="block p-4 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer group border border-gray-200 dark:border-gray-700"
+                >
+                  <div className="flex flex-row items-center justify-between mb-3 gap-x-6 flex-wrap">
+                    <p className="font-semibold text-lg group-hover:text-primary transition-colors whitespace-nowrap">{client.name}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                      Inactive since {new Date(client.inactiveSince).toLocaleDateString()}
+                    </p>
+                    <svg
+                      className="w-5 h-5 text-gray-400 group-hover:text-primary transition-colors flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
                   </div>
-                  <span className="text-sm font-medium">
-                    {client.compliance}%
-                  </span>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => handleReactivateClick(client)}
-                    className="ml-4 bg-green-600 hover:bg-green-700"
-                  >
-                    Reactivate
-                  </Button>
-                  <Link
-                    to={`/dashboard/clients/${client.id}`}
-                    className="ml-2 text-primary hover:underline text-sm"
-                  >
-                    View
-                  </Link>
-                </div>
+                  <div className="absolute top-4 right-4 z-10">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleReactivateClick(client);
+                      }}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      Reactivate
+                    </Button>
+                  </div>
+                </Link>
               </div>
             ))
           )}

@@ -18,6 +18,9 @@ type ComplianceClient = {
   overallCompliance: number;
 };
 
+// In-memory cache for compliance clients (expires after 30s)
+const complianceClientsCache: Record<string, { data: any; expires: number }> = {};
+
 export const loader: LoaderFunction = async ({ request }) => {
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
@@ -49,6 +52,10 @@ export const loader: LoaderFunction = async ({ request }) => {
       /* ignore */
     }
   }
+  // Check cache (per coach)
+  if (coachId && complianceClientsCache[coachId] && complianceClientsCache[coachId].expires > Date.now()) {
+    return json({ complianceClients: complianceClientsCache[coachId].data });
+  }
   const complianceClients: ComplianceClient[] = [];
   if (authId) {
     const supabase = createClient<Database>(
@@ -71,106 +78,153 @@ export const loader: LoaderFunction = async ({ request }) => {
         .select("id, name")
         .eq("coach_id", coachId)
         .eq("role", "client");
-      if (clients) {
-        for (const client of clients) {
-          // Get compliance data for last 7 days
-          const weekAgo = new Date();
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          
-          // Fetch all completions for the week (consistent date filtering)
-          const weekAgoISO = weekAgo.toISOString();
-          const nowISO = new Date().toISOString();
-          
-          const { data: workoutCompletions } = await supabase
+      if (clients && clients.length > 0) {
+        const clientIds = clients.map((c) => c.id);
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekAgoISO = weekAgo.toISOString();
+        const nowISO = new Date().toISOString();
+        // First, fetch workoutPlansRaw and mealPlansRaw
+        const [
+          workoutPlansRaw,
+          mealPlansRaw
+        ] = await Promise.all([
+          supabase
+            .from("workout_plans")
+            .select("id, user_id, is_active")
+            .in("user_id", clientIds)
+            .eq("is_active", true),
+          supabase
+            .from("meal_plans")
+            .select("id, user_id, is_active")
+            .in("user_id", clientIds)
+            .eq("is_active", true)
+        ]);
+        // Now fetch all completions, workout days, meals, and supplements
+        const [
+          workoutCompletionsRaw,
+          mealCompletionsRaw,
+          supplementCompletionsRaw,
+          workoutDaysRaw,
+          mealsRaw,
+          supplementsRaw
+        ] = await Promise.all([
+          supabase
             .from("workout_completions")
-            .select("id, completed_at")
-            .eq("user_id", client.id)
+            .select("id, completed_at, user_id")
+            .in("user_id", clientIds)
             .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO);
-
-          const { data: mealCompletions } = await supabase
+            .lt("completed_at", nowISO),
+          supabase
             .from("meal_completions")
-            .select("id, completed_at")
-            .eq("user_id", client.id)
+            .select("id, completed_at, user_id")
+            .in("user_id", clientIds)
             .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO);
-
-          const { data: supplementCompletions } = await supabase
+            .lt("completed_at", nowISO),
+          supabase
             .from("supplement_completions")
-            .select("id, completed_at")
-            .eq("user_id", client.id)
+            .select("id, completed_at, user_id")
+            .in("user_id", clientIds)
             .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO);
-          
+            .lt("completed_at", nowISO),
+          supabase
+            .from("workout_days")
+            .select("workout_plan_id, is_rest")
+            .in("workout_plan_id", (workoutPlansRaw.data ?? []).map((p: any) => p.id)),
+          supabase
+            .from("meals")
+            .select("id, meal_plan_id")
+            .in("meal_plan_id", (mealPlansRaw.data ?? []).map((p: any) => p.id)),
+          supabase
+            .from("supplements")
+            .select("id, user_id")
+            .in("user_id", clientIds)
+        ]);
+        // Group data by client
+        const workoutCompletionsByUser: Record<string, any[]> = {};
+        (workoutCompletionsRaw.data ?? []).forEach((comp: any) => {
+          if (!workoutCompletionsByUser[comp.user_id]) workoutCompletionsByUser[comp.user_id] = [];
+          workoutCompletionsByUser[comp.user_id].push(comp);
+        });
+        const mealCompletionsByUser: Record<string, any[]> = {};
+        (mealCompletionsRaw.data ?? []).forEach((comp: any) => {
+          if (!mealCompletionsByUser[comp.user_id]) mealCompletionsByUser[comp.user_id] = [];
+          mealCompletionsByUser[comp.user_id].push(comp);
+        });
+        const supplementCompletionsByUser: Record<string, any[]> = {};
+        (supplementCompletionsRaw.data ?? []).forEach((comp: any) => {
+          if (!supplementCompletionsByUser[comp.user_id]) supplementCompletionsByUser[comp.user_id] = [];
+          supplementCompletionsByUser[comp.user_id].push(comp);
+        });
+        const workoutPlanByUser: Record<string, any> = {};
+        (workoutPlansRaw.data ?? []).forEach((plan: any) => {
+          workoutPlanByUser[plan.user_id] = plan;
+        });
+        const workoutDaysByPlan: Record<string, any[]> = {};
+        (workoutDaysRaw.data ?? []).forEach((day: any) => {
+          if (!workoutDaysByPlan[day.workout_plan_id]) workoutDaysByPlan[day.workout_plan_id] = [];
+          workoutDaysByPlan[day.workout_plan_id].push(day);
+        });
+        const mealPlanByUser: Record<string, any> = {};
+        (mealPlansRaw.data ?? []).forEach((plan: any) => {
+          mealPlanByUser[plan.user_id] = plan;
+        });
+        const mealsByPlan: Record<string, any[]> = {};
+        (mealsRaw.data ?? []).forEach((meal: any) => {
+          if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
+          mealsByPlan[meal.meal_plan_id].push(meal);
+        });
+        const supplementsByUser: Record<string, any[]> = {};
+        (supplementsRaw.data ?? []).forEach((supp: any) => {
+          if (!supplementsByUser[supp.user_id]) supplementsByUser[supp.user_id] = [];
+          supplementsByUser[supp.user_id].push(supp);
+        });
+        // Build complianceClients array
+        complianceClients.push(...clients.map((client) => {
           // Calculate expected activities for this client
           let expectedWorkoutDays = 0;
           let expectedMeals = 0;
           let expectedSupplements = 0;
-          
           // Expected workouts
-          const { data: clientWorkoutPlans } = await supabase
-            .from("workout_plans")
-            .select("id")
-            .eq("user_id", client.id)
-            .eq("is_active", true)
-            .limit(1);
-          
-          if (clientWorkoutPlans && clientWorkoutPlans.length > 0) {
-            const { data: workoutDays } = await supabase
-              .from("workout_days")
-              .select("is_rest")
-              .eq("workout_plan_id", clientWorkoutPlans[0].id);
-            expectedWorkoutDays = (workoutDays || []).filter(day => !day.is_rest).length;
+          const plan = workoutPlanByUser[client.id];
+          if (plan && workoutDaysByPlan[plan.id]) {
+            expectedWorkoutDays = (workoutDaysByPlan[plan.id] || []).filter((day: any) => !day.is_rest).length;
           }
-
           // Expected meals (7 days worth)
-          const { data: clientMealPlans } = await supabase
-            .from("meal_plans")
-            .select("id")
-            .eq("user_id", client.id)
-            .eq("is_active", true)
-            .limit(1);
-          
-          if (clientMealPlans && clientMealPlans.length > 0) {
-            const { data: meals } = await supabase
-              .from("meals")
-              .select("id")
-              .eq("meal_plan_id", clientMealPlans[0].id);
-            expectedMeals = (meals || []).length * 7; // 7 days
+          const mealPlan = mealPlanByUser[client.id];
+          if (mealPlan && mealsByPlan[mealPlan.id]) {
+            expectedMeals = (mealsByPlan[mealPlan.id] || []).length * 7;
           }
-
           // Expected supplements (7 days worth)
-          const { data: clientSupplements } = await supabase
-            .from("supplements")
-            .select("id")
-            .eq("user_id", client.id);
-          expectedSupplements = (clientSupplements || []).length * 7; // 7 days
-          
-          const completedWorkouts = (workoutCompletions ?? []).length;
-          const completedMeals = (mealCompletions ?? []).length;
-          const completedSupplements = (supplementCompletions ?? []).length;
-          
+          const supplements = supplementsByUser[client.id] || [];
+          expectedSupplements = supplements.length * 7;
+          // Completions
+          const completedWorkouts = (workoutCompletionsByUser[client.id] || []).length;
+          const completedMeals = (mealCompletionsByUser[client.id] || []).length;
+          const completedSupplements = (supplementCompletionsByUser[client.id] || []).length;
           // Calculate individual compliance percentages
           const workoutCompliance = expectedWorkoutDays > 0 ? Math.round((completedWorkouts / expectedWorkoutDays) * 100) : 0;
           const mealCompliance = expectedMeals > 0 ? Math.round((completedMeals / expectedMeals) * 100) : 0;
           const supplementCompliance = expectedSupplements > 0 ? Math.round((completedSupplements / expectedSupplements) * 100) : 0;
-          
           // Calculate overall compliance
           const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
           const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
           const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
-          
-          complianceClients.push({
+          return {
             id: client.id,
             name: client.name,
             workoutCompliance,
             mealCompliance,
             supplementCompliance,
             overallCompliance,
-          });
-        }
+          };
+        }));
         // Sort by overall compliance desc
         complianceClients.sort((a, b) => b.overallCompliance - a.overallCompliance);
+        // Cache result
+        if (coachId) {
+          complianceClientsCache[coachId] = { data: complianceClients, expires: Date.now() + 30_000 };
+        }
       }
     }
   }

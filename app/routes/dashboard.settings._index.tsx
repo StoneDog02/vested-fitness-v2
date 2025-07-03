@@ -12,6 +12,9 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 
+// In-memory cache for user settings (expires after 30s)
+const userSettingsCache: Record<string, { data: any; expires: number }> = {};
+
 export const meta: MetaFunction = () => {
   return [
     { title: "Settings | Vested Fitness" },
@@ -69,6 +72,11 @@ export const loader: LoaderFunction = async ({ request }) => {
     throw new Response("Unauthorized", { status: 401 });
   }
 
+  // Check cache (per user)
+  if (userSettingsCache[authId] && userSettingsCache[authId].expires > Date.now()) {
+    return json(userSettingsCache[authId].data);
+  }
+
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
@@ -85,7 +93,10 @@ export const loader: LoaderFunction = async ({ request }) => {
     throw new Response("User not found", { status: 404 });
   }
 
-  return json({ user });
+  const result = { user };
+  // Cache result
+  userSettingsCache[authId] = { data: result, expires: Date.now() + 30_000 };
+  return json(result);
 };
 
 export default function Settings() {

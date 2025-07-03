@@ -12,6 +12,11 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import type { LoaderFunction } from "@remix-run/node";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export const meta: MetaFunction = () => {
   return [
@@ -63,6 +68,11 @@ export const loader: LoaderFunction = async ({ request }) => {
     process.env.SUPABASE_SERVICE_KEY!
   );
 
+  // TODO: In the future, use user-specific timezone from profile if available
+  const userTz = "America/Denver"; // Northern Utah timezone
+  const currentDate = dayjs().tz(userTz).startOf("day");
+  const currentDateStr = currentDate.format("YYYY-MM-DD");
+
   // Get user data
   const { data: user, error } = await supabase
     .from("users")
@@ -73,10 +83,6 @@ export const loader: LoaderFunction = async ({ request }) => {
   if (error || !user) {
     throw new Response("User not found", { status: 404 });
   }
-
-  const currentDate = new Date();
-  currentDate.setHours(0, 0, 0, 0);
-  const currentDateStr = currentDate.toISOString().slice(0, 10);
 
   // Get ALL workout plans for this user (both active and recently deactivated)
   const { data: allPlans, error: plansError } = await supabase

@@ -57,9 +57,10 @@ export const meta: MetaFunction = () => {
   ];
 };
 
+// In-memory cache for coach's clients (expires after 30s)
+const clientsCache: Record<string, { data: any; expires: number }> = {};
+
 export const loader: LoaderFunction = async ({ request }) => {
-
-
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
     (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
@@ -105,7 +106,11 @@ export const loader: LoaderFunction = async ({ request }) => {
     }
   }
 
-  // Fetch all clients for this coach
+  // Check cache (per coach)
+  if (coachId && clientsCache[coachId] && clientsCache[coachId].expires > Date.now()) {
+    return json({ clients: clientsCache[coachId].data });
+  }
+
   let clients: {
     id: string;
     name: string;
@@ -127,7 +132,8 @@ export const loader: LoaderFunction = async ({ request }) => {
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
     );
-    const { data, error } = await supabase
+    // Fetch all clients for this coach
+    const { data: clientRows, error } = await supabase
       .from("users")
       .select(
         "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
@@ -136,80 +142,107 @@ export const loader: LoaderFunction = async ({ request }) => {
       .eq("role", "client")
       .neq("status", "inactive"); // Only show active clients
     if (error) console.log("[LOADER] Supabase error:", error);
-    let clientsWithWeightLogs: typeof clients = [];
-    if (data) {
-      // For each client, fetch their active meal plan, workout plan, supplements, and first weight log
-      clientsWithWeightLogs = await Promise.all(
-        data.map(async (client) => {
-          // Active meal plan
-          const { data: mealPlansRaw } = await supabase
-            .from("meal_plans")
-            .select("id, title, is_active")
-            .eq("user_id", client.id)
-            .eq("is_active", true)
-            .order("created_at", { ascending: false });
-          let activeMealPlan = null;
-          if (mealPlansRaw && mealPlansRaw.length > 0) {
-            const plan = mealPlansRaw[0];
-            const { data: mealsRaw } = await supabase
-              .from("meals")
-              .select("id, name, time, sequence_order")
-              .eq("meal_plan_id", plan.id)
-              .order("sequence_order", { ascending: true });
-            const meals = await Promise.all(
-              (mealsRaw || []).map(async (meal) => {
-                const { data: foods } = await supabase
-                  .from("foods")
-                  .select("id, name, portion, calories, protein, carbs, fat")
-                  .eq("meal_id", meal.id);
-                return { ...meal, foods: foods || [] };
-              })
-            );
-            activeMealPlan = { ...plan, meals };
-          }
-
-          // Active workout plan
-          const { data: workoutPlansRaw } = await supabase
-            .from("workout_plans")
-            .select("id, title, is_active")
-            .eq("user_id", client.id)
-            .eq("is_active", true)
-            .order("created_at", { ascending: false });
-          const activeWorkoutPlan =
-            workoutPlansRaw && workoutPlansRaw.length > 0
-              ? workoutPlansRaw[0]
-              : null;
-
-          // Supplements
-          const { data: supplementsRaw } = await supabase
-            .from("supplements")
-            .select("id, name")
-            .eq("user_id", client.id);
-          const supplements = supplementsRaw || [];
-
-          // First weight log
-          const { data: firstWeightLogRaw } = await supabase
-            .from("weight_logs")
-            .select("weight")
-            .eq("user_id", client.id)
-            .order("logged_at", { ascending: true })
-            .limit(1);
-          const firstWeightLog = firstWeightLogRaw && firstWeightLogRaw.length > 0 ? firstWeightLogRaw[0] : undefined;
-
-          return {
-            ...client,
-            activeMealPlan,
-            activeWorkoutPlan,
-            supplements,
-            firstWeightLog,
-          };
-        })
-      );
+    if (clientRows && clientRows.length > 0) {
+      const clientIds = clientRows.map((c) => c.id);
+      // Batch fetch all related data
+      const [
+        mealPlansRaw,
+        mealsRaw,
+        foodsRaw,
+        workoutPlansRaw,
+        supplementsRaw,
+        firstWeightLogsRaw
+      ] = await Promise.all([
+        supabase
+          .from("meal_plans")
+          .select("id, title, is_active, user_id")
+          .in("user_id", clientIds)
+          .eq("is_active", true),
+        supabase
+          .from("meals")
+          .select("id, name, time, sequence_order, meal_plan_id")
+          .in("meal_plan_id", clientIds.length > 0 ? clientIds : [""]),
+        supabase
+          .from("foods")
+          .select("id, name, portion, calories, protein, carbs, fat, meal_id")
+          .in("meal_id", clientIds.length > 0 ? clientIds : [""]),
+        supabase
+          .from("workout_plans")
+          .select("id, title, is_active, user_id")
+          .in("user_id", clientIds)
+          .eq("is_active", true),
+        supabase
+          .from("supplements")
+          .select("id, name, user_id")
+          .in("user_id", clientIds),
+        supabase
+          .from("weight_logs")
+          .select("weight, user_id, logged_at")
+          .in("user_id", clientIds)
+      ]);
+      // Group data by client
+      const mealPlansByUser: Record<string, MealPlan | null> = {};
+      (mealPlansRaw?.data || []).forEach((plan) => {
+        mealPlansByUser[plan.user_id] = { ...plan, meals: [] };
+      });
+      const mealsByPlan: Record<string, Meal[]> = {};
+      (mealsRaw?.data || []).forEach((meal) => {
+        if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
+        mealsByPlan[meal.meal_plan_id].push({ ...meal, foods: [] });
+      });
+      const foodsByMeal: Record<string, MealFood[]> = {};
+      (foodsRaw?.data || []).forEach((food) => {
+        if (!foodsByMeal[food.meal_id]) foodsByMeal[food.meal_id] = [];
+        foodsByMeal[food.meal_id].push(food);
+      });
+      // Attach foods to meals
+      Object.values(mealsByPlan).forEach((meals) => {
+        meals.forEach((meal) => {
+          meal.foods = foodsByMeal[meal.id] || [];
+        });
+      });
+      // Attach meals to meal plans
+      Object.entries(mealPlansByUser).forEach(([userId, plan]) => {
+        if (plan && mealsByPlan[plan.id]) {
+          plan.meals = mealsByPlan[plan.id];
+        }
+      });
+      // Workout plans
+      const workoutPlansByUser: Record<string, WorkoutPlan | null> = {};
+      (workoutPlansRaw?.data || []).forEach((plan) => {
+        workoutPlansByUser[plan.user_id] = plan;
+      });
+      // Supplements
+      const supplementsByUser: Record<string, Supplement[]> = {};
+      (supplementsRaw?.data || []).forEach((supp) => {
+        if (!supplementsByUser[supp.user_id]) supplementsByUser[supp.user_id] = [];
+        supplementsByUser[supp.user_id].push(supp);
+      });
+      // First weight log
+      const firstWeightLogByUser: Record<string, { weight: number; logged_at: string } | undefined> = {};
+      (firstWeightLogsRaw?.data || []).forEach((log) => {
+        if (!firstWeightLogByUser[log.user_id] ||
+            new Date(log.logged_at) < new Date(firstWeightLogByUser[log.user_id]?.logged_at || Infinity)) {
+          firstWeightLogByUser[log.user_id] = { weight: log.weight, logged_at: log.logged_at };
+        }
+      });
+      // Build clients array
+      clients = clientRows.map((client) => ({
+        ...client,
+        activeMealPlan: mealPlansByUser[client.id] || null,
+        activeWorkoutPlan: workoutPlansByUser[client.id] || null,
+        supplements: supplementsByUser[client.id] || [],
+        firstWeightLog: firstWeightLogByUser[client.id]
+          ? { weight: firstWeightLogByUser[client.id]!.weight }
+          : undefined,
+      }));
     }
-    clients = clientsWithWeightLogs;
   }
-
-  return json({ coachId, clients });
+  // Cache result
+  if (coachId) {
+    clientsCache[coachId] = { data: clients, expires: Date.now() + 30_000 };
+  }
+  return json({ clients });
 };
 
 export default function ClientsIndex() {

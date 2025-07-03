@@ -10,6 +10,11 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import { useMealCompletion } from "~/context/MealCompletionContext";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export const meta: MetaFunction = () => {
   return [
@@ -55,6 +60,12 @@ export const loader: LoaderFunction = async ({ request }) => {
       process.env.SUPABASE_SERVICE_KEY!
     );
     
+    // TODO: In the future, use user-specific timezone from profile if available
+    const userTz = "America/Denver"; // Northern Utah timezone
+    const today = dayjs().tz(userTz).startOf("day");
+    const todayStr = today.format("YYYY-MM-DD");
+    const tomorrowStr = today.add(1, "day").format("YYYY-MM-DD");
+    
     // Get user
     const { data: user, error } = await supabase
       .from("users")
@@ -65,10 +76,6 @@ export const loader: LoaderFunction = async ({ request }) => {
     if (error || !user) {
       throw new Response("User not found", { status: 404 });
     }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().slice(0, 10);
 
     // Get ALL meal plans for this user (both active and recently deactivated)
     const { data: allPlans, error: plansError } = await supabase
@@ -82,32 +89,31 @@ export const loader: LoaderFunction = async ({ request }) => {
     // 1. Show active plans activated before today (normal case)
     // 2. Show plans deactivated today (they were active until today, should show until end of day)
     let activeMealPlan = null;
+    let debugPlan = null;
     if (allPlans && allPlans.length > 0) {
       // First try to find an active plan activated before today
       let planToShow = allPlans.find(plan => {
         if (!plan.is_active) return false;
         if (!plan.activated_at) return true; // Legacy plans without activation date
-        const activatedDate = plan.activated_at.slice(0, 10);
+        const activatedDate = dayjs(plan.activated_at).tz(userTz).format("YYYY-MM-DD");
         return activatedDate < todayStr;
       });
-      
       // If no active plan found, look for plan deactivated today (was active until today)
       if (!planToShow) {
         planToShow = allPlans.find(plan => {
           if (!plan.deactivated_at) return false;
-          const deactivatedDate = plan.deactivated_at.slice(0, 10);
+          const deactivatedDate = dayjs(plan.deactivated_at).tz(userTz).format("YYYY-MM-DD");
           return deactivatedDate === todayStr; // Deactivated today, so show until end of day
         });
       }
-      
       if (planToShow) {
+        debugPlan = planToShow;
         // Get the full plan details
         const { data: mealsRaw } = await supabase
           .from("meals")
           .select("id, name, time, sequence_order")
           .eq("meal_plan_id", planToShow.id)
           .order("sequence_order", { ascending: true });
-
         if (mealsRaw && mealsRaw.length > 0) {
           const meals = await Promise.all(
             mealsRaw.map(async (meal) => {
@@ -142,27 +148,36 @@ export const loader: LoaderFunction = async ({ request }) => {
               };
             })
           );
-
           activeMealPlan = {
             name: planToShow.title,
             date: "", // Could add date range formatting here if needed
             meals,
           };
+          // Debug: Log plan, date, and meals
+          console.log('[MEALS] Selected planToShow:', {
+            id: planToShow.id,
+            title: planToShow.title,
+            activated_at: planToShow.activated_at,
+            is_active: planToShow.is_active
+          });
+          console.log('[MEALS] todayStr:', todayStr, 'tomorrowStr:', tomorrowStr);
+          console.log('[MEALS] Meals fetched:', (meals || []).map(m => ({ id: m.id, name: m.name, time: m.time })));
         }
       }
     }
 
     // Get meal completions for today if we have an active meal plan
-    let mealCompletions: { meal_id: string }[] = [];
-    if (activeMealPlan) {
+    let mealCompletions: { meal_id: string, completed_at: string }[] = [];
+    if (activeMealPlan && debugPlan) {
       const { data: completions } = await supabase
         .from("meal_completions")
-        .select("meal_id")
+        .select("meal_id, completed_at")
         .eq("user_id", user.id)
         .gte("completed_at", todayStr)
-        .lt("completed_at", new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
-      
+        .lt("completed_at", tomorrowStr);
       mealCompletions = completions || [];
+      // Debug: Log completions
+      console.log('[MEALS] Meal completions:', mealCompletions);
     }
 
     return json({

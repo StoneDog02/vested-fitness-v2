@@ -17,6 +17,9 @@ type ActiveClient = {
   activeSince: string;
 };
 
+// In-memory cache for active clients (expires after 30s)
+const activeClientsCache: Record<string, { data: any; expires: number }> = {};
+
 export const loader: LoaderFunction = async ({ request }) => {
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
@@ -48,7 +51,11 @@ export const loader: LoaderFunction = async ({ request }) => {
       /* ignore */
     }
   }
-  const activeClients: ActiveClient[] = [];
+  // Check cache (per coach)
+  if (coachId && activeClientsCache[coachId] && activeClientsCache[coachId].expires > Date.now()) {
+    return json({ activeClients: activeClientsCache[coachId].data });
+  }
+  let activeClients: ActiveClient[] = [];
   if (authId) {
     const supabase = createClient<Database>(
       process.env.SUPABASE_URL!,
@@ -71,63 +78,88 @@ export const loader: LoaderFunction = async ({ request }) => {
         .eq("coach_id", coachId)
         .eq("role", "client")
         .neq("status", "inactive"); // Only get active clients
-      if (clients) {
-        for (const client of clients) {
-          // Compliance: % of workouts completed in last 7 days
-          const weekAgo = new Date();
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          
-          // Get workout completions
-          const { data: workoutCompletions } = await supabase
+      if (clients && clients.length > 0) {
+        const clientIds = clients.map((c) => c.id);
+        // Batch fetch all workout completions and workout plans first
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const [
+          workoutCompletionsRaw,
+          workoutPlansRaw
+        ] = await Promise.all([
+          supabase
             .from("workout_completions")
-            .select("id, completed_at")
-            .eq("user_id", client.id)
-            .gte("completed_at", weekAgo.toISOString().slice(0, 10));
-          
-          // Get expected workout days for this client
-          const { data: clientPlans } = await supabase
+            .select("id, completed_at, user_id")
+            .in("user_id", clientIds)
+            .gte("completed_at", weekAgo.toISOString().slice(0, 10)),
+          supabase
             .from("workout_plans")
-            .select("id")
-            .eq("user_id", client.id)
+            .select("id, user_id, is_active")
+            .in("user_id", clientIds)
             .eq("is_active", true)
-            .limit(1);
-          
+        ]);
+        // Now fetch workout days for all plans
+        const planIds = (workoutPlansRaw.data ?? []).map((p: any) => p.id);
+        let workoutDaysRaw: any[] = [];
+        if (planIds.length > 0) {
+          const { data } = await supabase
+            .from("workout_days")
+            .select("workout_plan_id, is_rest")
+            .in("workout_plan_id", planIds);
+          workoutDaysRaw = data ?? [];
+        }
+        // Group workout plans by user
+        const workoutPlanByUser: Record<string, any> = {};
+        (workoutPlansRaw.data ?? []).forEach((plan: any) => {
+          workoutPlanByUser[plan.user_id] = plan;
+        });
+        // Group workout days by plan
+        const workoutDaysByPlan: Record<string, any[]> = {};
+        (workoutDaysRaw || []).forEach((day: any) => {
+          if (!workoutDaysByPlan[day.workout_plan_id]) workoutDaysByPlan[day.workout_plan_id] = [];
+          workoutDaysByPlan[day.workout_plan_id].push(day);
+        });
+        // Group workout completions by user
+        const workoutCompletionsByUser: Record<string, any[]> = {};
+        (workoutCompletionsRaw.data ?? []).forEach((comp: any) => {
+          if (!workoutCompletionsByUser[comp.user_id]) workoutCompletionsByUser[comp.user_id] = [];
+          workoutCompletionsByUser[comp.user_id].push(comp);
+        });
+        // Build activeClients array
+        activeClients = clients.map((client) => {
+          const plan = workoutPlanByUser[client.id];
           let expectedWorkoutDays = 0;
-          if (clientPlans && clientPlans.length > 0) {
-            const { data: workoutDays } = await supabase
-              .from("workout_days")
-              .select("is_rest")
-              .eq("workout_plan_id", clientPlans[0].id);
-            expectedWorkoutDays = (workoutDays || []).filter(day => !day.is_rest).length;
+          if (plan && workoutDaysByPlan[plan.id]) {
+            expectedWorkoutDays = (workoutDaysByPlan[plan.id] || []).filter((day: any) => !day.is_rest).length;
           }
-          
-          const completedWorkouts = (workoutCompletions ?? []).length;
-          const compliance =
-            expectedWorkoutDays > 0
-              ? Math.round((completedWorkouts / expectedWorkoutDays) * 100)
-              : 0;
-          
+          const completions = workoutCompletionsByUser[client.id] || [];
+          const completedWorkouts = completions.length;
+          const compliance = expectedWorkoutDays > 0 ? Math.round((completedWorkouts / expectedWorkoutDays) * 100) : 0;
           // Last active: use updated_at (or latest workout completion if available)
           let lastActive = client.updated_at;
-          if (workoutCompletions && workoutCompletions.length > 0) {
-            const latestCompletion = workoutCompletions.reduce((latest, w) =>
+          if (completions.length > 0) {
+            const latestCompletion = completions.reduce((latest: any, w: any) =>
               new Date(w.completed_at) > new Date(latest.completed_at) ? w : latest
             );
             lastActive = latestCompletion.completed_at;
           }
-          activeClients.push({
+          return {
             id: client.id,
             name: client.name,
             lastActive,
             compliance,
             activeSince: client.created_at,
-          });
-        }
+          };
+        });
         // Sort by lastActive desc
         activeClients.sort(
           (a, b) =>
             new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime()
         );
+        // Cache result
+        if (coachId) {
+          activeClientsCache[coachId] = { data: activeClients, expires: Date.now() + 30_000 };
+        }
       }
     }
   }
@@ -193,38 +225,34 @@ export default function ActiveClients() {
             </div>
           ) : (
             filteredClients.map((client: ActiveClient) => (
-              <div
+              <Link
                 key={client.id}
-                className="flex items-center justify-between"
+                to={`/dashboard/clients/${client.id}`}
+                className="block p-4 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer group border border-gray-200 dark:border-gray-700"
               >
-                <div>
-                  <p className="font-medium">{client.name}</p>
-                  <p className="text-sm text-muted-foreground">
+                <div className="flex flex-row items-center justify-between mb-3 gap-x-6 flex-wrap">
+                  <p className="font-semibold text-lg group-hover:text-primary transition-colors whitespace-nowrap">{client.name}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
                     Last active {new Date(client.lastActive).toLocaleString()}
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Active since{" "}
-                    {new Date(client.activeSince).toLocaleDateString()}
+                  <p className="text-xs text-gray-500 whitespace-nowrap">
+                    Active since {new Date(client.activeSince).toLocaleDateString()}
                   </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-[60px] h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-green-500 rounded-full"
-                      style={{ width: `${client.compliance}%` }}
-                    />
-                  </div>
-                  <span className="text-sm font-medium">
-                    {client.compliance}%
-                  </span>
-                  <Link
-                    to={`/dashboard/clients/${client.id}`}
-                    className="ml-4 text-primary hover:underline text-sm"
+                  <svg
+                    className="w-5 h-5 text-gray-400 group-hover:text-primary transition-colors flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
                   >
-                    View
-                  </Link>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
                 </div>
-              </div>
+              </Link>
             ))
           )}
         </div>

@@ -40,6 +40,9 @@ const getActivationStatus = (plan: { isActive: boolean; activatedAt?: string }) 
   }
 };
 
+// In-memory cache for client meal plans (expires after 30s)
+const clientMealsCache: Record<string, { data: any; expires: number }> = {};
+
 export const loader = async ({
   params,
   request,
@@ -47,26 +50,32 @@ export const loader = async ({
   params: { clientId: string };
   request: Request;
 }) => {
+  const clientIdParam = params.clientId;
+  // Check cache (per client)
+  if (clientIdParam && clientMealsCache[clientIdParam] && clientMealsCache[clientIdParam].expires > Date.now()) {
+    return json(clientMealsCache[clientIdParam].data);
+  }
+
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  // Try to find client by slug first
-  const { data: initialClient, error } = await supabase
-    .from("users")
-    .select("id, name")
-    .eq("slug", params.clientId)
-    .single();
-  let client = initialClient;
-  if (error || !client) {
-    const { data: clientById } = await supabase
+  // Try to find client by slug first, then by id
+  let client: { id: string; name: string } | null = null;
+  const [initialClientResult, clientByIdResult] = await Promise.all([
+    supabase
       .from("users")
       .select("id, name")
-      .eq("id", params.clientId)
-      .single();
-    client = clientById;
-  }
+      .eq("slug", clientIdParam)
+      .single(),
+    supabase
+      .from("users")
+      .select("id, name")
+      .eq("id", clientIdParam)
+      .single(),
+  ]);
+  client = initialClientResult.data || clientByIdResult.data;
   if (!client)
     return json({
       mealPlans: [],
@@ -91,61 +100,76 @@ export const loader = async ({
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  // Fetch meal plans for the client
-  const { data: mealPlansRaw } = await supabase
-    .from("meal_plans")
-    .select(
-      "id, title, description, is_active, created_at, activated_at, deactivated_at"
-    )
-    .eq("user_id", client.id)
-    .eq("is_template", false)
-    .order("created_at", { ascending: false });
+  // Parallel fetch all plans
+  const [mealPlansRaw, libraryPlansRaw] = await Promise.all([
+    supabase
+      .from("meal_plans")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
+      .eq("user_id", client.id)
+      .eq("is_template", false)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("meal_plans")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
+      .eq("is_template", true)
+      .order("created_at", { ascending: false }),
+  ]);
 
-  // Fetch library meal plans
-  const { data: libraryPlansRaw } = await supabase
-    .from("meal_plans")
-    .select(
-      "id, title, description, is_active, created_at, activated_at, deactivated_at"
-    )
-    .eq("is_template", true)
-    .order("created_at", { ascending: false });
+  // Collect all plan ids
+  const allPlanIds = [
+    ...(mealPlansRaw.data?.map((p: any) => p.id) || []),
+    ...(libraryPlansRaw.data?.map((p: any) => p.id) || []),
+  ];
 
-  // For each meal plan, fetch meals and foods
-  const fetchMealsAndFoods = async (plans: any[]) => {
-    return Promise.all(
-      (plans || []).map(async (plan) => {
-        const { data: mealsRaw } = await supabase
-          .from("meals")
-          .select("id, name, time, sequence_order")
-          .eq("meal_plan_id", plan.id)
-          .order("sequence_order", { ascending: true });
-        const meals = (await Promise.all(
-          (mealsRaw || []).map(async (meal) => {
-            const { data: foods } = await supabase
-              .from("foods")
-              .select("name, portion, calories, protein, carbs, fat")
-              .eq("meal_id", meal.id);
-            return { ...meal, foods: foods || [] };
-          })
-        ))
-        // Filter out meals with no foods
-        .filter((meal) => meal.foods && meal.foods.length > 0);
-        return {
-          id: plan.id,
-          title: plan.title,
-          description: plan.description,
-          createdAt: plan.created_at,
-          isActive: plan.is_active,
-          activatedAt: plan.activated_at,
-          deactivatedAt: plan.deactivated_at,
-          meals,
-        };
-      })
-    );
-  };
+  // Batch fetch all meals for all plans
+  const { data: allMealsRaw } = await supabase
+    .from("meals")
+    .select("id, name, time, sequence_order, meal_plan_id")
+    .in("meal_plan_id", allPlanIds.length > 0 ? allPlanIds : [""])
+    .order("sequence_order", { ascending: true });
 
-  const mealPlans = await fetchMealsAndFoods(mealPlansRaw || []);
-  const libraryPlans = await fetchMealsAndFoods(libraryPlansRaw || []);
+  // Batch fetch all foods for all meals
+  const allMealIds = (allMealsRaw || []).map((m: any) => m.id);
+  const { data: allFoodsRaw } = await supabase
+    .from("foods")
+    .select("name, portion, calories, protein, carbs, fat, meal_id")
+    .in("meal_id", allMealIds.length > 0 ? allMealIds : [""]);
+
+  // Group foods by meal
+  const foodsByMeal: Record<string, any[]> = {};
+  (allFoodsRaw || []).forEach((food: any) => {
+    if (!foodsByMeal[food.meal_id]) foodsByMeal[food.meal_id] = [];
+    foodsByMeal[food.meal_id].push(food);
+  });
+
+  // Group meals by plan
+  const mealsByPlan: Record<string, any[]> = {};
+  (allMealsRaw || []).forEach((meal: any) => {
+    if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
+    mealsByPlan[meal.meal_plan_id].push({ ...meal, foods: foodsByMeal[meal.id] || [] });
+  });
+
+  // Attach meals to plans
+  const mealPlans = (mealPlansRaw.data || []).map((plan: any) => ({
+    id: plan.id,
+    title: plan.title,
+    description: plan.description,
+    createdAt: plan.created_at,
+    isActive: plan.is_active,
+    activatedAt: plan.activated_at,
+    deactivatedAt: plan.deactivated_at,
+    meals: (mealsByPlan[plan.id] || []).filter((meal) => meal.foods && meal.foods.length > 0),
+  }));
+  const libraryPlans = (libraryPlansRaw.data || []).map((plan: any) => ({
+    id: plan.id,
+    title: plan.title,
+    description: plan.description,
+    createdAt: plan.created_at,
+    isActive: plan.is_active,
+    activatedAt: plan.activated_at,
+    deactivatedAt: plan.deactivated_at,
+    meals: (mealsByPlan[plan.id] || []).filter((meal) => meal.foods && meal.foods.length > 0),
+  }));
 
   // Fetch all meal completions for this user for the week
   const { data: completionsRaw } = await supabase
@@ -188,7 +212,12 @@ export const loader = async ({
     complianceData.push(percent);
   }
 
-  return json({ mealPlans, libraryPlans, complianceData, client });
+  const result = { mealPlans, libraryPlans, complianceData, client };
+  // Cache result
+  if (clientIdParam) {
+    clientMealsCache[clientIdParam] = { data: result, expires: Date.now() + 30_000 };
+  }
+  return json(result);
 };
 
 export const meta: MetaFunction = () => {

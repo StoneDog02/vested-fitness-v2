@@ -22,6 +22,9 @@ interface Supplement {
   compliance: number;
 }
 
+// In-memory cache for client supplements (expires after 30s)
+const clientSupplementsCache: Record<string, { data: any; expires: number }> = {};
+
 export const meta: MetaFunction = () => {
   return [
     { title: "Client Supplements | Vested Fitness" },
@@ -36,26 +39,31 @@ export const loader = async ({
   params: { clientId: string };
   request: Request;
 }) => {
+  const clientIdParam = params.clientId;
+  // Check cache (per client)
+  if (clientIdParam && clientSupplementsCache[clientIdParam] && clientSupplementsCache[clientIdParam].expires > Date.now()) {
+    return json(clientSupplementsCache[clientIdParam].data);
+  }
+
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  // Find client by slug or id
-  const { data: initialClient, error } = await supabase
-    .from("users")
-    .select("id")
-    .eq("slug", params.clientId)
-    .single();
-  let client = initialClient;
-  if (error || !client) {
-    const { data: clientById } = await supabase
+  // Find client by slug or id (parallel)
+  const [initialClientResult, clientByIdResult] = await Promise.all([
+    supabase
       .from("users")
       .select("id")
-      .eq("id", params.clientId)
-      .single();
-    client = clientById;
-  }
+      .eq("slug", clientIdParam)
+      .single(),
+    supabase
+      .from("users")
+      .select("id")
+      .eq("id", clientIdParam)
+      .single(),
+  ]);
+  let client = initialClientResult.data || clientByIdResult.data;
   if (!client) {
     return json({
       supplements: [],
@@ -80,19 +88,31 @@ export const loader = async ({
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  // Fetch all supplements for this client
-  const { data: supplementsRaw, error: supplementsError } = await supabase
-    .from("supplements")
-    .select("id, name, dosage, frequency, instructions")
-    .eq("user_id", client.id);
-
-  // Fetch all completions for this user for the week
-  const { data: completionsRaw } = await supabase
-    .from("supplement_completions")
-    .select("supplement_id, completed_at")
-    .eq("user_id", client.id)
-    .gte("completed_at", weekStart.toISOString())
-    .lt("completed_at", weekEnd.toISOString());
+  // Batch fetch all supplements and completions in parallel
+  const [supplementsRaw, completionsRaw, completions7dRaw] = await Promise.all([
+    supabase
+      .from("supplements")
+      .select("id, name, dosage, frequency, instructions")
+      .eq("user_id", client.id),
+    supabase
+      .from("supplement_completions")
+      .select("supplement_id, completed_at")
+      .eq("user_id", client.id)
+      .gte("completed_at", weekStart.toISOString())
+      .lt("completed_at", weekEnd.toISOString()),
+    (() => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const weekAgo = new Date(today);
+      weekAgo.setDate(today.getDate() - 6); // 7 days including today
+      return supabase
+        .from("supplement_completions")
+        .select("supplement_id, completed_at")
+        .eq("user_id", client.id)
+        .gte("completed_at", weekAgo.toISOString())
+        .lte("completed_at", today.toISOString());
+    })(),
+  ]);
 
   // Build complianceData: for each day, percent of supplements completed
   const complianceData: number[] = [];
@@ -100,12 +120,11 @@ export const loader = async ({
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
     const dayStr = day.toISOString().split('T')[0]; // Get YYYY-MM-DD format
-    
     // For each supplement, check if a completion exists for this day
-    const supplementIds = (supplementsRaw || []).map((s) => s.id);
+    const supplementIds = (supplementsRaw.data || []).map((s: any) => s.id);
     let completedCount = 0;
     for (const supplementId of supplementIds) {
-      const found = (completionsRaw || []).find((c) => {
+      const found = (completionsRaw.data || []).find((c: any) => {
         return (
           c.completed_at.startsWith(dayStr) &&
           c.supplement_id === supplementId
@@ -123,40 +142,41 @@ export const loader = async ({
   today.setHours(0, 0, 0, 0);
   const weekAgo = new Date(today);
   weekAgo.setDate(today.getDate() - 6); // 7 days including today
-  const supplements = await Promise.all(
-    (supplementsRaw || []).map(async (supplement) => {
-      // Fetch completions for this supplement in the last 7 days
-      const { data: completions, error: completionsError } = await supabase
-        .from("supplement_completions")
-        .select("completed_at")
-        .eq("supplement_id", supplement.id)
-        .eq("user_id", client.id)
-        .gte("completed_at", weekAgo.toISOString())
-        .lte("completed_at", today.toISOString());
-      // Count unique days with a completion
-      const daysWithCompletion = new Set(
-        (completions || []).map((c) =>
-          new Date(c.completed_at).toISOString().slice(0, 10)
-        )
-      );
-      const compliance = Math.round((daysWithCompletion.size / 7) * 100);
-      return {
-        id: supplement.id,
-        name: supplement.name,
-        dosage: supplement.dosage,
-        frequency: supplement.frequency,
-        instructions: supplement.instructions ?? "",
-        compliance,
-      };
-    })
-  );
+  // Group completions by supplement_id for last 7 days
+  const completions7dBySupp: Record<string, string[]> = {};
+  (completions7dRaw.data || []).forEach((c: any) => {
+    if (!completions7dBySupp[c.supplement_id]) completions7dBySupp[c.supplement_id] = [];
+    completions7dBySupp[c.supplement_id].push(c.completed_at);
+  });
+  const supplements = (supplementsRaw.data || []).map((supplement: any) => {
+    // Count unique days with a completion
+    const daysWithCompletion = new Set(
+      (completions7dBySupp[supplement.id] || []).map((d) =>
+        new Date(d).toISOString().slice(0, 10)
+      )
+    );
+    const compliance = Math.round((daysWithCompletion.size / 7) * 100);
+    return {
+      id: supplement.id,
+      name: supplement.name,
+      dosage: supplement.dosage,
+      frequency: supplement.frequency,
+      instructions: supplement.instructions ?? "",
+      compliance,
+    };
+  });
 
-  return json({
+  const result = {
     supplements,
     complianceData,
     weekStart: weekStart.toISOString(),
-    client: { id: client.id, name: "Client" }, // Add client data for the fetcher
-  });
+    client: { id: client.id, name: "Client" },
+  };
+  // Cache result
+  if (clientIdParam) {
+    clientSupplementsCache[clientIdParam] = { data: result, expires: Date.now() + 30_000 };
+  }
+  return json(result);
 };
 
 export const action = async ({

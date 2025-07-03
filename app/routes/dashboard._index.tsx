@@ -2,7 +2,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData, useMatches, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
-import type { DailyWorkout } from "~/types/workout";
+import type { DailyWorkout, WorkoutType, Exercise } from "~/types/workout";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import ClientInviteModal from "~/components/coach/ClientInviteModal";
@@ -137,9 +137,15 @@ export const loader: LoaderFunction = async ({ request }) => {
     }
   }
 
-  // Check cache (per user)
-  if (authId && dashboardCache[authId] && dashboardCache[authId].expires > Date.now()) {
-    return json(dashboardCache[authId].data);
+  // Invalidate cache if requested (e.g., after meal completion)
+  const url = new URL(request.url);
+  const invalidateCache = url.searchParams.get('invalidateCache') === '1';
+  if (authId && dashboardCache[authId]) {
+    if (invalidateCache) {
+      delete dashboardCache[authId];
+    } else if (dashboardCache[authId].expires > Date.now()) {
+      return json(dashboardCache[authId].data);
+    }
   }
 
   let totalClients = 0;
@@ -164,26 +170,133 @@ export const loader: LoaderFunction = async ({ request }) => {
     if (user) {
       coachId = user.role === "coach" ? user.id : user.coach_id;
       if (user.role === "client") {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const dayOfWeek = today.getDay();
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() - dayOfWeek);
-        weekStart.setHours(0, 0, 0, 0);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 7);
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(startOfDay);
-        endOfDay.setDate(startOfDay.getDate() + 1);
+        // TODO: In the future, use user-specific timezone from profile if available
+        const userTz = "America/Denver"; // Northern Utah timezone
+        const today = dayjs().tz(userTz).startOf("day");
+        const todayStr = today.format("YYYY-MM-DD");
+        const tomorrowStr = today.add(1, "day").format("YYYY-MM-DD");
+        // Get ALL meal plans for this user (both active and recently deactivated)
+        const { data: allPlans } = await supabase
+          .from("meal_plans")
+          .select("id, title, description, created_at, is_active, activated_at, deactivated_at")
+          .eq("user_id", user.id)
+          .eq("is_template", false)
+          .order("activated_at", { ascending: false, nullsFirst: false });
+        // Determine which plan to show to the client (EXACTLY as in dashboard.meals.tsx):
+        let planToShow = null;
+        if (allPlans && allPlans.length > 0) {
+          planToShow = allPlans.find(plan => {
+            if (!plan.is_active) return false;
+            if (!plan.activated_at) return true; // Legacy plans without activation date
+            const activatedDate = dayjs(plan.activated_at).tz(userTz).format("YYYY-MM-DD");
+            return activatedDate < todayStr;
+          });
+          // If no active plan found, look for plan deactivated today (was active until today)
+          if (!planToShow) {
+            planToShow = allPlans.find(plan => {
+              if (!plan.deactivated_at) return false;
+              const deactivatedDate = dayjs(plan.deactivated_at).tz(userTz).format("YYYY-MM-DD");
+              return deactivatedDate === todayStr; // Deactivated today, so show until end of day
+            });
+          }
+        }
+        let todaysMeals: Meal[] = [];
+        let completedMealIds: string[] = [];
+        if (planToShow) {
+          // Fetch all meals for the selected plan, order by sequence_order
+          const { data: mealsRaw, error: mealsError } = await supabase
+            .from("meals")
+            .select("id, name, time, sequence_order")
+            .eq("meal_plan_id", planToShow.id)
+            .order("sequence_order", { ascending: true });
+          if (mealsError) console.error('[DASHBOARD] Meals query error:', mealsError);
+          // For each meal, fetch foods and join food_library for macros
+          todaysMeals = await Promise.all((mealsRaw || []).map(async (meal: any) => {
+            const { data: foodsRaw } = await supabase
+              .from("foods")
+              .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+              .eq("meal_id", meal.id);
+            const foods = (foodsRaw || []).map((food: any) => {
+              const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
+              const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
+              const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) || 0 : Number(food.fat) || 0;
+              const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
+              return {
+                id: String(food.id || ''),
+                name: String(food.name || ''),
+                portion: String(food.portion || ''),
+                calories: isFinite(calories) ? calories : 0,
+                protein: isFinite(protein) ? Math.round(protein) : 0,
+                carbs: isFinite(carbs) ? Math.round(carbs) : 0,
+                fat: isFinite(fat) ? Math.round(fat) : 0,
+              };
+            });
+            // Optionally, sum macros for the meal (or keep as foods only)
+            const totalProtein = foods.reduce((sum, f) => sum + (f.protein || 0), 0);
+            const totalCarbs = foods.reduce((sum, f) => sum + (f.carbs || 0), 0);
+            const totalFat = foods.reduce((sum, f) => sum + (f.fat || 0), 0);
+            const totalCalories = foods.reduce((sum, f) => sum + (f.calories || 0), 0);
+            return {
+              id: meal.id,
+              name: meal.name,
+              time: meal.time,
+              completed: false,
+              foods,
+              calories: totalCalories,
+              protein: totalProtein,
+              carbs: totalCarbs,
+              fat: totalFat,
+              description: meal.description,
+            };
+          }));
+          // Fetch today's meal completions for this plan
+          const { data: completions } = await supabase
+            .from("meal_completions")
+            .select("meal_id, completed_at")
+            .eq("user_id", user.id)
+            .gte("completed_at", todayStr)
+            .lt("completed_at", tomorrowStr);
+          completedMealIds = (completions || []).map((mc: any) => {
+            const mealObj = todaysMeals.find((m) => m.id === mc.meal_id);
+            if (mealObj) {
+              return `${mealObj.id}-${mealObj.name}-${mealObj.time.slice(0,5)}`;
+            }
+            return String(mc.meal_id);
+          });
+        }
+        // Fetch updates and weight logs (needed for dashboard)
+        const [updatesRawResult, weightLogsResult] = await Promise.all([
+          supabase
+            .from("coach_updates")
+            .select("message, created_at")
+            .eq("client_id", user.id)
+            .gte("created_at", todayStr)
+            .lt("created_at", tomorrowStr)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("weight_logs")
+            .select("weight, logged_at")
+            .eq("user_id", user.id)
+            .order("logged_at", { ascending: true })
+        ]);
+        // Build updates
+        const updates = (updatesRawResult.data || []).map((u: any) => ({
+          message: u.message,
+          timestamp: u.created_at ? dayjs(u.created_at).tz(userTz).format("YYYY-MM-DD HH:mm") : ""
+        }));
+        // Weight change
+        let weightChange = 0;
+        if (weightLogsResult.data && weightLogsResult.data.length > 0) {
+          const first = weightLogsResult.data[0].weight;
+          const last = weightLogsResult.data[weightLogsResult.data.length - 1].weight;
+          weightChange = last - first;
+        } else if (user.starting_weight && user.current_weight) {
+          weightChange = user.current_weight - user.starting_weight;
+        }
         // Parallelize all independent queries
         const [
           workoutCompletionsResult,
           activePlansResult,
-          mealPlansResult,
-          mealCompletionsResult,
-          weightLogsResult,
-          updatesRawResult,
           workoutPlansResult,
           supplementsResult,
           supplementCompletionsResult
@@ -192,38 +305,14 @@ export const loader: LoaderFunction = async ({ request }) => {
             .from("workout_completions")
             .select("completed_at")
             .eq("user_id", user.id)
-            .gte("completed_at", weekStart.toISOString().slice(0, 10))
-            .lt("completed_at", weekEnd.toISOString().slice(0, 10)),
+            .gte("completed_at", todayStr)
+            .lt("completed_at", tomorrowStr),
           supabase
             .from("workout_plans")
             .select("id")
             .eq("user_id", user.id)
             .eq("is_active", true)
             .limit(1),
-          supabase
-            .from("meal_plans")
-            .select("id, is_active")
-            .eq("user_id", user.id)
-            .eq("is_active", true)
-            .limit(1),
-          supabase
-            .from("meal_completions")
-            .select("meal_id, completed_at")
-            .eq("user_id", user.id)
-            .gte("completed_at", weekStart.toISOString())
-            .lt("completed_at", weekEnd.toISOString()),
-          supabase
-            .from("weight_logs")
-            .select("weight, logged_at")
-            .eq("user_id", user.id)
-            .order("logged_at", { ascending: true }),
-          supabase
-            .from("coach_updates")
-            .select("message, created_at")
-            .eq("client_id", user.id)
-            .gte("created_at", startOfDay.toISOString())
-            .lt("created_at", endOfDay.toISOString())
-            .order("created_at", { ascending: false }),
           supabase
             .from("workout_plans")
             .select("id, title, is_active")
@@ -238,17 +327,100 @@ export const loader: LoaderFunction = async ({ request }) => {
             .from("supplement_completions")
             .select("supplement_id, completed_at")
             .eq("user_id", user.id)
-            .gte("completed_at", weekStart.toISOString())
-            .lt("completed_at", weekEnd.toISOString())
+            .gte("completed_at", todayStr)
+            .lt("completed_at", tomorrowStr)
         ]);
-        // ...existing logic to process results (reuse your code, just use the results from above)...
-        // Build meals, completedMealIds, and all other clientData fields as before
-        // (Insert the full clientData construction logic here, using the results from the parallel queries)
-        // At the end, cache the result:
-        // Example:
-        // const clientData = { ... };
-        // dashboardCache[authId] = { data: { clientData }, expires: Date.now() + 30_000 };
-        // return json({ clientData });
+
+        // Build today's workout (use string day name for workout_days.day_of_week)
+        let workouts: DailyWorkout[] = [];
+        let planName: string | null = null;
+        let isRestDay: boolean | null = null;
+        if (activePlansResult.data && activePlansResult.data.length > 0) {
+          const workoutPlanId = activePlansResult.data[0].id;
+          const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          const todayName = daysOfWeek[today.day()];
+          // Fetch today's workout day using string day name
+          const { data: daysRaw } = await supabase
+            .from("workout_days")
+            .select("id, workout_plan_id, day_of_week, is_rest, workout_name, workout_type")
+            .eq("workout_plan_id", workoutPlanId)
+            .eq("day_of_week", todayName)
+            .limit(1);
+          if (daysRaw && daysRaw.length > 0) {
+            const day = daysRaw[0];
+            planName = day.workout_name || null;
+            isRestDay = day.is_rest;
+            if (!day.is_rest) {
+              // Fetch all exercises for this day
+              const { data: exercisesRaw } = await supabase
+                .from("workout_exercises")
+                .select("id, workout_day_id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
+                .eq("workout_day_id", day.id)
+                .order("sequence_order", { ascending: true });
+              // Group exercises by group_type
+              const groupsMap: Record<string, any[]> = {};
+              (exercisesRaw || []).forEach((ex) => {
+                if (!groupsMap[ex.group_type]) groupsMap[ex.group_type] = [];
+                groupsMap[ex.group_type].push({
+                  id: ex.id,
+                  name: ex.exercise_name,
+                  description: ex.exercise_description,
+                  type: ex.group_type,
+                  videoUrl: ex.video_url,
+                  sets: ex.sets_data || [],
+                  notes: ex.group_notes,
+                });
+              });
+              const groups = Object.entries(groupsMap).map(([type, exercises]) => ({
+                type: type as WorkoutType,
+                exercises,
+              }));
+              const exercisesFlat = groups.flatMap((g) => g.exercises);
+              workouts = [{
+                id: day.id,
+                name: day.workout_name,
+                exercises: exercisesFlat,
+                date: today.toISOString().slice(0, 10),
+                completed: false,
+                groups,
+              }];
+            } else {
+              workouts = [];
+            }
+          }
+        }
+
+        // Build supplements
+        const supplements = (supplementsResult.data || []).map((s) => ({
+          name: s.name,
+        }));
+
+        // Compliance calculations
+        const workoutCompliance = workoutCompletionsResult.data && activePlansResult.data && activePlansResult.data.length > 0
+          ? Math.round((workoutCompletionsResult.data.length / 7) * 100)
+          : 0;
+        const mealCompliance = workoutCompletionsResult.data && todaysMeals.length > 0
+          ? Math.round((workoutCompletionsResult.data.length / todaysMeals.length) * 100)
+          : 0;
+        const supplementCompliance = supplementCompletionsResult.data && supplements.length > 0
+          ? Math.round((supplementCompletionsResult.data.length / supplements.length) * 100)
+          : 0;
+
+        const clientData: ClientDashboardData = {
+          updates,
+          meals: todaysMeals,
+          workouts,
+          supplements,
+          workoutCompliance,
+          mealCompliance,
+          supplementCompliance,
+          weightChange,
+          planName,
+          isRestDay,
+          completedMealIds,
+        };
+        dashboardCache[authId] = { data: { clientData }, expires: Date.now() + 30_000 };
+        return json({ clientData });
       }
       // ...coach logic: parallelize all independent queries as above, then cache result...
     }
@@ -273,7 +445,7 @@ type SkeletonCardProps = {
   className?: string;
 };
 
-function SkeletonCard({ lines = 3, className = "" }: SkeletonCardProps) {
+function SkeletonCard({ lines = 3, className = "" }: SkeletonCardProps) { 
   return (
     <div className={`space-y-3 ${className}`} aria-busy="true">
       {[...Array(lines)].map((_, i) => (
@@ -296,7 +468,10 @@ export default function Dashboard() {
   // Listen for custom event to revalidate dashboard
   useEffect(() => {
     function handleRevalidate() {
-      revalidator.revalidate();
+      // Reload with cache invalidation param
+      const url = new URL(window.location.href);
+      url.searchParams.set('invalidateCache', '1');
+      window.location.href = url.toString();
     }
     window.addEventListener("meals:completed", handleRevalidate);
     window.addEventListener("workouts:completed", handleRevalidate);
@@ -579,11 +754,12 @@ export default function Dashboard() {
                     const createMealKey = (meal: { id?: string | number; name: string; time: string }) => {
                       return `${meal.id}-${meal.name}-${meal.time.slice(0,5)}`;
                     };
-                    // Use completedMealIds from clientData, not checkedMeals
-                    const completedMealIds = clientData.completedMealIds ?? [];
+                    // Use checkedMeals from MealCompletionContext for instant UI
+                    const checkedMealKeys = checkedMeals ?? [];
                     const nextMeal = (clientData.meals ?? []).find((meal) => {
                       const mealKey = createMealKey(meal);
-                      return !completedMealIds.includes(mealKey);
+                      const isChecked = checkedMealKeys.includes(mealKey);
+                      return !isChecked;
                     });
                     if (!nextMeal) {
                       return <div className="text-green-600 font-semibold">All meals completed for today!</div>;

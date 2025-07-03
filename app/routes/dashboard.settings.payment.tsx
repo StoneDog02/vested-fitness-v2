@@ -1,8 +1,12 @@
 import { useState } from "react";
-import type { MetaFunction } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import type { MetaFunction, LoaderFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { Link, useLoaderData } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
+import { parse } from "cookie";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
 
 export const meta: MetaFunction = () => {
   return [
@@ -13,6 +17,9 @@ export const meta: MetaFunction = () => {
     },
   ];
 };
+
+// In-memory cache for user payment settings (expires after 30s)
+const userPaymentCache: Record<string, { data: any; expires: number }> = {};
 
 // Mock payment data
 const mockPaymentMethods = [
@@ -68,7 +75,60 @@ const mockBillingHistory = [
   },
 ];
 
+export const loader: LoaderFunction = async ({ request }) => {
+  // Get user from auth cookie
+  const cookies = parse(request.headers.get("cookie") || "");
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  let accessToken;
+  if (supabaseAuthCookieKey) {
+    try {
+      const decoded = Buffer.from(
+        cookies[supabaseAuthCookieKey],
+        "base64"
+      ).toString("utf-8");
+      const [access] = JSON.parse(JSON.parse(decoded));
+      accessToken = access;
+    } catch (e) {
+      accessToken = undefined;
+    }
+  }
+  let authId: string | undefined;
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+      authId =
+        decoded && typeof decoded === "object" && "sub" in decoded
+          ? (decoded.sub as string)
+          : undefined;
+    } catch (e) {
+      authId = undefined;
+    }
+  }
+  if (!authId) {
+    throw new Response("Unauthorized", { status: 401 });
+  }
+  // Check cache (per user)
+  if (userPaymentCache[authId] && userPaymentCache[authId].expires > Date.now()) {
+    return json(userPaymentCache[authId].data);
+  }
+  // For now, just return mock data
+  const result = {
+    paymentMethods: mockPaymentMethods,
+    subscription: mockSubscription,
+    billingHistory: mockBillingHistory,
+  };
+  userPaymentCache[authId] = { data: result, expires: Date.now() + 30_000 };
+  return json(result);
+};
+
 export default function PaymentSettings() {
+  const { paymentMethods, subscription, billingHistory } = useLoaderData<{
+    paymentMethods: typeof mockPaymentMethods;
+    subscription: typeof mockSubscription;
+    billingHistory: typeof mockBillingHistory;
+  }>();
   const [showAddCardForm, setShowAddCardForm] = useState(false);
 
   const formatCardBrand = (brand: string) => {
@@ -117,7 +177,7 @@ export default function PaymentSettings() {
         {/* Payment Methods */}
         <Card title="Payment Methods">
           <div className="space-y-4">
-            {mockPaymentMethods.map((method) => (
+            {paymentMethods.map((method) => (
               <div
                 key={method.id}
                 className="flex justify-between items-center p-3 border border-gray-light rounded-md"
@@ -254,14 +314,14 @@ export default function PaymentSettings() {
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="text-sm font-medium text-secondary dark:text-alabaster">
-                  {mockSubscription.plan}
+                  {subscription.plan}
                 </h3>
                 <p className="text-sm text-gray-dark dark:text-gray-300">
-                  ${mockSubscription.amount}/{mockSubscription.interval}
+                  ${subscription.amount}/{subscription.interval}
                 </p>
               </div>
               <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded">
-                {mockSubscription.status}
+                {subscription.status}
               </span>
             </div>
 
@@ -270,7 +330,7 @@ export default function PaymentSettings() {
                 Next Billing Date
               </h3>
               <p className="text-sm text-gray-dark dark:text-gray-300">
-                {formatDate(mockSubscription.nextBillingDate)}
+                {formatDate(subscription.nextBillingDate)}
               </p>
             </div>
 
@@ -279,7 +339,7 @@ export default function PaymentSettings() {
                 Billing History
               </h3>
               <div className="space-y-2">
-                {mockBillingHistory.map((invoice) => (
+                {billingHistory.map((invoice) => (
                   <div
                     key={invoice.id}
                     className="flex justify-between items-center text-sm"
