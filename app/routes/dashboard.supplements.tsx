@@ -49,6 +49,7 @@ export const loader: LoaderFunction = async ({ request }) => {
 export default function Supplements() {
   const { supplements } = useLoaderData<LoaderData>();
   const fetcher = useFetcher();
+  const submitFetcher = useFetcher();
   const [checkedSupplements, setCheckedSupplements] = useState<{
     [key: string]: boolean;
   }>({});
@@ -178,6 +179,48 @@ export default function Supplements() {
       day: "numeric",
       year: "numeric",
     }),
+  };
+
+  // Optimistic supplement submission handler
+  const handleSubmitSupplements = async () => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    // Get all checked supplement IDs
+    const completedSupplementIds = Object.entries(checkedSupplements)
+      .filter(([_, checked]) => checked)
+      .map(([id]) => id);
+
+    // Optimistically update UI
+    setIsDaySubmitted(true);
+    setShowSuccess(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(() => setShowSuccess(false), 3000);
+
+    // Optionally, update complianceData optimistically for today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    const todayIdx = (today.getDay() + 7 - startOfWeek.getDay()) % 7;
+    setComplianceData(prev => {
+      const newData = [...prev];
+      if (newData[todayIdx]) {
+        newData[todayIdx].percentage = 100 * (completedSupplementIds.length / supplements.length);
+        newData[todayIdx].status = completedSupplementIds.length > 0 ? "completed" : "pending";
+      }
+      return newData;
+    });
+
+    // Submit to backend using fetcher
+    submitFetcher.submit(
+      { supplementIds: completedSupplementIds, date: currentDateString },
+      { method: "POST", action: "/api/submit-supplement-completions", encType: "application/json" }
+    );
+    setIsSubmitting(false);
+
+    // Dispatch custom event to trigger dashboard revalidation
+    window.dispatchEvent(new Event("supplements:completed"));
   };
 
   return (
@@ -322,47 +365,7 @@ export default function Supplements() {
                 <Button
                   variant="primary"
                   disabled={isSubmitting || isDaySubmitted}
-                  onClick={async () => {
-                    setIsSubmitting(true);
-                    setSubmitError(null);
-                    
-                    try {
-                      // Get all checked supplement IDs
-                      const completedSupplementIds = Object.entries(checkedSupplements)
-                        .filter(([_, checked]) => checked)
-                        .map(([id]) => id);
-
-                      // Clear all existing completions for this date first, then add new ones
-                      const response = await fetch('/api/submit-supplement-completions', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                          supplementIds: completedSupplementIds,
-                          date: currentDateString,
-                        }),
-                      });
-
-                      if (response.ok) {
-                        setIsDaySubmitted(true);
-                        setShowSuccess(true);
-                        
-                        // Refresh compliance data to update the calendar
-                        await loadComplianceData();
-                        
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                        setTimeout(() => setShowSuccess(false), 3000);
-                      } else {
-                        const errorData = await response.json().catch(() => ({}));
-                        setSubmitError(errorData.error || 'Submission failed.');
-                      }
-                    } catch (error) {
-                      setSubmitError('Submission failed.');
-                    } finally {
-                      setIsSubmitting(false);
-                    }
-                  }}
+                  onClick={handleSubmitSupplements}
                 >
                   <span className="flex items-center gap-2">
                     {isSubmitting ? (

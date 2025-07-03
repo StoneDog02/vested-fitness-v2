@@ -8,12 +8,13 @@ import { Buffer } from "buffer";
 
 export const loader: LoaderFunction = async ({ request }) => {
   const url = new URL(request.url);
-  const dateParam = url.searchParams.get("date");
+  const date = url.searchParams.get("date");
   
-  if (!dateParam) {
+  if (!date) {
     return json({ error: "Date parameter is required" }, { status: 400 });
   }
 
+  // Get user from auth cookie
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
     (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
@@ -32,84 +33,113 @@ export const loader: LoaderFunction = async ({ request }) => {
       accessToken = undefined;
     }
   }
-  
-  let userId: string | undefined;
+
+  let authId: string | undefined;
   if (accessToken) {
     try {
       const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      userId =
+      authId =
         decoded && typeof decoded === "object" && "sub" in decoded
           ? (decoded.sub as string)
           : undefined;
     } catch (e) {
-      userId = undefined;
+      authId = undefined;
     }
   }
-  
-  if (!userId) {
+
+  if (!authId) {
     return json({ error: "Unauthorized" }, { status: 401 });
   }
-  
+
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
-  
-  // Get user row
+
+  // Get user
   const { data: user } = await supabase
     .from("users")
     .select("id")
-    .eq("auth_id", userId)
+    .eq("auth_id", authId)
     .single();
-    
+
   if (!user) {
     return json({ error: "User not found" }, { status: 404 });
   }
-  
-  // Get active workout plan
-  const { data: workoutPlans } = await supabase
+
+  const requestedDate = new Date(date);
+  const requestedDateStr = requestedDate.toISOString().slice(0, 10);
+  const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const dayOfWeek = daysOfWeek[requestedDate.getDay()];
+
+  // Get ALL workout plans for this user (both active and recently deactivated)
+  const { data: allPlans } = await supabase
     .from("workout_plans")
-    .select("id, title, is_active")
+    .select("id, title, activated_at, deactivated_at, is_active")
     .eq("user_id", user.id)
-    .eq("is_active", true)
-    .limit(1);
+    .eq("is_template", false)
+    .order("activated_at", { ascending: false, nullsFirst: false });
+
+  // Find the plan that should be active for the requested date:
+  // 1. Show active plans activated before or on the requested date
+  // 2. Show plans deactivated on the requested date (were active until that day)
+  let activePlanId = null;
+  if (allPlans && allPlans.length > 0) {
+    // First try to find an active plan activated before or on the requested date
+    let planToShow = allPlans.find(plan => {
+      if (!plan.is_active) return false;
+      if (!plan.activated_at) return true; // Legacy plans without activation date
+      const activatedDate = plan.activated_at.slice(0, 10);
+      return activatedDate <= requestedDateStr;
+    });
     
-  if (!workoutPlans || workoutPlans.length === 0) {
+    // If no active plan found, look for plan deactivated on requested date
+    if (!planToShow) {
+      planToShow = allPlans.find(plan => {
+        if (!plan.deactivated_at) return false;
+        const deactivatedDate = plan.deactivated_at.slice(0, 10);
+        return deactivatedDate === requestedDateStr; // Deactivated on requested date
+      });
+    }
+    
+    if (planToShow) {
+      activePlanId = planToShow.id;
+    }
+  }
+
+  if (!activePlanId) {
     return json({ 
-      workout: null, 
-      error: "No active workout plan found" 
+      todaysWorkout: {
+        id: null,
+        name: "No Active Plan",
+        groups: [],
+        allExercises: [],
+        uniqueTypes: [],
+        isRest: false
+      },
+      todaysCompletedGroups: []
     });
   }
-  
-  const planId = workoutPlans[0].id;
-  
-  // Parse the date and get day of week (handle timezone correctly)
-  // Split the date string and create date in local timezone
-  const [year, month, day] = dateParam.split('-').map(Number);
-  const targetDate = new Date(year, month - 1, day); // month is 0-indexed
-  const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const dayOfWeek = daysOfWeek[targetDate.getDay()];
 
-  // Get workout day for the specified day of week
+  // Get workout day for this plan and day of week
   const { data: planDays } = await supabase
     .from("workout_days")
     .select("id, day_of_week, is_rest, workout_name, workout_type")
-    .eq("workout_plan_id", planId)
+    .eq("workout_plan_id", activePlanId)
     .eq("day_of_week", dayOfWeek)
     .limit(1);
 
   if (!planDays || planDays.length === 0 || planDays[0].is_rest) {
-    // Rest day
-    return json({
-      workout: {
+    return json({ 
+      todaysWorkout: {
         id: null,
         name: "Rest Day",
         groups: [],
         allExercises: [],
         uniqueTypes: [],
-        isRest: true,
-        dayOfWeek: dayOfWeek
-      }
+        isRest: true
+      },
+      todaysCompletedGroups: []
     });
   }
 
@@ -159,25 +189,23 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Get all unique types
   const uniqueTypes = Array.from(new Set(groups.map((g) => g.type)));
 
-  // Get completion data for this specific date
-  const dateStr = targetDate.toISOString().slice(0, 10);
-  const { data: completionData } = await supabase
+  // Get completion data for the requested date
+  const { data: completion } = await supabase
     .from("workout_completions")
     .select("completed_groups")
     .eq("user_id", user.id)
-    .eq("completed_at", dateStr)
+    .eq("completed_at", requestedDateStr)
     .single();
 
   return json({
-    workout: {
+    todaysWorkout: {
       id: workoutDay.id,
-      name: workoutDay.workout_name || "Workout",
+      name: workoutDay.workout_name || "Today's Workout",
       groups,
       allExercises,
       uniqueTypes,
-      isRest: false,
-      dayOfWeek: dayOfWeek
+      isRest: false
     },
-    completedGroups: completionData?.completed_groups || []
+    todaysCompletedGroups: completion?.completed_groups || [],
   });
 }; 

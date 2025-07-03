@@ -1,12 +1,12 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useMatches, Link } from "@remix-run/react";
+import { useLoaderData, useMatches, Link, useRevalidator } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import type { DailyWorkout } from "~/types/workout";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import ClientInviteModal from "~/components/coach/ClientInviteModal";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { parse } from "cookie";
 import type { LoaderFunction } from "@remix-run/node";
 import jwt from "jsonwebtoken";
@@ -15,6 +15,7 @@ import { useMealCompletion } from "../context/MealCompletionContext";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
+import React from "react";
 
 // Configure dayjs
 dayjs.extend(utc);
@@ -284,7 +285,7 @@ export const loader: LoaderFunction = async ({ request }) => {
               .lt("completed_at", endOfDay.toISOString());
             const mealIdToKey: Record<string, string> = {};
             for (const meal of mealsRaw) {
-              mealIdToKey[String(meal.id)] = `${meal.id}-${meal.name}-${meal.time}`;
+              mealIdToKey[String(meal.id)] = `${meal.id}-${meal.name}-${meal.time.slice(0,5)}`;
             }
             completedMealIds = (todayCompletions ?? []).map((c: any) => mealIdToKey[String(c.meal_id)]).filter(Boolean);
           }
@@ -905,6 +906,22 @@ export default function Dashboard() {
   const parentData = matches.find((match) => match.id === "routes/dashboard")
     ?.data as { role: "coach" | "client" };
   const role = parentData?.role;
+  const revalidator = useRevalidator();
+  
+  // Listen for custom event to revalidate dashboard
+  useEffect(() => {
+    function handleRevalidate() {
+      revalidator.revalidate();
+    }
+    window.addEventListener("meals:completed", handleRevalidate);
+    window.addEventListener("workouts:completed", handleRevalidate);
+    window.addEventListener("supplements:completed", handleRevalidate);
+    return () => {
+      window.removeEventListener("meals:completed", handleRevalidate);
+      window.removeEventListener("workouts:completed", handleRevalidate);
+      window.removeEventListener("supplements:completed", handleRevalidate);
+    };
+  }, [revalidator]);
   
   return (
     <>
@@ -1150,14 +1167,14 @@ export default function Dashboard() {
                 ) : (() => {
                     // Create meal key function to match the one used in meals page
                     const createMealKey = (meal: { id?: string | number; name: string; time: string }) => {
-                      return `${meal.id}-${meal.name}-${meal.time}`;
+                      return `${meal.id}-${meal.name}-${meal.time.slice(0,5)}`;
                     };
-                    
+                    // Use completedMealIds from clientData, not checkedMeals
+                    const completedMealIds = clientData.completedMealIds ?? [];
                     const nextMeal = (clientData.meals ?? []).find((meal) => {
                       const mealKey = createMealKey(meal);
-                      return !checkedMeals.includes(mealKey);
+                      return !completedMealIds.includes(mealKey);
                     });
-                    
                     if (!nextMeal) {
                       return <div className="text-green-600 font-semibold">All meals completed for today!</div>;
                     }

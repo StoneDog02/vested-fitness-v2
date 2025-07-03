@@ -21,6 +21,26 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 
+// Helper function to determine activation status for coaches
+const getActivationStatus = (plan: { isActive: boolean; activatedAt: string | null }) => {
+  if (!plan.isActive) return null;
+  
+  if (!plan.activatedAt) return "Active"; // Legacy plans without activation date
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+  const activatedDateStr = plan.activatedAt.slice(0, 10);
+  
+  if (activatedDateStr < todayStr) {
+    return "Active"; // Activated before today
+  } else if (activatedDateStr === todayStr) {
+    return "Will Activate Tomorrow"; // Activated today
+  } else {
+    return "Scheduled"; // Activated in the future (edge case)
+  }
+};
+
 interface Group {
   type: WorkoutType;
   notes?: string;
@@ -952,8 +972,12 @@ export default function ClientWorkouts() {
                             {workout.title}
                           </h3>
                           {workout.isActive ? (
-                            <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
-                              Active
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              getActivationStatus(workout) === "Will Activate Tomorrow" 
+                                ? "bg-orange-500 text-white" 
+                                : "bg-primary text-white"
+                            }`}>
+                              {getActivationStatus(workout)}
                             </span>
                           ) : (
                             <fetcher.Form method="post">
@@ -1041,8 +1065,12 @@ export default function ClientWorkouts() {
                             {workout.title}
                           </h3>
                           {workout.isActive ? (
-                            <span className="px-2 py-1 text-xs bg-primary text-white rounded-full">
-                              Active
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              getActivationStatus(workout) === "Will Activate Tomorrow" 
+                                ? "bg-orange-500 text-white" 
+                                : "bg-primary text-white"
+                            }`}>
+                              {getActivationStatus(workout)}
                             </span>
                           ) : (
                             <fetcher.Form method="post">

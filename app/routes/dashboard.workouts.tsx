@@ -21,10 +21,12 @@ export const meta: MetaFunction = () => {
 };
 
 export const loader: LoaderFunction = async ({ request }) => {
+  // Get user from auth cookie
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
     (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
   );
+  
   let accessToken;
   if (supabaseAuthCookieKey) {
     try {
@@ -38,179 +40,135 @@ export const loader: LoaderFunction = async ({ request }) => {
       accessToken = undefined;
     }
   }
-  let userId: string | undefined;
+
+  let authId: string | undefined;
   if (accessToken) {
     try {
       const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      userId =
+      authId =
         decoded && typeof decoded === "object" && "sub" in decoded
           ? (decoded.sub as string)
           : undefined;
     } catch (e) {
-      userId = undefined;
+      authId = undefined;
     }
   }
-  if (!userId) return json({ todaysWorkout: null, complianceData: [0, 0, 0, 0, 0, 0, 0] });
-  
+
+  if (!authId) {
+    throw new Response("Unauthorized", { status: 401 });
+  }
+
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
-  
-  // Get user row
-  const { data: user } = await supabase
+
+  // Get user data
+  const { data: user, error } = await supabase
     .from("users")
-    .select("id")
-    .eq("auth_id", userId)
+    .select("id, name, email, avatar_url")
+    .eq("auth_id", authId)
     .single();
-  if (!user) return json({ todaysWorkout: null, complianceData: [0, 0, 0, 0, 0, 0, 0] });
-  
-  // Get active workout plan
-  const { data: workoutPlans } = await supabase
-    .from("workout_plans")
-    .select("id, title, is_active")
-    .eq("user_id", user.id)
-    .eq("is_active", true)
-    .limit(1);
-  if (!workoutPlans || workoutPlans.length === 0) return json({ todaysWorkout: null, complianceData: [0, 0, 0, 0, 0, 0, 0] });
-  
-  const planId = workoutPlans[0].id;
-  const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  
-  // Get today's workout
-  const today = new Date();
-  const todayDay = daysOfWeek[today.getDay()];
 
-  const { data: planDays } = await supabase
-    .from("workout_days")
-    .select("id, day_of_week, is_rest, workout_name, workout_type")
-    .eq("workout_plan_id", planId)
-    .eq("day_of_week", todayDay)
-    .limit(1);
-
-  if (!planDays || planDays.length === 0 || planDays[0].is_rest) {
-    // Even on rest days, return structure for submission
-    const workoutCompletion = {
-      id: null,
-      name: "Rest Day",
-      groups: [],
-      allExercises: [],
-      uniqueTypes: [],
-      isRest: true
-    };
-    
-    // Still calculate compliance for the week
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
-    startOfWeek.setHours(0, 0, 0, 0);
-    
-    const complianceData = await calculateWeeklyCompliance(supabase, user.id, startOfWeek);
-    
-    return json({ todaysWorkout: workoutCompletion, complianceData, todaysCompletedGroups: [] });
+  if (error || !user) {
+    throw new Response("User not found", { status: 404 });
   }
 
-  const workoutDay = planDays[0];
+  const currentDate = new Date();
+  currentDate.setHours(0, 0, 0, 0);
+  const currentDateStr = currentDate.toISOString().slice(0, 10);
 
-  // Fetch exercises for this workout day
-  const { data: exercisesRaw } = await supabase
-    .from("workout_exercises")
-    .select("id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data")
-    .eq("workout_day_id", workoutDay.id)
-    .order("sequence_order", { ascending: true });
+  // Get ALL workout plans for this user (both active and recently deactivated)
+  const { data: allPlans, error: plansError } = await supabase
+    .from("workout_plans")
+    .select("id, title, description, created_at, is_active, activated_at, deactivated_at")
+    .eq("user_id", user.id)
+    .eq("is_template", false)
+    .order("activated_at", { ascending: false, nullsFirst: false });
 
-  // Group exercises by their group type and sequence order
-  const groupsMap = new Map();
-  (exercisesRaw || []).forEach((exercise) => {
-    const groupKey = `${exercise.sequence_order}-${exercise.group_type}`;
-    if (!groupsMap.has(groupKey)) {
-      groupsMap.set(groupKey, {
-        id: groupKey,
-        type: exercise.group_type,
-        exercises: []
+  // Determine which plan to show to the client:
+  // 1. Show active plans activated before today (normal case)
+  // 2. Show plans deactivated today (they were active until today, should show until end of day)
+  let activeWorkoutPlan = null;
+  if (allPlans && allPlans.length > 0) {
+    // First try to find an active plan activated before today
+    let planToShow = allPlans.find(plan => {
+      if (!plan.is_active) return false;
+      if (!plan.activated_at) return true; // Legacy plans without activation date
+      const activatedDate = plan.activated_at.slice(0, 10);
+      return activatedDate < currentDateStr;
+    });
+    
+    // If no active plan found, look for plan deactivated today (was active until today)
+    if (!planToShow) {
+      planToShow = allPlans.find(plan => {
+        if (!plan.deactivated_at) return false;
+        const deactivatedDate = plan.deactivated_at.slice(0, 10);
+        return deactivatedDate === currentDateStr; // Deactivated today, so show until end of day
       });
     }
     
-    // Parse sets data from JSONB
-    const setsData = exercise.sets_data || [];
-    
-    groupsMap.get(groupKey).exercises.push({
-      id: exercise.id,
-      name: exercise.exercise_name,
-      description: exercise.exercise_description,
-      videoUrl: exercise.video_url,
-      type: exercise.group_type,
-      sets: setsData.map((set: any) => ({
-        setNumber: set.set_number,
-        reps: set.reps,
-        completed: false,
-      })),
-    });
-  });
+    if (planToShow) {
+      // Get the full plan details with workout days
+      const { data: workoutDaysRaw } = await supabase
+        .from("workout_days")
+        .select("id, day_of_week, is_rest, workout_name, workout_type")
+        .eq("workout_plan_id", planToShow.id)
+        .order("day_of_week");
 
-  const groups = Array.from(groupsMap.values());
-  
-  // Flatten all exercises for the table
-  const allExercises = groups.flatMap((g) => g.exercises);
-  
-  // Get all unique types
-  const uniqueTypes = Array.from(new Set(groups.map((g) => g.type)));
+      const workoutDays = await Promise.all(
+        (workoutDaysRaw || []).map(async (day) => {
+          if (day.is_rest) {
+            return {
+              dayOfWeek: day.day_of_week,
+              isRest: true,
+              exercises: [],
+            };
+          }
 
-  // Calculate weekly compliance
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
-  
-  const complianceData = await calculateWeeklyCompliance(supabase, user.id, startOfWeek);
-  
-  // Get today's completion data to pre-populate checkboxes
-  const todayStr = today.toISOString().slice(0, 10);
-  const { data: todaysCompletion } = await supabase
-    .from("workout_completions")
-    .select("completed_groups")
-    .eq("user_id", user.id)
-    .eq("completed_at", todayStr)
-    .single();
-  
+          const { data: exercisesRaw } = await supabase
+            .from("workout_exercises")
+            .select("exercise_name, exercise_description, sets_data, group_type, group_notes, sequence_order")
+            .eq("workout_day_id", day.id)
+            .order("sequence_order");
+
+          const exercises = (exercisesRaw || []).map((exercise) => ({
+            name: exercise.exercise_name,
+            description: exercise.exercise_description || "",
+            sets: exercise.sets_data || [],
+            groupType: exercise.group_type,
+            groupNotes: exercise.group_notes || "",
+          }));
+
+          return {
+            dayOfWeek: day.day_of_week,
+            isRest: false,
+            workoutName: day.workout_name || "",
+            workoutType: day.workout_type || "",
+            exercises,
+          };
+        })
+      );
+
+      activeWorkoutPlan = {
+        id: planToShow.id,
+        name: planToShow.title,
+        description: planToShow.description || "",
+        days: workoutDays,
+      };
+    }
+  }
+
   return json({
-    todaysWorkout: {
-      id: workoutDay.id,
-      name: workoutDay.workout_name || "Today's Workout",
-      groups,
-      allExercises,
-      uniqueTypes,
-      isRest: false
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatar_url: user.avatar_url,
     },
-    complianceData,
-    todaysCompletedGroups: todaysCompletion?.completed_groups || [],
+    workoutPlan: activeWorkoutPlan,
   });
 };
-
-// Helper function to calculate weekly compliance
-async function calculateWeeklyCompliance(supabase: any, userId: string, startOfWeek: Date) {
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 7);
-  
-  // Get workout completions for the week
-  const { data: completions } = await supabase
-    .from("workout_completions")
-    .select("completed_at")
-    .eq("user_id", userId)
-    .gte("completed_at", startOfWeek.toISOString().slice(0, 10))
-    .lt("completed_at", endOfWeek.toISOString().slice(0, 10));
-  
-  // For each day of the week, check if there's a completion
-  const complianceData = [];
-  for (let i = 0; i < 7; i++) {
-    const day = new Date(startOfWeek);
-    day.setDate(startOfWeek.getDate() + i);
-    const dayStr = day.toISOString().slice(0, 10);
-    
-    const hasCompletion = (completions || []).some((c: any) => c.completed_at === dayStr);
-    complianceData.push(hasCompletion ? 1 : 0);
-  }
-  
-  return complianceData;
-}
 
 export default function Workouts() {
   const { todaysWorkout, complianceData: initialComplianceData, todaysCompletedGroups } = useLoaderData<{ 
@@ -236,6 +194,7 @@ export default function Workouts() {
   const [currentDayWorkout, setCurrentDayWorkout] = useState(todaysWorkout);
   const [isLoadingWorkout, setIsLoadingWorkout] = useState(false);
   const weekFetcher = useFetcher<{ workouts: Record<string, any>, completions: Record<string, string[]> }>();
+  const submitFetcher = useFetcher();
   
   // Track current week and cached workout data
   const [currentWeekStart, setCurrentWeekStart] = useState(() => {
@@ -254,23 +213,82 @@ export default function Workouts() {
     setComplianceData(initialComplianceData);
   }, [initialComplianceData]);
 
-  // Initialize completed groups and submission status based on today's completion data
+  // Calculate the current date with offset
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
+  const currentDate = new Date(today);
+  currentDate.setDate(today.getDate() + dayOffset);
+  const currentDateApi = currentDate.toISOString().slice(0, 10);
+
+  // Fetch completed workout groups for today from backend (for real-time updates)
+  const fetchCompletedGroupsForToday = async () => {
+    try {
+      const res = await fetch(`/api/get-workout-completions?date=${currentDateApi}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.completedGroupIds) && data.completedGroupIds.length > 0) {
+          const groupIds = data.completedGroupIds;
+          const groupMap: Record<string, boolean> = {};
+          let matchCount = 0;
+          if (currentDayWorkout && currentDayWorkout.groups) {
+            groupIds.forEach((groupId: string) => {
+              if (currentDayWorkout.groups.some((g: any) => g.id === groupId)) {
+                groupMap[groupId] = true;
+                matchCount++;
+              }
+            });
+          }
+          setCompletedGroups(groupMap);
+          setIsWorkoutSubmitted(matchCount > 0);
+        }
+      }
+    } catch (e) {
+      // Ignore errors, use cached data
+    }
+  };
+
+  // Update completed groups and submission status when day changes or week data loads
   useEffect(() => {
-    if (dayOffset === 0) {
-      // For today, use the initial data from the loader
-      if (todaysCompletedGroups.length > 0) {
-        const initialCompletedGroups: Record<string, boolean> = {};
-        todaysCompletedGroups.forEach((groupId: string) => {
-          initialCompletedGroups[groupId] = true;
-        });
-        setCompletedGroups(initialCompletedGroups);
-        setIsWorkoutSubmitted(true);
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + dayOffset);
+    const dateStr = targetDate.toISOString().slice(0, 10);
+    const workoutData = weekWorkouts[dateStr];
+    const completionData = weekCompletions[dateStr] || [];
+
+    if (workoutData !== undefined) {
+      setCurrentDayWorkout(workoutData);
+      if (completionData.length > 0) {
+        const dayCompletedGroups: Record<string, boolean> = {};
+        const matchingGroupsCount = completionData.filter((groupId: string) => {
+          const groupExists = workoutData?.groups?.some((group: any) => group.id === groupId);
+          if (groupExists) {
+            dayCompletedGroups[groupId] = true;
+          }
+          return groupExists;
+        }).length;
+        setCompletedGroups(dayCompletedGroups);
+        setIsWorkoutSubmitted(matchingGroupsCount > 0);
       } else {
         setCompletedGroups({});
         setIsWorkoutSubmitted(false);
+        // For today, always re-fetch completions from backend when dayOffset changes to 0
+        if (dayOffset === 0) {
+          fetchCompletedGroupsForToday();
+        }
+      }
+      setIsLoadingWorkout(false);
+    } else {
+      // Need to fetch this week's data
+      const weekStart = new Date(targetDate);
+      const dayOfWeek = weekStart.getDay();
+      weekStart.setDate(weekStart.getDate() - dayOfWeek);
+      weekStart.setHours(0, 0, 0, 0);
+      if (weekStart.getTime() !== currentWeekStart.getTime()) {
+        setCurrentWeekStart(weekStart);
+        fetchWorkoutWeek(weekStart);
       }
     }
-  }, [todaysCompletedGroups, dayOffset]);
+  }, [dayOffset, weekWorkouts, weekCompletions, currentWeekStart, currentDayWorkout]);
 
   // Function to fetch a week's worth of workout data
   const fetchWorkoutWeek = (weekStart: Date) => {
@@ -308,46 +326,6 @@ export default function Workouts() {
       setIsLoadingWorkout(false);
     }
   }, [weekFetcher.data]);
-
-  // Update workout data when day offset changes
-  useEffect(() => {
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + dayOffset);
-    const dateStr = targetDate.toISOString().slice(0, 10);
-    
-    // Check if we have this day's data in our cache
-    const workoutData = weekWorkouts[dateStr];
-    const completionData = weekCompletions[dateStr] || [];
-    
-    if (workoutData !== undefined) {
-      // We have the data cached
-      setCurrentDayWorkout(workoutData);
-      
-      if (completionData.length > 0) {
-        const dayCompletedGroups: Record<string, boolean> = {};
-        completionData.forEach((groupId: string) => {
-          dayCompletedGroups[groupId] = true;
-        });
-        setCompletedGroups(dayCompletedGroups);
-        setIsWorkoutSubmitted(true);
-      } else {
-        setCompletedGroups({});
-        setIsWorkoutSubmitted(false);
-      }
-      setIsLoadingWorkout(false);
-    } else {
-      // Need to fetch this week's data
-      const weekStart = new Date(targetDate);
-      const dayOfWeek = weekStart.getDay();
-      weekStart.setDate(weekStart.getDate() - dayOfWeek);
-      weekStart.setHours(0, 0, 0, 0);
-      
-      if (weekStart.getTime() !== currentWeekStart.getTime()) {
-        setCurrentWeekStart(weekStart);
-        fetchWorkoutWeek(weekStart);
-      }
-    }
-  }, [dayOffset, weekWorkouts, weekCompletions, currentWeekStart]);
 
   // Get the formatted date display (UI only - no data fetching)
   const getDateDisplay = (offset: number) => {
@@ -430,47 +408,40 @@ export default function Workouts() {
     }
   };
 
-  // Handle workout submission
+  // Handle workout submission - OPTIMISTIC UI with fetcher
   const handleSubmitWorkout = async () => {
     setIsSubmitting(true);
     setSubmitError(null);
-    
-    try {
-      const today = new Date();
-      const dateStr = today.toISOString().slice(0, 10);
-      
-      const completedGroupIds = Object.entries(completedGroups)
-        .filter(([_, completed]) => completed)
-        .map(([groupId]) => groupId);
-      
-      const body = {
-        completedGroups: completedGroupIds,
-        completedAt: dateStr,
-      };
-      
-      const res = await fetch("/api/submit-workout-completion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      
-      if (res.ok) {
-        setShowSuccess(true);
-        setIsWorkoutSubmitted(true);
-        window.scrollTo({ top: 0, behavior: "smooth" });
-        setTimeout(() => setShowSuccess(false), 3000);
-        
-        // Refresh compliance data to show updated completion status
-        await refreshComplianceData();
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        setSubmitError(errorData.error || 'Submission failed.');
-      }
-    } catch (err) {
-      setSubmitError('Submission failed.');
-    } finally {
-      setIsSubmitting(false);
-    }
+
+    const today = new Date();
+    const dateStr = today.toISOString().slice(0, 10);
+    const completedGroupIds = Object.entries(completedGroups)
+      .filter(([_, completed]) => completed)
+      .map(([groupId]) => groupId);
+
+    // Optimistically update UI
+    setShowSuccess(true);
+    setIsWorkoutSubmitted(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(() => setShowSuccess(false), 3000);
+
+    // Optionally, update complianceData optimistically for today
+    const todayIdx = (today.getDay() + 7 - currentWeekStart.getDay()) % 7;
+    setComplianceData(prev => {
+      const newData = [...prev];
+      newData[todayIdx] = 1;
+      return newData;
+    });
+
+    // Submit to backend using fetcher
+    submitFetcher.submit(
+      { completedGroups: completedGroupIds, completedAt: dateStr },
+      { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
+    );
+    setIsSubmitting(false);
+
+    // Dispatch custom event to trigger dashboard revalidation
+    window.dispatchEvent(new Event("workouts:completed"));
   };
 
   // Calculate daily progress
@@ -505,7 +476,6 @@ export default function Workouts() {
   };
 
   // Week navigation
-  const today = new Date();
   const startOfWeek = new Date(today);
   startOfWeek.setDate(today.getDate() - today.getDay());
   startOfWeek.setHours(0, 0, 0, 0);
