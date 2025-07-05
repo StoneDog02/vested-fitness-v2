@@ -66,13 +66,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Parse request body
-    const { name, email, font_size, email_notifications, app_notifications } = await request.json();
+    const { name, email, email_notifications, app_notifications } = await request.json();
 
     // Build update object
     const updateData: any = {};
     if (name !== undefined) updateData.name = name;
     if (email !== undefined) updateData.email = email;
-    if (font_size !== undefined) updateData.font_size = font_size;
     if (email_notifications !== undefined) updateData.email_notifications = email_notifications;
     if (app_notifications !== undefined) updateData.app_notifications = app_notifications;
 

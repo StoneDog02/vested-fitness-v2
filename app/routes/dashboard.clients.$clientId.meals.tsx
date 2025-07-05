@@ -4,7 +4,7 @@ import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import Card from "~/components/ui/Card";
 import CreateMealPlanModal from "~/components/coach/CreateMealPlanModal";
 import ViewMealPlanLibraryModal from "~/components/coach/ViewMealPlanLibraryModal";
@@ -100,35 +100,52 @@ export const loader = async ({
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  // Parallel fetch all plans
-  const [mealPlansRaw, libraryPlansRaw] = await Promise.all([
+  // Pagination for meal plans and library plans
+  const mealPlansPage = parseInt(url.searchParams.get("mealPlansPage") || "1", 10);
+  const mealPlansPageSize = parseInt(url.searchParams.get("mealPlansPageSize") || "10", 10);
+  const mealPlansOffset = (mealPlansPage - 1) * mealPlansPageSize;
+  const libraryPlansPage = parseInt(url.searchParams.get("libraryPlansPage") || "1", 10);
+  const libraryPlansPageSize = parseInt(url.searchParams.get("libraryPlansPageSize") || "10", 10);
+  const libraryPlansOffset = (libraryPlansPage - 1) * libraryPlansPageSize;
+
+  // Parallel fetch paginated plans
+  const [mealPlansRaw, libraryPlansRaw, mealPlansCountRaw, libraryPlansCountRaw] = await Promise.all([
     supabase
       .from("meal_plans")
-      .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at", { count: "exact" })
       .eq("user_id", client.id)
       .eq("is_template", false)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .range(mealPlansOffset, mealPlansOffset + mealPlansPageSize - 1),
     supabase
       .from("meal_plans")
-      .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at", { count: "exact" })
       .eq("is_template", true)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .range(libraryPlansOffset, libraryPlansOffset + libraryPlansPageSize - 1),
+    supabase
+      .from("meal_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", client.id)
+      .eq("is_template", false),
+    supabase
+      .from("meal_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("is_template", true),
   ]);
 
-  // Collect all plan ids
-  const allPlanIds = [
-    ...(mealPlansRaw.data?.map((p: any) => p.id) || []),
-    ...(libraryPlansRaw.data?.map((p: any) => p.id) || []),
-  ];
+  // Collect all plan ids for this page
+  const mealPlanIds = (mealPlansRaw.data?.map((p: any) => p.id) || []);
+  const libraryPlanIds = (libraryPlansRaw.data?.map((p: any) => p.id) || []);
 
-  // Batch fetch all meals for all plans
+  // Batch fetch all meals for just these plans
   const { data: allMealsRaw } = await supabase
     .from("meals")
     .select("id, name, time, sequence_order, meal_plan_id")
-    .in("meal_plan_id", allPlanIds.length > 0 ? allPlanIds : [""])
+    .in("meal_plan_id", [...mealPlanIds, ...libraryPlanIds].length > 0 ? [...mealPlanIds, ...libraryPlanIds] : [""])
     .order("sequence_order", { ascending: true });
 
-  // Batch fetch all foods for all meals
+  // Batch fetch all foods for just these meals
   const allMealIds = (allMealsRaw || []).map((m: any) => m.id);
   const { data: allFoodsRaw } = await supabase
     .from("foods")
@@ -171,6 +188,12 @@ export const loader = async ({
     meals: (mealsByPlan[plan.id] || []).filter((meal) => meal.foods && meal.foods.length > 0),
   }));
 
+  // Pagination info
+  const mealPlansTotal = mealPlansCountRaw.count || 0;
+  const mealPlansHasMore = mealPlansOffset + mealPlans.length < mealPlansTotal;
+  const libraryPlansTotal = libraryPlansCountRaw.count || 0;
+  const libraryPlansHasMore = libraryPlansOffset + libraryPlans.length < libraryPlansTotal;
+
   // Fetch all meal completions for this user for the week
   const { data: completionsRaw } = await supabase
     .from("meal_completions")
@@ -212,7 +235,20 @@ export const loader = async ({
     complianceData.push(percent);
   }
 
-  const result = { mealPlans, libraryPlans, complianceData, client };
+  const result = {
+    mealPlans,
+    libraryPlans,
+    mealPlansHasMore,
+    mealPlansTotal,
+    mealPlansPage,
+    mealPlansPageSize,
+    libraryPlansHasMore,
+    libraryPlansTotal,
+    libraryPlansPage,
+    libraryPlansPageSize,
+    complianceData,
+    client,
+  };
   // Cache result
   if (clientIdParam) {
     clientMealsCache[clientIdParam] = { data: result, expires: Date.now() + 30_000 };
@@ -371,7 +407,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     // Get template meals
     const { data: templateMeals } = await supabase
       .from("meals")
-      .select("*")
+      .select("id, name, time, sequence_order")
       .eq("meal_plan_id", templateId)
       .order("sequence_order", { ascending: true });
 
@@ -394,7 +430,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           // Get and copy foods
           const { data: foods } = await supabase
             .from("foods")
-            .select("*")
+            .select("name, portion, calories, protein, carbs, fat")
             .eq("meal_id", meal.id);
 
           if (foods) {
@@ -598,12 +634,14 @@ export type MealPlan = {
 };
 
 export default function ClientMeals() {
-  const { mealPlans, libraryPlans, client, complianceData: initialComplianceData } = useLoaderData<{
+  const loaderData = useLoaderData<{
     mealPlans: MealPlan[];
     libraryPlans: MealPlan[];
     client: { name: string, id: string } | null;
     complianceData: number[];
+    mealPlansHasMore?: boolean;
   }>();
+  const { mealPlans, libraryPlans, client, complianceData: initialComplianceData, mealPlansHasMore: loaderMealPlansHasMore } = loaderData;
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
 
@@ -625,9 +663,6 @@ export default function ClientMeals() {
   const [selectedPlan, setSelectedPlan] = React.useState<MealPlanType | null>(
     null
   );
-
-  // Only show up to 3 most recent meal plans in history
-  const historyMealPlans = sortedMealPlans.slice(0, 3);
 
   // Compliance calendar state
   const [calendarStart, setCalendarStart] = React.useState(() => {
@@ -685,6 +720,52 @@ export default function ClientMeals() {
   function formatDateShort(date: Date) {
     return `${date.getMonth() + 1}/${date.getDate()}`;
   }
+
+  const [historyMealPlans, setHistoryMealPlans] = React.useState(mealPlans);
+  const [mealPlansPage, setMealPlansPage] = React.useState(1);
+  const [hasMoreMealPlans, setHasMoreMealPlans] = React.useState(loaderMealPlansHasMore ?? true);
+  const historyModalRef = useRef<HTMLDivElement>(null);
+  const historyFetcher = useFetcher();
+
+  // Infinite scroll for history modal
+  React.useEffect(() => {
+    if (!isHistoryModalOpen) return;
+    const handleScroll = () => {
+      if (!historyModalRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = historyModalRef.current;
+      if (scrollTop + clientHeight >= scrollHeight - 40 && hasMoreMealPlans && historyFetcher.state === "idle") {
+        const nextPage = mealPlansPage + 1;
+        setMealPlansPage(nextPage);
+        historyFetcher.load(`${window.location.pathname}?mealPlansPage=${nextPage}`);
+      }
+    };
+    const el = historyModalRef.current;
+    if (el) {
+      el.addEventListener("scroll", handleScroll);
+      return () => {
+        el.removeEventListener("scroll", handleScroll);
+      };
+    }
+    return undefined;
+  }, [isHistoryModalOpen, hasMoreMealPlans, mealPlansPage, historyFetcher.state]);
+
+  // Append new plans when fetcher loads more
+  React.useEffect(() => {
+    if (historyFetcher.data && historyFetcher.state === "idle") {
+      const { mealPlans: newPlans = [], mealPlansHasMore = false } = historyFetcher.data as any;
+      setHistoryMealPlans((prev) => [...prev, ...newPlans]);
+      setHasMoreMealPlans(mealPlansHasMore);
+    }
+  }, [historyFetcher.data, historyFetcher.state]);
+
+  // Reset on open
+  React.useEffect(() => {
+    if (isHistoryModalOpen) {
+      setHistoryMealPlans(mealPlans);
+      setMealPlansPage(1);
+      setHasMoreMealPlans(loaderMealPlansHasMore ?? true);
+    }
+  }, [isHistoryModalOpen, mealPlans, loaderMealPlansHasMore]);
 
   return (
     <ClientDetailLayout>
@@ -822,6 +903,14 @@ export default function ClientMeals() {
                       </div>
                     </div>
                   ))
+                )}
+                {hasMoreMealPlans && historyFetcher.state === "loading" && (
+                  <div className="flex justify-center py-4">
+                    <svg className="animate-spin h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
                 )}
               </div>
             </Card>
@@ -1023,7 +1112,7 @@ export default function ClientMeals() {
         />
         {isHistoryModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-8 max-w-2xl w-full overflow-y-auto max-h-[90vh]">
+            <div className="bg-white rounded-lg p-8 max-w-2xl w-full overflow-y-auto max-h-[90vh]" ref={historyModalRef}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Meal Plan History</h2>
                 <button
@@ -1036,10 +1125,10 @@ export default function ClientMeals() {
                 </button>
               </div>
               <div className="space-y-4">
-                {sortedMealPlans.length === 0 ? (
+                {historyMealPlans.length === 0 ? (
                   <div className="text-gray-500">No meal plans found.</div>
                 ) : (
-                  sortedMealPlans.map((plan) => (
+                  historyMealPlans.map((plan) => (
                     <div
                       key={plan.id}
                       className={`p-4 border rounded-lg ${

@@ -71,7 +71,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // Get completions for a specific date
       const { data: completions } = await supabase
         .from("workout_completions")
-        .select("*")
+        .select("id, user_id, workout_id, completed_at")
         .eq("user_id", userId)
         .eq("completed_at", date);
 
@@ -83,7 +83,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // Get completions for a date range
       const { data: completions } = await supabase
         .from("workout_completions")
-        .select("*")
+        .select("id, user_id, workout_id, completed_at")
         .eq("user_id", userId)
         .gte("completed_at", start)
         .lte("completed_at", end);

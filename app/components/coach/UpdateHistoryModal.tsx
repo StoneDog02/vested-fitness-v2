@@ -11,6 +11,8 @@ interface UpdateHistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
   updates: Update[];
+  onLoadMore: () => void;
+  hasMore: boolean;
   emptyMessage?: string;
 }
 
@@ -18,6 +20,8 @@ export default function UpdateHistoryModal({
   isOpen,
   onClose,
   updates,
+  onLoadMore,
+  hasMore,
   emptyMessage,
 }: UpdateHistoryModalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -76,6 +80,16 @@ export default function UpdateHistoryModal({
                   </p>
                 </div>
               ))
+            )}
+            {hasMore && (
+              <div className="flex justify-center mt-4">
+                <button
+                  className="px-4 py-2 border border-gray-light dark:border-davyGray rounded text-sm text-primary hover:bg-gray-50 dark:hover:bg-davyGray"
+                  onClick={onLoadMore}
+                >
+                  ...Load More
+                </button>
+              </div>
             )}
           </div>
         </div>

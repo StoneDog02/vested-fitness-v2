@@ -16,6 +16,9 @@ import timezone from "dayjs/plugin/timezone";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+// In-memory cache for meals loader (per user, 30s TTL)
+const mealsLoaderCache: Record<string, { data: any; expires: number }> = {};
+
 export const meta: MetaFunction = () => {
   return [
     { title: "Meals | Vested Fitness" },
@@ -53,6 +56,11 @@ export const loader: LoaderFunction = async ({ request }) => {
 
     if (!authId) {
       throw new Response("Unauthorized", { status: 401 });
+    }
+
+    // Check cache (per user)
+    if (mealsLoaderCache[authId] && mealsLoaderCache[authId].expires > Date.now()) {
+      return json(mealsLoaderCache[authId].data);
     }
 
     const supabase = createClient(
@@ -115,81 +123,100 @@ export const loader: LoaderFunction = async ({ request }) => {
           .eq("meal_plan_id", planToShow.id)
           .order("sequence_order", { ascending: true });
         if (mealsRaw && mealsRaw.length > 0) {
-          const meals = await Promise.all(
-            mealsRaw.map(async (meal) => {
-              // Join foods to food_library for macros
-              const { data: foodsRaw } = await supabase
-                .from("foods")
-                .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
-                .eq("meal_id", meal.id);
-              const foods = (foodsRaw || []).map((food) => {
-                // Ensure all values are serializable numbers
-                const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
-                const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
-                const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) || 0 : Number(food.fat) || 0;
-                // Always calculate calories from macros and ensure no NaN
-                const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
-                return {
-                  id: String(food.id || ''),
-                  name: String(food.name || ''),
-                  portion: String(food.portion || ''),
-                  calories: isFinite(calories) ? calories : 0,
-                  protein: isFinite(protein) ? Math.round(protein) : 0,
-                  carbs: isFinite(carbs) ? Math.round(carbs) : 0,
-                  fat: isFinite(fat) ? Math.round(fat) : 0,
-                };
-              });
-              return { 
-                id: String(meal.id || ''),
-                name: String(meal.name || ''),
-                time: String(meal.time || ''),
-                sequence_order: Number(meal.sequence_order) || 0,
-                foods 
-              };
-            })
-          );
+          // Batch fetch all foods for all meals in a single query
+          const mealIds = mealsRaw.map(m => m.id);
+          const [foodsRes, completionsRes] = await Promise.all([
+            mealIds.length > 0
+              ? supabase
+                  .from("foods")
+                  .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+                  .in("meal_id", mealIds)
+              : { data: [] },
+            supabase
+              .from("meal_completions")
+              .select("meal_id, completed_at")
+              .eq("user_id", user.id)
+              .gte("completed_at", todayStr)
+              .lt("completed_at", tomorrowStr)
+          ]);
+          const foodsRaw = foodsRes.data || [];
+          // Group foods by meal_id
+          const foodsByMeal: Record<string, any[]> = {};
+          for (const food of foodsRaw) {
+            const mealId = String(food.meal_id);
+            if (!foodsByMeal[mealId]) foodsByMeal[mealId] = [];
+            // Ensure all values are serializable numbers
+            const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
+            const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
+            const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) || 0 : Number(food.fat) || 0;
+            // Always calculate calories from macros and ensure no NaN
+            const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
+            foodsByMeal[mealId].push({
+              id: String(food.id || ''),
+              name: String(food.name || ''),
+              portion: String(food.portion || ''),
+              calories: isFinite(calories) ? calories : 0,
+              protein: isFinite(protein) ? Math.round(protein) : 0,
+              carbs: isFinite(carbs) ? Math.round(carbs) : 0,
+              fat: isFinite(fat) ? Math.round(fat) : 0,
+            });
+          }
+          // Assemble meals with foods
+          const meals = mealsRaw.map(meal => ({
+            id: String(meal.id || ''),
+            name: String(meal.name || ''),
+            time: String(meal.time || ''),
+            sequence_order: Number(meal.sequence_order) || 0,
+            foods: foodsByMeal[String(meal.id)] || []
+          }));
           activeMealPlan = {
             name: planToShow.title,
             date: "", // Could add date range formatting here if needed
             meals,
           };
           // Debug: Log plan, date, and meals
-          console.log('[MEALS] Selected planToShow:', {
-            id: planToShow.id,
-            title: planToShow.title,
-            activated_at: planToShow.activated_at,
-            is_active: planToShow.is_active
-          });
-          console.log('[MEALS] todayStr:', todayStr, 'tomorrowStr:', tomorrowStr);
-          console.log('[MEALS] Meals fetched:', (meals || []).map(m => ({ id: m.id, name: m.name, time: m.time })));
+          // console.log('[MEALS] Selected planToShow:', {
+          //   id: planToShow.id,
+          //   title: planToShow.title,
+          //   activated_at: planToShow.activated_at,
+          //   is_active: planToShow.is_active
+          // });
+          // console.log('[MEALS] todayStr:', todayStr, 'tomorrowStr:', tomorrowStr);
+          // console.log('[MEALS] Meals fetched:', (meals || []).map(m => ({ id: m.id, name: m.name, time: m.time })));
+          // Get meal completions for today if we have an active meal plan
+          let mealCompletions: { meal_id: string, completed_at: string }[] = [];
+          if (completionsRes.data) {
+            mealCompletions = completionsRes.data;
+          }
+          const result = {
+            user: {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              avatar_url: user.avatar_url,
+            },
+            mealPlan: activeMealPlan,
+            mealCompletions,
+          };
+          // Cache result
+          mealsLoaderCache[authId] = { data: result, expires: Date.now() + 30_000 };
+          return json(result);
         }
       }
     }
-
-    // Get meal completions for today if we have an active meal plan
-    let mealCompletions: { meal_id: string, completed_at: string }[] = [];
-    if (activeMealPlan && debugPlan) {
-      const { data: completions } = await supabase
-        .from("meal_completions")
-        .select("meal_id, completed_at")
-        .eq("user_id", user.id)
-        .gte("completed_at", todayStr)
-        .lt("completed_at", tomorrowStr);
-      mealCompletions = completions || [];
-      // Debug: Log completions
-      console.log('[MEALS] Meal completions:', mealCompletions);
-    }
-
-    return json({
+    // If no plan or no meals, return empty
+    const result = {
       user: {
         id: user.id,
         name: user.name,
         email: user.email,
         avatar_url: user.avatar_url,
       },
-      mealPlan: activeMealPlan,
-      mealCompletions,  
-    });
+      mealPlan: null,
+      mealCompletions: [],
+    };
+    mealsLoaderCache[authId] = { data: result, expires: Date.now() + 30_000 };
+    return json(result);
   } catch (error) {
     console.error('Error in meals loader:', error);
     return json({ 

@@ -7,8 +7,13 @@ import Button from "~/components/ui/Button";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+// In-memory cache for supplements loader (per user, 30s TTL)
+const supplementsLoaderCache: Record<string, { data: any; expires: number }> = {};
 
 export const meta: MetaFunction = () => {
   return [
@@ -31,20 +36,52 @@ interface LoaderData {
 
 export const loader: LoaderFunction = async ({ request }) => {
   try {
+    // Extract user key from auth cookie for per-user cache
+    const cookies = request.headers.get('cookie') || '';
+    let authId: string | undefined = undefined;
+    const supabaseAuthCookieKey = cookies
+      .split(';')
+      .map(c => c.trim())
+      .find(key => key.startsWith('sb-') && key.endsWith('-auth-token'));
+    let accessToken;
+    if (supabaseAuthCookieKey) {
+      try {
+        const cookieVal = supabaseAuthCookieKey.split('=')[1];
+        const decoded = Buffer.from(cookieVal, "base64").toString("utf-8");
+        const [access] = JSON.parse(JSON.parse(decoded));
+        accessToken = access;
+      } catch (e) {
+        accessToken = undefined;
+      }
+    }
+    if (accessToken) {
+      try {
+        const decoded = jwt.decode(accessToken);
+        authId = decoded && typeof decoded === "object" && "sub" in decoded ? decoded.sub as string : undefined;
+      } catch (e) {}
+    }
+    // If we have a user, check cache
+    if (authId && supplementsLoaderCache[authId] && supplementsLoaderCache[authId].expires > Date.now()) {
+      return json(supplementsLoaderCache[authId].data);
+    }
     // Fetch supplements from API
     const supplementsResponse = await fetch(`${new URL(request.url).origin}/api/get-supplements`, {
       headers: {
-        'Cookie': request.headers.get('Cookie') || '',
+        'Cookie': cookies,
       },
     });
 
     if (!supplementsResponse.ok) {
       console.error('Failed to fetch supplements');
-      return json({ supplements: [] } as LoaderData);
+      const result = { supplements: [] } as LoaderData;
+      if (authId) supplementsLoaderCache[authId] = { data: result, expires: Date.now() + 30_000 };
+      return json(result);
     }
 
     const supplementsData = await supplementsResponse.json();
-    return json({ supplements: supplementsData.supplements || [] } as LoaderData);
+    const result = { supplements: supplementsData.supplements || [] } as LoaderData;
+    if (authId) supplementsLoaderCache[authId] = { data: result, expires: Date.now() + 30_000 };
+    return json(result);
   } catch (error) {
     console.error('Error loading supplements:', error);
     return json({ supplements: [] } as LoaderData);

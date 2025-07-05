@@ -28,7 +28,6 @@ type LoaderData = {
     name: string;
     email: string;
     avatar_url?: string;
-    font_size?: string;
     email_notifications?: boolean;
     app_notifications?: boolean;
   };
@@ -85,7 +84,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Get user data
   const { data: user, error } = await supabase
     .from("users")
-    .select("id, name, email, avatar_url, font_size, email_notifications, app_notifications")
+    .select("id, name, email, avatar_url, email_notifications, app_notifications")
     .eq("auth_id", authId)
     .single();
 
@@ -105,7 +104,6 @@ export default function Settings() {
   const profileFetcher = useFetcher();
   const passwordFetcher = useFetcher();
   const avatarFetcher = useFetcher();
-  const fontSizeFetcher = useFetcher();
   const deleteAccountFetcher = useFetcher();
   
   // Success popup state (same pattern as meals/workouts/supplements)
@@ -133,7 +131,6 @@ export default function Settings() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [fontSize, setFontSize] = useState(user.font_size || "medium");
   const [emailNotifications, setEmailNotifications] = useState(user.email_notifications ?? true);
   const [appNotifications, setAppNotifications] = useState(user.app_notifications ?? true);
 
@@ -146,7 +143,6 @@ export default function Settings() {
       {
         name,
         email,
-        font_size: fontSize,
         email_notifications: emailNotifications,
         app_notifications: appNotifications,
       },
@@ -215,26 +211,6 @@ export default function Settings() {
       alert("Failed to upload avatar");
       setIsUploadingAvatar(false);
     }
-  };
-
-  const handleFontSizeChange = (newSize: string) => {
-    setFontSize(newSize);
-    
-    // Auto-save font size change
-    fontSizeFetcher.submit(
-      {
-        name,
-        email,
-        font_size: newSize,
-        email_notifications: emailNotifications,
-        app_notifications: appNotifications,
-      },
-      {
-        method: "POST",
-        action: "/api/update-profile",
-        encType: "application/json",
-      }
-    );
   };
 
   const handleDeleteAccount = (e: React.FormEvent) => {
@@ -306,20 +282,6 @@ export default function Settings() {
       }
     }
   }, [avatarFetcher.data, avatarFetcher.state]);
-
-  // Handle font size fetcher responses separately
-  useEffect(() => {
-    if (fontSizeFetcher.data && fontSizeFetcher.state === "idle") {
-      const data = fontSizeFetcher.data as { success?: boolean; error?: string };
-      if (data.success) {
-        setShowSuccess(true);
-        window.scrollTo({ top: 0, behavior: "smooth" });
-        setTimeout(() => setShowSuccess(false), 3000);
-      } else if (data.error) {
-        alert(data.error);
-      }
-    }
-  }, [fontSizeFetcher.data, fontSizeFetcher.state]);
 
   // Handle delete account responses
   useEffect(() => {
@@ -543,76 +505,6 @@ export default function Settings() {
               </Button>
             </div>
           </form>
-        </Card>
-
-        {/* Appearance */}
-        <Card title="Appearance">
-          <div className="space-y-4">
-
-
-            <div>
-              <h3 className="text-sm font-medium text-secondary dark:text-alabaster mb-1">
-                Font Size
-              </h3>
-              <p className="text-sm text-gray-dark dark:text-gray-light mb-2">
-                Adjust the size of text throughout the application
-              </p>
-              <div className="flex items-center space-x-2">
-                <Button 
-                  variant={fontSize === "small" ? "primary" : "outline"} 
-                  size="sm"
-                  type="button"
-                  onClick={() => handleFontSizeChange("small")}
-                  disabled={fontSizeFetcher.state !== "idle"}
-                >
-                  Small
-                </Button>
-                <Button 
-                  variant={fontSize === "medium" ? "primary" : "outline"} 
-                  size="sm"
-                  type="button"
-                  onClick={() => handleFontSizeChange("medium")}
-                  disabled={fontSizeFetcher.state !== "idle"}
-                >
-                  Medium
-                </Button>
-                <Button 
-                  variant={fontSize === "large" ? "primary" : "outline"} 
-                  size="sm"
-                  type="button"
-                  onClick={() => handleFontSizeChange("large")}
-                  disabled={fontSizeFetcher.state !== "idle"}
-                >
-                  Large
-                </Button>
-                {fontSizeFetcher.state !== "idle" && (
-                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <svg
-                      className="animate-spin h-4 w-4"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                    Saving...
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
         </Card>
 
         {/* Account Security */}

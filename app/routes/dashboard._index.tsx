@@ -497,12 +497,56 @@ export default function Dashboard() {
     recentActivity: Activity[];
     weightChange: number;
     complianceCalendars: any;
+    hasMore: boolean;
+    page: number;
   }>;
   const nonCriticalData: NonCriticalData = nonCriticalFetcher.data ?? {};
   const recentClients = nonCriticalData.recentClients ?? loaderRecentClients ?? [];
   const recentActivity = nonCriticalData.recentActivity ?? loaderRecentActivity ?? [];
   const weightChange = nonCriticalData.weightChange ?? clientData?.weightChange ?? 0;
   const nonCriticalLoading = nonCriticalFetcher.state !== "idle" && !nonCriticalFetcher.data;
+  
+  const [activity, setActivity] = useState<Activity[]>(recentActivity);
+  const [activityPage, setActivityPage] = useState(1);
+  const [activityHasMore, setActivityHasMore] = useState(
+    (nonCriticalData as any)?.hasMore ?? true
+  );
+  const [activityLoading, setActivityLoading] = useState(false);
+  const activityFetcher = useFetcher();
+
+  // When nonCriticalFetcher loads new data (first load), set activity state
+  useEffect(() => {
+    if (nonCriticalFetcher.data && nonCriticalFetcher.state === "idle") {
+      const data = nonCriticalFetcher.data as {
+        recentActivity: Activity[];
+        hasMore: boolean;
+        page: number;
+      };
+      setActivity(data.recentActivity || []);
+      setActivityPage(data.page || 1);
+      setActivityHasMore(data.hasMore ?? false);
+    }
+  }, [nonCriticalFetcher.data, nonCriticalFetcher.state]);
+
+  // When activityFetcher loads more, append to activity
+  useEffect(() => {
+    if (activityFetcher.data && activityFetcher.state === "idle") {
+      const data = activityFetcher.data as {
+        recentActivity: Activity[];
+        hasMore: boolean;
+        page: number;
+      };
+      setActivity((prev) => [...prev, ...(data.recentActivity || [])]);
+      setActivityPage(data.page || activityPage + 1);
+      setActivityHasMore(data.hasMore ?? false);
+      setActivityLoading(false);
+    }
+  }, [activityFetcher.data, activityFetcher.state]);
+
+  const handleLoadMoreActivity = () => {
+    setActivityLoading(true);
+    activityFetcher.load(`/api/dashboard-noncritical?page=${activityPage + 1}`);
+  };
   
   return (
     <>
@@ -633,25 +677,34 @@ export default function Dashboard() {
               <div className="space-y-4">
                 {nonCriticalLoading ? (
                   <SkeletonCard lines={4} />
-                ) : recentActivity.length === 0 ? (
+                ) : activity.length === 0 ? (
                   <div className="text-gray-dark dark:text-gray-light">
                     No activity yet today.
                   </div>
                 ) : (
-                  recentActivity.map((activity: Activity) => (
-                    <div key={activity.id} className="flex items-start gap-3">
-                      <div className="w-2 h-2 mt-2 rounded-full bg-primary" />
-                      <div>
-                        <p className="font-medium">{activity.clientName}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {activity.action}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {dayjs(activity.time).local().format('h:mm A')}
-                        </p>
+                  <>
+                    {activity.map((activity: Activity) => (
+                      <div key={activity.id} className="flex items-start gap-3">
+                        <div className="w-2 h-2 mt-2 rounded-full bg-primary" />
+                        <div>
+                          <p className="font-medium">{activity.clientName}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {activity.action}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {dayjs(activity.time).local().format('h:mm A')}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                    {activityHasMore && (
+                      <div className="flex justify-center mt-4">
+                        <Button variant="outline" onClick={handleLoadMoreActivity} disabled={activityLoading || activityFetcher.state !== "idle"}>
+                          {activityLoading || activityFetcher.state !== "idle" ? "Loading..." : "Load More"}
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </Card>
@@ -803,7 +856,7 @@ export default function Dashboard() {
               <div className="rounded-xl bg-white shadow p-6 space-y-6">
                 {clientData?.workouts?.length === 0 && clientData?.planName && clientData?.isRestDay ? (
                   <div className="text-gray-500 text-center">
-                    <div className="font-semibold mb-1">{clientData.planName} - Day</div>
+                    <div className="font-semibold mb-1">Workout - {dayjs().tz('America/Denver').format('dddd')}</div>
                     <div>Today is a Rest Day</div>
                   </div>
                 ) : clientData?.workouts?.length === 0 ? (

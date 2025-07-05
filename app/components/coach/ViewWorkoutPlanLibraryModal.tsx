@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useFetcher } from "@remix-run/react";
 
 // Define the type for a workout plan template
@@ -32,15 +32,59 @@ type ViewWorkoutPlanLibraryModalProps = {
 export default function ViewWorkoutPlanLibraryModal({
   isOpen,
   onClose,
-  libraryPlans,
+  libraryPlans: initialLibraryPlans,
 }: ViewWorkoutPlanLibraryModalProps) {
   const fetcher = useFetcher();
+  const [libraryPlans, setLibraryPlans] = useState(initialLibraryPlans);
+  const [libraryPlansPage, setLibraryPlansPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Load more plans when scrolled to bottom
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleScroll = () => {
+      if (!containerRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+      if (scrollTop + clientHeight >= scrollHeight - 40 && hasMore && fetcher.state === "idle") {
+        const nextPage = libraryPlansPage + 1;
+        setLibraryPlansPage(nextPage);
+        fetcher.load(`${window.location.pathname}?libraryPlansPage=${nextPage}`);
+      }
+    };
+    const el = containerRef.current;
+    if (el) {
+      el.addEventListener("scroll", handleScroll);
+      return () => {
+        el.removeEventListener("scroll", handleScroll);
+      };
+    }
+    return undefined;
+  }, [isOpen, hasMore, libraryPlansPage, fetcher.state]);
+
+  // Append new plans when fetcher loads more
+  useEffect(() => {
+    if (fetcher.data && fetcher.state === "idle") {
+      const { libraryPlans: newPlans = [], libraryPlansHasMore = false } = fetcher.data as any;
+      setLibraryPlans((prev) => [...prev, ...newPlans]);
+      setHasMore(libraryPlansHasMore);
+    }
+  }, [fetcher.data, fetcher.state]);
+
+  // Reset on open
+  useEffect(() => {
+    if (isOpen) {
+      setLibraryPlans(initialLibraryPlans);
+      setLibraryPlansPage(1);
+      setHasMore(true);
+    }
+  }, [isOpen, initialLibraryPlans]);
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-night rounded-lg p-8 max-w-2xl w-full overflow-y-auto max-h-[90vh]">
+      <div className="bg-white dark:bg-night rounded-lg p-8 max-w-2xl w-full overflow-y-auto max-h-[90vh]" ref={containerRef}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold text-secondary dark:text-alabaster">Workout Plan Library</h2>
           <button
@@ -96,6 +140,14 @@ export default function ViewWorkoutPlanLibraryModal({
                 </div>
               </div>
             ))
+          )}
+          {hasMore && fetcher.state === "loading" && (
+            <div className="flex justify-center py-4">
+              <svg className="animate-spin h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
           )}
         </div>
       </div>

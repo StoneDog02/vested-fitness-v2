@@ -3,7 +3,7 @@ import Card from "~/components/ui/Card";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import ViewWorkoutPlanModal from "~/components/coach/ViewWorkoutPlanModal";
 import CreateWorkoutModal from "~/components/coach/CreateWorkoutModal";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Modal from "~/components/ui/Modal";
 import { TrashIcon, PencilIcon } from "@heroicons/react/24/outline";
 import { json, redirect } from "@remix-run/node";
@@ -143,19 +143,38 @@ export const loader = async ({
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  // Step 1: Fetch plans and completions in parallel
-  const [plansRaw, libraryPlansRaw, completionsRaw] = await Promise.all([
+  // Pagination for workout plans and library plans
+  const workoutPlansPage = parseInt(url.searchParams.get("workoutPlansPage") || "1", 10);
+  const workoutPlansPageSize = parseInt(url.searchParams.get("workoutPlansPageSize") || "10", 10);
+  const workoutPlansOffset = (workoutPlansPage - 1) * workoutPlansPageSize;
+  const libraryPlansPage = parseInt(url.searchParams.get("libraryPlansPage") || "1", 10);
+  const libraryPlansPageSize = parseInt(url.searchParams.get("libraryPlansPageSize") || "10", 10);
+  const libraryPlansOffset = (libraryPlansPage - 1) * libraryPlansPageSize;
+
+  // Fetch paginated plans
+  const [plansRaw, libraryPlansRaw, plansCountRaw, libraryPlansCountRaw, completionsRaw] = await Promise.all([
     supabase
       .from("workout_plans")
-      .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at", { count: "exact" })
       .eq("user_id", client.id)
       .eq("is_template", false)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .range(workoutPlansOffset, workoutPlansOffset + workoutPlansPageSize - 1),
     supabase
       .from("workout_plans")
-      .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at", { count: "exact" })
       .eq("is_template", true)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .range(libraryPlansOffset, libraryPlansOffset + libraryPlansPageSize - 1),
+    supabase
+      .from("workout_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", client.id)
+      .eq("is_template", false),
+    supabase
+      .from("workout_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("is_template", true),
     supabase
       .from("workout_completions")
       .select("completed_at")
@@ -164,17 +183,15 @@ export const loader = async ({
       .lt("completed_at", weekEnd.toISOString().slice(0, 10)),
   ]);
 
-  // Collect all plan ids
-  const allPlanIds = [
-    ...(plansRaw?.data?.map((p: any) => p.id) || []),
-    ...(libraryPlansRaw?.data?.map((p: any) => p.id) || []),
-  ];
+  // Collect all plan ids for this page
+  const workoutPlanIds = (plansRaw?.data?.map((p: any) => p.id) || []);
+  const libraryPlanIds = (libraryPlansRaw?.data?.map((p: any) => p.id) || []);
 
   // Step 2: Fetch all days for all plans
   const { data: daysRawData } = await supabase
     .from("workout_days")
     .select("id, workout_plan_id, day_of_week, is_rest, workout_name, workout_type")
-    .in("workout_plan_id", allPlanIds.length > 0 ? allPlanIds : [""]);
+    .in("workout_plan_id", workoutPlanIds.length > 0 ? workoutPlanIds : [""]);
 
   // Step 3: Fetch all exercises for all days
   const allDayIds = (daysRawData || []).map((d: any) => d.id);
@@ -273,6 +290,12 @@ export const loader = async ({
     days: buildDays(plan.id, plan.title, plan.created_at),
   }));
 
+  // Pagination info
+  const workoutPlansTotal = plansCountRaw.count || 0;
+  const workoutPlansHasMore = workoutPlansOffset + workoutPlans.length < workoutPlansTotal;
+  const libraryPlansTotal = libraryPlansCountRaw.count || 0;
+  const libraryPlansHasMore = libraryPlansOffset + libraryPlans.length < libraryPlansTotal;
+
   // Build complianceData: for each day, check if there's a completion
   const completions = completionsRaw?.data || [];
   const complianceData: number[] = [];
@@ -287,6 +310,14 @@ export const loader = async ({
   const result = {
     workoutPlans,
     libraryPlans,
+    workoutPlansHasMore,
+    workoutPlansTotal,
+    workoutPlansPage,
+    workoutPlansPageSize,
+    libraryPlansHasMore,
+    libraryPlansTotal,
+    libraryPlansPage,
+    libraryPlansPageSize,
     client,
     complianceData,
     weekStart: weekStart.toISOString(),
@@ -459,7 +490,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     // Get template days
     const { data: templateDays } = await supabase
       .from("workout_days")
-      .select("*")
+      .select("id, day_of_week, is_rest, workout_name, workout_type")
       .eq("workout_plan_id", templateId);
     
     // Copy days and exercises
@@ -482,7 +513,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           // Copy exercises for this day
           const { data: templateExercises } = await supabase
             .from("workout_exercises")
-            .select("*")
+            .select("group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
             .eq("workout_day_id", day.id);
           
           if (templateExercises) {
@@ -790,13 +821,15 @@ function buildWeekFromPlan(plan: WorkoutPlan) {
 }
 
 export default function ClientWorkouts() {
-  const { workoutPlans, libraryPlans, client, complianceData: initialComplianceData, weekStart } = useLoaderData<{
+  const loaderData = useLoaderData<{
     workoutPlans: WorkoutPlan[];
     libraryPlans: WorkoutPlan[];
     client: { id: string; name: string } | null;
     complianceData: number[];
     weekStart: string;
+    workoutPlansHasMore?: boolean;
   }>();
+  const { workoutPlans, libraryPlans, client, complianceData: initialComplianceData, weekStart, workoutPlansHasMore: loaderWorkoutPlansHasMore } = loaderData;
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -812,6 +845,11 @@ export default function ClientWorkouts() {
   const [, setSearchParams] = useSearchParams();
   const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
   const [currentWeekStart, setCurrentWeekStart] = useState(weekStart);
+  const [historyWorkoutPlans, setHistoryWorkoutPlans] = useState(workoutPlans);
+  const [workoutPlansPage, setWorkoutPlansPage] = useState(1);
+  const [hasMoreWorkoutPlans, setHasMoreWorkoutPlans] = useState(loaderWorkoutPlansHasMore ?? true);
+  const historyModalRef = useRef<HTMLDivElement>(null);
+  const historyFetcher = useFetcher();
 
   // Update compliance data when fetcher returns
   useEffect(() => {
@@ -825,6 +863,46 @@ export default function ClientWorkouts() {
     setComplianceData(initialComplianceData);
     setCurrentWeekStart(weekStart);
   }, [initialComplianceData, weekStart]);
+
+  // Infinite scroll for history modal
+  useEffect(() => {
+    if (!isHistoryModalOpen) return;
+    const handleScroll = () => {
+      if (!historyModalRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = historyModalRef.current;
+      if (scrollTop + clientHeight >= scrollHeight - 40 && hasMoreWorkoutPlans && historyFetcher.state === "idle") {
+        const nextPage = workoutPlansPage + 1;
+        setWorkoutPlansPage(nextPage);
+        historyFetcher.load(`${window.location.pathname}?workoutPlansPage=${nextPage}`);
+      }
+    };
+    const el = historyModalRef.current;
+    if (el) {
+      el.addEventListener("scroll", handleScroll);
+      return () => {
+        el.removeEventListener("scroll", handleScroll);
+      };
+    }
+    return undefined;
+  }, [isHistoryModalOpen, hasMoreWorkoutPlans, workoutPlansPage, historyFetcher.state]);
+
+  // Append new plans when fetcher loads more
+  useEffect(() => {
+    if (historyFetcher.data && historyFetcher.state === "idle") {
+      const { workoutPlans: newPlans = [], workoutPlansHasMore = false } = historyFetcher.data as any;
+      setHistoryWorkoutPlans((prev) => [...prev, ...newPlans]);
+      setHasMoreWorkoutPlans(workoutPlansHasMore);
+    }
+  }, [historyFetcher.data, historyFetcher.state]);
+
+  // Reset on open
+  useEffect(() => {
+    if (isHistoryModalOpen) {
+      setHistoryWorkoutPlans(workoutPlans);
+      setWorkoutPlansPage(1);
+      setHasMoreWorkoutPlans(loaderWorkoutPlansHasMore ?? true);
+    }
+  }, [isHistoryModalOpen, workoutPlans, loaderWorkoutPlansHasMore]);
 
   // For visible plans, just show all plans (or filter as needed)
   const sortedPlans = [...workoutPlans].sort((a, b) =>
@@ -1067,13 +1145,13 @@ export default function ClientWorkouts() {
               onClose={() => setIsHistoryModalOpen(false)}
               title="Workout History"
             >
-              <div className="space-y-4">
-                {sortedPlans.length === 0 ? (
+              <div className="space-y-4" ref={historyModalRef}>
+                {historyWorkoutPlans.length === 0 ? (
                   <div className="text-center text-gray-dark dark:text-gray-light">
                     No workouts in history.
                   </div>
                 ) : (
-                  sortedPlans.map((workout) => (
+                  historyWorkoutPlans.map((workout) => (
                     <div
                       key={workout.id}
                       className={`p-4 border rounded-lg ${
@@ -1151,6 +1229,14 @@ export default function ClientWorkouts() {
                       </div>
                     </div>
                   ))
+                )}
+                {hasMoreWorkoutPlans && historyFetcher.state === "loading" && (
+                  <div className="flex justify-center py-4">
+                    <svg className="animate-spin h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
                 )}
               </div>
             </Modal>
@@ -1248,14 +1334,31 @@ export default function ClientWorkouts() {
                   const isToday = thisDate.getTime() === today.getTime();
                   const isFuture = thisDate.getTime() > today.getTime();
                   
-                  // Determine percentage for display
-                  const percentage = Math.round((complianceData[i] || 0) * 100);
-                  let displayPercentage = percentage;
-                  
-                  // For pending days, show 0% in the bar but don't show percentage text
-                  if (isFuture || (isToday && complianceData[i] === 0)) {
-                    displayPercentage = 0;
+                  // --- NEW: Check if this is a rest day in the active plan ---
+                  const activePlan = sortedPlans.find((p) => p.isActive);
+                  let isRestDay = false;
+                  if (activePlan && Array.isArray(activePlan.days) && activePlan.days[i]) {
+                    isRestDay = !!activePlan.days[i].isRest;
                   }
+                  // --- END NEW ---
+                  
+                  // Determine percentage for display
+                  let percentage = Math.round((complianceData[i] || 0) * 100);
+                  let displayPercentage = percentage;
+                  let displayText = `${percentage}%`;
+                  let barColor = getBarColor(complianceData[i] || 0);
+                  
+                  // --- NEW: If rest day, always show 100% ---
+                  if (isRestDay) {
+                    displayPercentage = 100;
+                    displayText = "100%";
+                    barColor = getBarColor(1); // 100% green
+                  } else if (isFuture || (isToday && complianceData[i] === 0)) {
+                    displayPercentage = 0;
+                    displayText = "Pending";
+                    barColor = 'transparent';
+                  }
+                  // --- END NEW ---
                   
                   return (
                     <div key={label} className="flex items-center gap-4">
@@ -1269,26 +1372,30 @@ export default function ClientWorkouts() {
                             className="absolute left-0 top-0 h-2 rounded-full"
                             style={{
                               width: `${displayPercentage}%`,
-                              background: displayPercentage > 0 ? getBarColor(complianceData[i] || 0) : 'transparent',
+                              background: displayPercentage > 0 ? barColor : 'transparent',
                               transition: "width 0.3s, background 0.3s",
                             }}
                           />
                         </div>
                         <span
                           className={`ml-4 text-xs font-medium text-right whitespace-nowrap ${
-                            isToday && complianceData[i] === 0 
+                            isRestDay
+                              ? 'bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20'
+                              : isToday && complianceData[i] === 0 
                               ? 'bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20' 
                               : isFuture || (isToday && complianceData[i] === 0)
                               ? 'text-gray-500 min-w-[60px]'
                               : 'min-w-[40px]'
                           }`}
                           style={{ 
-                            color: !(isFuture || (isToday && complianceData[i] === 0)) 
-                              ? getBarColor(complianceData[i] || 0)
-                              : undefined
+                            color: isRestDay
+                              ? getBarColor(1)
+                              : !(isFuture || (isToday && complianceData[i] === 0)) 
+                                ? getBarColor(complianceData[i] || 0)
+                                : undefined
                           }}
                         >
-                          {isFuture || (isToday && complianceData[i] === 0) ? 'Pending' : `${percentage}%`}
+                          {displayText}
                         </span>
                       </div>
                     </div>

@@ -1,7 +1,7 @@
 import type { MetaFunction } from "@remix-run/node";
 import Button from "~/components/ui/Button";
 import ClientInviteModal from "~/components/coach/ClientInviteModal";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import { parse } from "cookie";
@@ -9,10 +9,11 @@ import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import type { LoaderFunction } from "@remix-run/node";
 import type { Database } from "~/lib/supabase";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useSearchParams, useNavigate, useFetcher } from "@remix-run/react";
 import ClientProfile from "~/components/coach/ClientProfile";
 import { Link } from "@remix-run/react";
 import { calculateMacros } from "~/lib/utils";
+import { URL } from "url";
 
 interface Supplement {
   id: string;
@@ -61,6 +62,11 @@ export const meta: MetaFunction = () => {
 const clientsCache: Record<string, { data: any; expires: number }> = {};
 
 export const loader: LoaderFunction = async ({ request }) => {
+  const url = new URL(request.url);
+  const page = parseInt(url.searchParams.get("page") || "1", 10);
+  const pageSize = 10;
+  const offset = (page - 1) * pageSize;
+
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
     (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
@@ -106,181 +112,91 @@ export const loader: LoaderFunction = async ({ request }) => {
     }
   }
 
-  // Check cache (per coach)
-  if (coachId && clientsCache[coachId] && clientsCache[coachId].expires > Date.now()) {
-    return json({ clients: clientsCache[coachId].data });
+  // Only cache the first page (optional, can expand later)
+  if (
+    coachId &&
+    page === 1 &&
+    clientsCache[coachId] &&
+    clientsCache[coachId].expires > Date.now()
+  ) {
+    return json(clientsCache[coachId].data);
   }
 
   let clients: {
     id: string;
     name: string;
     email?: string;
-    goal?: string;
-    starting_weight?: number;
-    current_weight?: number;
-    workout_split?: string;
-    role?: string;
-    coach_id?: string;
+    status?: string;
     slug?: string;
-    activeMealPlan?: MealPlan | null;
-    activeWorkoutPlan?: WorkoutPlan | null;
-    supplements?: Supplement[];
-    firstWeightLog?: { weight: number };
   }[] = [];
+  let hasMore = false;
+  let total = 0;
   if (coachId) {
     const supabase = createClient<Database>(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
     );
-    // Fetch all clients for this coach
-    const { data: clientRows, error } = await supabase
+    // Fetch paginated clients for this coach (summary only)
+    const { data: clientRows, count, error } = await supabase
       .from("users")
-      .select(
-        "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
-      )
+      .select("id, name, email, status, slug", { count: "exact" })
       .eq("coach_id", coachId)
       .eq("role", "client")
-      .neq("status", "inactive"); // Only show active clients
+      .neq("status", "inactive")
+      .order("created_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
     if (error) console.log("[LOADER] Supabase error:", error);
-    if (clientRows && clientRows.length > 0) {
-      const clientIds = clientRows.map((c) => c.id);
-      // Batch fetch all related data
-      const [
-        mealPlansRaw,
-        mealsRaw,
-        foodsRaw,
-        workoutPlansRaw,
-        supplementsRaw,
-        firstWeightLogsRaw
-      ] = await Promise.all([
-        supabase
-          .from("meal_plans")
-          .select("id, title, is_active, user_id")
-          .in("user_id", clientIds)
-          .eq("is_active", true),
-        supabase
-          .from("meals")
-          .select("id, name, time, sequence_order, meal_plan_id")
-          .in("meal_plan_id", clientIds.length > 0 ? clientIds : [""]),
-        supabase
-          .from("foods")
-          .select("id, name, portion, calories, protein, carbs, fat, meal_id")
-          .in("meal_id", clientIds.length > 0 ? clientIds : [""]),
-        supabase
-          .from("workout_plans")
-          .select("id, title, is_active, user_id")
-          .in("user_id", clientIds)
-          .eq("is_active", true),
-        supabase
-          .from("supplements")
-          .select("id, name, user_id")
-          .in("user_id", clientIds),
-        supabase
-          .from("weight_logs")
-          .select("weight, user_id, logged_at")
-          .in("user_id", clientIds)
-      ]);
-      // Group data by client
-      const mealPlansByUser: Record<string, MealPlan | null> = {};
-      (mealPlansRaw?.data || []).forEach((plan) => {
-        mealPlansByUser[plan.user_id] = { ...plan, meals: [] };
-      });
-      const mealsByPlan: Record<string, Meal[]> = {};
-      (mealsRaw?.data || []).forEach((meal) => {
-        if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
-        mealsByPlan[meal.meal_plan_id].push({ ...meal, foods: [] });
-      });
-      const foodsByMeal: Record<string, MealFood[]> = {};
-      (foodsRaw?.data || []).forEach((food) => {
-        if (!foodsByMeal[food.meal_id]) foodsByMeal[food.meal_id] = [];
-        foodsByMeal[food.meal_id].push(food);
-      });
-      // Attach foods to meals
-      Object.values(mealsByPlan).forEach((meals) => {
-        meals.forEach((meal) => {
-          meal.foods = foodsByMeal[meal.id] || [];
-        });
-      });
-      // Attach meals to meal plans
-      Object.entries(mealPlansByUser).forEach(([userId, plan]) => {
-        if (plan && mealsByPlan[plan.id]) {
-          plan.meals = mealsByPlan[plan.id];
-        }
-      });
-      // Workout plans
-      const workoutPlansByUser: Record<string, WorkoutPlan | null> = {};
-      (workoutPlansRaw?.data || []).forEach((plan) => {
-        workoutPlansByUser[plan.user_id] = plan;
-      });
-      // Supplements
-      const supplementsByUser: Record<string, Supplement[]> = {};
-      (supplementsRaw?.data || []).forEach((supp) => {
-        if (!supplementsByUser[supp.user_id]) supplementsByUser[supp.user_id] = [];
-        supplementsByUser[supp.user_id].push(supp);
-      });
-      // First weight log
-      const firstWeightLogByUser: Record<string, { weight: number; logged_at: string } | undefined> = {};
-      (firstWeightLogsRaw?.data || []).forEach((log) => {
-        if (!firstWeightLogByUser[log.user_id] ||
-            new Date(log.logged_at) < new Date(firstWeightLogByUser[log.user_id]?.logged_at || Infinity)) {
-          firstWeightLogByUser[log.user_id] = { weight: log.weight, logged_at: log.logged_at };
-        }
-      });
-      // Build clients array
-      clients = clientRows.map((client) => ({
-        ...client,
-        activeMealPlan: mealPlansByUser[client.id] || null,
-        activeWorkoutPlan: workoutPlansByUser[client.id] || null,
-        supplements: supplementsByUser[client.id] || [],
-        firstWeightLog: firstWeightLogByUser[client.id]
-          ? { weight: firstWeightLogByUser[client.id]!.weight }
-          : undefined,
-      }));
-    }
+    clients = clientRows || [];
+    total = count || 0;
+    hasMore = offset + clients.length < total;
   }
-  // Cache result
-  if (coachId) {
-    clientsCache[coachId] = { data: clients, expires: Date.now() + 30_000 };
+  const result = { clients, hasMore, page, pageSize, total };
+  if (coachId && page === 1) {
+    clientsCache[coachId] = { data: result, expires: Date.now() + 30_000 };
   }
-  return json({ clients });
+  return json(result);
 };
 
 export default function ClientsIndex() {
-  const { coachId, clients } = useLoaderData<{
-    coachId: string;
-    clients: {
-      id: string;
-      name: string;
-      email?: string;
-      goal?: string;
-      starting_weight?: number;
-      current_weight?: number;
-      workout_split?: string;
-      role?: string;
-      coach_id?: string;
-      slug?: string;
-      activeMealPlan?: MealPlan | null;
-      activeWorkoutPlan?: WorkoutPlan | null;
-      supplements?: Supplement[];
-      firstWeightLog?: { weight: number };
-    }[];
+  const initialData = useLoaderData<{
+    clients: { id: string; name: string; email?: string; status?: string; slug?: string }[];
+    hasMore: boolean;
+    page: number;
+    pageSize: number;
+    total: number;
   }>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const filteredClients = clients.filter(
-    (client: {
-      name: string;
-      goal?: string;
-      starting_weight?: number;
-      current_weight?: number;
-      workout_split?: string;
-      current_macros?: { protein: number; carbs: number; fat: number };
-      supplement_count?: number;
-    }) =>
-      client.name.toLowerCase().includes(search.toLowerCase()) ||
-      (client.goal || "").toLowerCase().includes(search.toLowerCase()) ||
-      (client.workout_split || "").toLowerCase().includes(search.toLowerCase())
+  const [clients, setClients] = useState(initialData.clients);
+  const [page, setPage] = useState(initialData.page);
+  const [hasMore, setHasMore] = useState(initialData.hasMore);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const fetcher = useFetcher();
+
+  // When fetcher loads more clients, append them
+  useEffect(() => {
+    if (fetcher.data && fetcher.state === "idle") {
+      const data = fetcher.data as {
+        clients: { id: string; name: string; email?: string; status?: string; slug?: string }[];
+        hasMore: boolean;
+        page: number;
+      };
+      setClients((prev) => [...prev, ...(data.clients || [])]);
+      setPage(data.page);
+      setHasMore(data.hasMore);
+      setLoadingMore(false);
+    }
+  }, [fetcher.data, fetcher.state]);
+
+  const filteredClients = clients.filter((client) =>
+    client.name.toLowerCase().includes(search.toLowerCase()) ||
+    (client.email || "").toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleLoadMore = () => {
+    setLoadingMore(true);
+    fetcher.load(`/dashboard/clients?page=${page + 1}`);
+  };
 
   return (
     <div className="p-6">
@@ -321,64 +237,44 @@ export default function ClientsIndex() {
       </div>
 
       <div className="space-y-4">
-        {filteredClients.map((client) => {
-          // Convert meal/food IDs to numbers for ClientProfile compatibility
-          const safeMeals = (client.activeMealPlan?.meals || []).map(
-            (meal) => ({
-              ...meal,
-              id:
-                typeof meal.id === "number" ? meal.id : parseInt(meal.id) || 0,
-              foods: (meal.foods || []).map((food) => ({
-                ...food,
-                id:
-                  typeof food.id === "number"
-                    ? food.id
-                    : parseInt(food.id) || 0,
-              })),
-            })
-          );
-          // Calculate macros from active meal plan
-          let macros = { protein: 0, carbs: 0, fat: 0 };
-          if (safeMeals.length > 0) {
-            macros = calculateMacros(safeMeals);
-          }
-          // Workout split from active workout plan
-          const workoutSplit = client.activeWorkoutPlan?.title || "N/A";
-          // Supplements
-          const supplementCount = client.supplements?.length || 0;
-          // Use first weight log as startingWeight if it exists, else fallback
-          const startingWeight = client.firstWeightLog?.weight ?? client.starting_weight ?? 0;
-          return (
-            <Link
-              key={client.id}
-              to={`/dashboard/clients/${client.slug || client.id}`}
-              className="block hover:shadow-lg transition-all"
-              style={{ textDecoration: "none", color: "inherit" }}
-            >
+        {filteredClients.length === 0 && (
+          <div className="text-gray-500 dark:text-gray-light">No clients found.</div>
+        )}
+        {filteredClients.map((client) => (
+          <Link
+            key={client.id}
+            to={`/dashboard/clients/${client.slug || client.id}`}
+            className="block hover:shadow-lg transition-all"
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            <div className="p-4 border rounded-md bg-white dark:bg-night flex flex-col sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <ClientProfile
-                  client={{
-                    id: client.id,
-                    name: client.name || "Unnamed",
-                    startingWeight,
-                    currentWeight: client.current_weight ?? 0,
-                    currentMacros: macros,
-                    workoutSplit,
-                    supplementCount,
-                    goal: client.goal || "N/A",
-                  }}
-                  mealPlan={{ meals: safeMeals }}
-                />
+                <div className="font-semibold text-lg text-secondary dark:text-alabaster">{client.name}</div>
+                <div className="text-sm text-gray-500 dark:text-gray-light">{client.email}</div>
               </div>
-            </Link>
-          );
-        })}
+              <div className="mt-2 sm:mt-0">
+                <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${client.status === "active" ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-600"}`}>
+                  {client.status || "Unknown"}
+                </span>
+              </div>
+            </div>
+          </Link>
+        ))}
       </div>
+
+      {/* Load More Button */}
+      {hasMore && (
+        <div className="flex justify-center mt-8">
+          <Button variant="outline" onClick={handleLoadMore} disabled={loadingMore || fetcher.state !== "idle"}>
+            {loadingMore || fetcher.state !== "idle" ? "Loading..." : "Load More"}
+          </Button>
+        </div>
+      )}
 
       <ClientInviteModal
         isOpen={isInviteModalOpen}
         onClose={() => setIsInviteModalOpen(false)}
-        coachId={coachId}
+        coachId={undefined}
       />
     </div>
   );

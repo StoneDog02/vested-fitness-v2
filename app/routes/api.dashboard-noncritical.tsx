@@ -59,10 +59,10 @@ export const loader: LoaderFunction = async ({ request }) => {
     throw new Response("User not found", { status: 404 });
   }
 
-  let recentActivity: any[] = [];
-  let recentClients: any[] = [];
+  let recentActivity: Array<{ id: string; clientName: string; action: string; time: string }> = [];
+  let recentClients: Array<{ id: string; name: string; updated_at: string; created_at: string; role: string; status: string }> = [];
   let weightChange = 0;
-  let complianceCalendars = {};
+  const complianceCalendars = {};
 
   if (user.role === "client") {
     // Weight change
@@ -126,7 +126,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       suppsLogged = supplements;
     }
     // Group activities by client and type
-    const activityGroups: { [key: string]: any } = {};
+    const activityGroups: { [key: string]: { clientName: string; action: string; count: number; latestTime: string; id: string } } = {};
     if (workoutsToday) {
       for (const w of workoutsToday) {
         const client = clients ? clients.find((c: any) => c.id === w.user_id) : null;
@@ -188,7 +188,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         }
       }
     }
-    recentActivity = Object.values(activityGroups).map((group: any) => {
+    recentActivity = Object.values(activityGroups).map((group) => {
       let actionText = group.action;
       if (group.count > 1) {
         actionText = `${group.action} (${group.count})`;

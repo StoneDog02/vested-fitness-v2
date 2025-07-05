@@ -113,6 +113,10 @@ interface LoaderData {
   weightLogs?: WeightLog[];
   activeMealPlan?: MealPlan | null;
   activeWorkoutPlan?: WorkoutPlan | null;
+  checkInsPage: number;
+  checkInsPageSize: number;
+  checkInsTotal: number;
+  checkInsHasMore: boolean;
 }
 
 // In-memory cache for client details (expires after 30s)
@@ -120,12 +124,19 @@ const clientDetailCache: Record<string, { data: any; expires: number }> = {};
 
 export const loader: import("@remix-run/node").LoaderFunction = async ({
   params,
+  request,
 }) => {
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
   const clientIdParam = params.clientId;
+
+  // Parse pagination params for check-ins
+  const url = new URL(request.url);
+  const checkInsPage = parseInt(url.searchParams.get("checkInsPage") || "1", 10);
+  const checkInsPageSize = parseInt(url.searchParams.get("checkInsPageSize") || "10", 10);
+  const checkInsOffset = (checkInsPage - 1) * checkInsPageSize;
 
   // Check cache (per client)
   if (clientIdParam && clientDetailCache[clientIdParam] && clientDetailCache[clientIdParam].expires > Date.now()) {
@@ -197,6 +208,10 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
       checkIns: [],
       mealPlans: [],
       supplements: [],
+      checkInsPage: 1,
+      checkInsPageSize: 10,
+      checkInsTotal: 0,
+      checkInsHasMore: false,
     });
   }
 
@@ -213,22 +228,23 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     // Updates from last 7 days
     supabase
       .from("coach_updates")
-      .select("*")
+      .select("id, coach_id, client_id, message, created_at, updated_at")
       .eq("client_id", client.id)
       .gte("created_at", dayjs().subtract(7, 'day').toISOString())
       .order("created_at", { ascending: false }),
     // All updates
     supabase
       .from("coach_updates")
-      .select("*")
+      .select("id, coach_id, client_id, message, created_at, updated_at")
       .eq("client_id", client.id)
       .order("created_at", { ascending: false }),
-    // Check-ins
+    // Paginated check-ins
     supabase
       .from("check_ins")
-      .select("id, notes, created_at")
+      .select("id, notes, created_at", { count: "exact" })
       .eq("client_id", client.id)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .range(checkInsOffset, checkInsOffset + checkInsPageSize - 1),
     // Meal plans
     supabase
       .from("meal_plans")
@@ -295,11 +311,20 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   const supplements = supplementsRaw?.data || [];
   const weightLogs = weightLogsRaw?.data || [];
 
+  // For check-ins, add pagination info
+  const checkIns = checkInsRaw?.data || [];
+  const checkInsTotal = checkInsRaw?.count || 0;
+  const checkInsHasMore = checkInsOffset + checkIns.length < checkInsTotal;
+
   const result = {
     client,
     updates: updatesRaw?.data || [],
     allUpdates: allUpdatesRaw?.data || [],
-    checkIns: checkInsRaw?.data || [],
+    checkIns,
+    checkInsPage,
+    checkInsPageSize,
+    checkInsTotal,
+    checkInsHasMore,
     mealPlans: mealPlans || [],
     supplements,
     weightLogs,
@@ -525,6 +550,10 @@ export default function ClientDetails() {
     activeMealPlan,
     activeWorkoutPlan,
     supplements,
+    checkInsPage,
+    checkInsPageSize,
+    checkInsTotal,
+    checkInsHasMore,
   } = useLoaderData<LoaderData>();
   const [showAddMessage, setShowAddMessage] = useState(false);
   const [showAddCheckIn, setShowAddCheckIn] = useState(false);
@@ -566,12 +595,6 @@ export default function ClientDetails() {
     .map(Number)
     .sort((a, b) => b - a);
 
-  // For history, use ALL check-ins that are older than 2 weeks
-  const allHistoryCheckIns = sortedCheckIns.filter(checkIn => {
-    const checkInTime = dayjs(checkIn.date).valueOf();
-    return checkInTime < recentWeekBoundary;
-  });
-
   // More explicit filtering - only show check-ins that are exactly in the current or previous week
   const thisWeekEnd = now.endOf('week').valueOf();
   const lastWeekEnd = now.subtract(1, 'week').endOf('week').valueOf();
@@ -598,24 +621,6 @@ export default function ClientDetails() {
     }) || null;
   })();
 
-  // For history, use check-ins that don't belong to this week or currently visible last week
-  const historyCheckIns = sortedCheckIns.filter(checkIn => {
-    const checkInTime = dayjs(checkIn.date).valueOf();
-    const oneDayAfterLastWeek = dayjs(lastWeekEnd).add(1, 'day').valueOf();
-    
-    // Exclude check-ins that fall within this week
-    const isInThisWeek = checkInTime >= thisWeekStart && checkInTime <= thisWeekEnd;
-    
-    // For last week check-ins, only exclude them if we're still within the cutoff period
-    const isInLastWeekAndStillVisible = (
-      checkInTime >= lastWeekStart && 
-      checkInTime <= lastWeekEnd && 
-      now.valueOf() <= oneDayAfterLastWeek
-    );
-    
-    return !isInThisWeek && !isInLastWeekAndStillVisible;
-  });
-
   // Debug logging to help identify the issue
   if (typeof window !== 'undefined') {
     console.log('Debug Check-in Info:', {
@@ -638,23 +643,49 @@ export default function ClientDetails() {
       })),
       thisWeekCheckIn: thisWeekCheckIn ? { date: thisWeekCheckIn.date, notes: thisWeekCheckIn.notes.substring(0, 20) } : null,
       lastWeekCheckIn: lastWeekCheckIn ? { date: lastWeekCheckIn.date, notes: lastWeekCheckIn.notes.substring(0, 20) } : null,
-      historyCount: historyCheckIns.length
     });
   }
 
-  // History modal pagination (if needed)
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
-  const displayedHistory = historyCheckIns.slice(0, currentPage * pageSize);
-  const hasMore = displayedHistory.length < historyCheckIns.length;
-  const handleLoadMore = () => setCurrentPage((p) => p + 1);
+  // New history state
+  const [historyCheckIns, setHistoryCheckIns] = useState<CheckInNote[]>([]);
+  const [historyPage, setHistoryPage] = useState(checkInsPage);
+  const [historyHasMore, setHistoryHasMore] = useState(checkInsHasMore);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const historyFetcher = useFetcher();
 
-  // When checkIns changes (add/delete), reset pagination if modal is open
+  // When loader data changes (first load), set initial history state
   useEffect(() => {
-    if (showHistory) {
-      setCurrentPage(1);
+    setHistoryCheckIns(
+      ((loaderCheckIns as CheckIn[]) || []).map((c) => ({ id: c.id, date: c.created_at, notes: c.notes }))
+    );
+    setHistoryPage(checkInsPage);
+    setHistoryHasMore(checkInsHasMore);
+  }, [loaderCheckIns, checkInsPage, checkInsHasMore]);
+
+  // When historyFetcher loads more, append to historyCheckIns
+  useEffect(() => {
+    if (historyFetcher.data && historyFetcher.state === "idle") {
+      const data = historyFetcher.data as {
+        checkIns: CheckIn[];
+        checkInsPage: number;
+        checkInsHasMore: boolean;
+      };
+      setHistoryCheckIns((prev) => [
+        ...prev,
+        ...(data.checkIns || []).map((c) => ({ id: c.id, date: c.created_at, notes: c.notes })),
+      ]);
+      setHistoryPage(data.checkInsPage || historyPage + 1);
+      setHistoryHasMore(data.checkInsHasMore ?? false);
+      setHistoryLoading(false);
     }
-  }, [checkIns, showHistory]);
+  }, [historyFetcher.data, historyFetcher.state]);
+
+  const handleLoadMoreHistory = () => {
+    setHistoryLoading(true);
+    historyFetcher.load(
+      `/dashboard/clients/${client.slug || client.id}?checkInsPage=${historyPage + 1}`
+    );
+  };
 
   // Periodically filter out updates older than 7 days from main display
   useEffect(() => {
@@ -858,6 +889,8 @@ export default function ClientDetails() {
               onClose={() => setShowUpdateHistory(false)}
               updates={allUpdates}
               emptyMessage="No updates yet."
+              onLoadMore={handleLoadMoreHistory}
+              hasMore={historyHasMore}
             />
 
             {/* Check In Notes */}
@@ -969,13 +1002,13 @@ export default function ClientDetails() {
         <CheckInHistoryModal
           isOpen={showHistory}
           onClose={() => setShowHistory(false)}
-          checkIns={displayedHistory.map((c) => ({ 
-            ...c, 
+          checkIns={historyCheckIns.map((c) => ({
+            ...c,
             formattedDate: formatDateMMDDYYYY(c.date),
-            weekRange: formatWeekRange(getWeekStart(c.date))
+            weekRange: formatWeekRange(getWeekStart(c.date)),
           }))}
-          onLoadMore={handleLoadMore}
-          hasMore={hasMore}
+          onLoadMore={handleLoadMoreHistory}
+          hasMore={historyHasMore}
           emptyMessage="No history yet."
         />
       </div>

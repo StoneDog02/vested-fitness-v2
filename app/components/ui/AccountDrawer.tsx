@@ -23,7 +23,6 @@ interface AccountDrawerProps {
     name: string;
     email: string;
     avatar_url?: string;
-    font_size?: string;
   } | null;
 }
 

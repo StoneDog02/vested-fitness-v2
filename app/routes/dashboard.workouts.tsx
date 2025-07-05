@@ -493,6 +493,8 @@ export default function Workouts() {
     return `${date.getMonth() + 1}/${date.getDate()}`;
   };
 
+  const safeComplianceData = Array.isArray(complianceData) ? complianceData : [];
+
   return (
     <div className="p-4 sm:p-6">
       {/* Success Message */}
@@ -628,7 +630,7 @@ export default function Workouts() {
                   {currentDayWorkout?.isRest ? "Rest day - take time to recover!" : "No workout scheduled for this day."}
                 </p>
               ) : (
-                currentDayWorkout.groups.map((group: any, idx: number) => (
+                (Array.isArray(currentDayWorkout?.groups) ? currentDayWorkout.groups : []).map((group: any, idx: number) => (
                   <div
                     key={group.id}
                     className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
@@ -794,13 +796,13 @@ export default function Workouts() {
                 // Determine status and display
                 let status: string;
                 let displayText: string;
-                const percentage = Math.round((complianceData[i] || 0) * 100);
+                const percentage = Math.round((safeComplianceData[i] || 0) * 100);
                 
                 if (isFuture) {
                   status = "pending";
                   displayText = "Pending";
                 } else if (isToday) {
-                  if (complianceData[i] > 0) {
+                  if (safeComplianceData[i] > 0) {
                     status = "completed";
                     displayText = `${percentage}%`;
                   } else if (!hasWorkoutsAssigned) {
@@ -813,7 +815,7 @@ export default function Workouts() {
                   }
                 } else {
                   // Past day
-                  if (complianceData[i] > 0) {
+                  if (safeComplianceData[i] > 0) {
                     status = "completed";
                     displayText = `${percentage}%`;
                   } else if (!hasWorkoutsAssigned) {
