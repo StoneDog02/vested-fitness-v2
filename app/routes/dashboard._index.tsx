@@ -421,8 +421,180 @@ export const loader: LoaderFunction = async ({ request }) => {
         };
         dashboardCache[authId] = { data: { clientData }, expires: Date.now() + 30_000 };
         return json({ clientData });
+      } else if (user.role === "coach") {
+        // Fetch all clients for this coach
+        const { data: clientsRaw } = await supabase
+          .from("users")
+          .select("id, name, updated_at, created_at, role, status")
+          .eq("coach_id", user.id)
+          .eq("role", "client");
+        const clients = clientsRaw || [];
+        // Count totals
+        const totalClients = clients.length;
+        const activeClients = clients.filter(c => c.status === "active").length;
+        const inactiveClients = clients.filter(c => c.status === "inactive").length;
+        // --- Compliance Calculation ---
+        const activeClientIds = clients.filter(c => c.status === "active").map(c => c.id);
+        let compliance = 0;
+        if (activeClientIds.length > 0) {
+          const weekAgo = new Date();
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          const weekAgoISO = weekAgo.toISOString();
+          const nowISO = new Date().toISOString();
+          // First, fetch workoutPlansRaw and mealPlansRaw
+          const [workoutPlansRaw, mealPlansRaw] = await Promise.all([
+            supabase
+              .from("workout_plans")
+              .select("id, user_id, is_active")
+              .in("user_id", activeClientIds)
+              .eq("is_active", true),
+            supabase
+              .from("meal_plans")
+              .select("id, user_id, is_active")
+              .in("user_id", activeClientIds)
+              .eq("is_active", true)
+          ]);
+          // Now fetch all completions, workout days, meals, and supplements
+          const [
+            workoutCompletionsRaw,
+            mealCompletionsRaw,
+            supplementCompletionsRaw,
+            workoutDaysRaw,
+            mealsRaw,
+            supplementsRaw
+          ] = await Promise.all([
+            supabase
+              .from("workout_completions")
+              .select("id, completed_at, user_id")
+              .in("user_id", activeClientIds)
+              .gte("completed_at", weekAgoISO)
+              .lt("completed_at", nowISO),
+            supabase
+              .from("meal_completions")
+              .select("id, completed_at, user_id")
+              .in("user_id", activeClientIds)
+              .gte("completed_at", weekAgoISO)
+              .lt("completed_at", nowISO),
+            supabase
+              .from("supplement_completions")
+              .select("id, completed_at, user_id")
+              .in("user_id", activeClientIds)
+              .gte("completed_at", weekAgoISO)
+              .lt("completed_at", nowISO),
+            supabase
+              .from("workout_days")
+              .select("workout_plan_id, is_rest")
+              .in("workout_plan_id", (workoutPlansRaw.data ?? []).map((p: any) => p.id)),
+            supabase
+              .from("meals")
+              .select("id, meal_plan_id")
+              .in("meal_plan_id", (mealPlansRaw.data ?? []).map((p: any) => p.id)),
+            supabase
+              .from("supplements")
+              .select("id, user_id")
+              .in("user_id", activeClientIds)
+          ]);
+          // Group plans and data by user
+          const workoutPlanByUser: Record<string, any> = {};
+          (workoutPlansRaw.data ?? []).forEach((plan: any) => {
+            workoutPlanByUser[plan.user_id] = plan;
+          });
+          const mealPlanByUser: Record<string, any> = {};
+          (mealPlansRaw.data ?? []).forEach((plan: any) => {
+            mealPlanByUser[plan.user_id] = plan;
+          });
+          const workoutDaysByPlan: Record<string, any[]> = {};
+          (workoutDaysRaw.data ?? []).forEach((day: any) => {
+            if (!workoutDaysByPlan[day.workout_plan_id]) workoutDaysByPlan[day.workout_plan_id] = [];
+            workoutDaysByPlan[day.workout_plan_id].push(day);
+          });
+          const mealsByPlan: Record<string, any[]> = {};
+          (mealsRaw.data ?? []).forEach((meal: any) => {
+            if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
+            mealsByPlan[meal.meal_plan_id].push(meal);
+          });
+          const supplementsByUser: Record<string, any[]> = {};
+          (supplementsRaw.data ?? []).forEach((supp: any) => {
+            if (!supplementsByUser[supp.user_id]) supplementsByUser[supp.user_id] = [];
+            supplementsByUser[supp.user_id].push(supp);
+          });
+          // Group completions by user
+          const workoutCompletionsByUser: Record<string, any[]> = {};
+          (workoutCompletionsRaw.data ?? []).forEach((comp: any) => {
+            if (!workoutCompletionsByUser[comp.user_id]) workoutCompletionsByUser[comp.user_id] = [];
+            workoutCompletionsByUser[comp.user_id].push(comp);
+          });
+          const mealCompletionsByUser: Record<string, any[]> = {};
+          (mealCompletionsRaw.data ?? []).forEach((comp: any) => {
+            if (!mealCompletionsByUser[comp.user_id]) mealCompletionsByUser[comp.user_id] = [];
+            mealCompletionsByUser[comp.user_id].push(comp);
+          });
+          const supplementCompletionsByUser: Record<string, any[]> = {};
+          (supplementCompletionsRaw.data ?? []).forEach((comp: any) => {
+            if (!supplementCompletionsByUser[comp.user_id]) supplementCompletionsByUser[comp.user_id] = [];
+            supplementCompletionsByUser[comp.user_id].push(comp);
+          });
+          // Calculate compliance for each client
+          let totalOverallCompliance = 0;
+          let countedClients = 0;
+          for (const clientId of activeClientIds) {
+            // Expected workouts
+            let expectedWorkoutDays = 0;
+            const plan = workoutPlanByUser[clientId];
+            if (plan && workoutDaysByPlan[plan.id]) {
+              expectedWorkoutDays = (workoutDaysByPlan[plan.id] || []).filter((day: any) => !day.is_rest).length;
+            }
+            // Expected meals (7 days worth)
+            let expectedMeals = 0;
+            const mealPlan = mealPlanByUser[clientId];
+            if (mealPlan && mealsByPlan[mealPlan.id]) {
+              expectedMeals = (mealsByPlan[mealPlan.id] || []).length * 7;
+            }
+            // Expected supplements (7 days worth)
+            const supplements = supplementsByUser[clientId] || [];
+            const expectedSupplements = supplements.length * 7;
+            // Completions
+            const completedWorkouts = (workoutCompletionsByUser[clientId] || []).length;
+            const completedMeals = (mealCompletionsByUser[clientId] || []).length;
+            const completedSupplements = (supplementCompletionsByUser[clientId] || []).length;
+            // Calculate overall compliance
+            const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
+            const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
+            const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
+            if (totalExpected > 0) {
+              totalOverallCompliance += overallCompliance;
+              countedClients++;
+            }
+          }
+          compliance = countedClients > 0 ? Math.round(totalOverallCompliance / countedClients) : 0;
+        }
+        // --- End Compliance Calculation ---
+        dashboardCache[authId] = {
+          data: {
+            coachId: user.id,
+            totalClients,
+            activeClients,
+            inactiveClients,
+            compliance,
+            percentChange: 0, // Placeholder
+            clients,
+            recentClients: [], // Handled by noncritical fetcher
+            recentActivity: [], // Handled by noncritical fetcher
+          },
+          expires: Date.now() + 30_000,
+        };
+        return json({
+          coachId: user.id,
+          totalClients,
+          activeClients,
+          inactiveClients,
+          compliance,
+          percentChange: 0, // Placeholder
+          clients,
+          recentClients: [], // Handled by noncritical fetcher
+          recentActivity: [], // Handled by noncritical fetcher
+        });
       }
-      // ...coach logic: parallelize all independent queries as above, then cache result...
     }
   }
 
