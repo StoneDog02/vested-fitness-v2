@@ -183,12 +183,15 @@ export const loader: LoaderFunction = async ({ request }) => {
         complianceClients.push(...clients.map((client) => {
           // Calculate expected activities for this client
           let expectedWorkoutDays = 0;
+          let restDays = 0;
           let expectedMeals = 0;
           let expectedSupplements = 0;
           // Expected workouts
           const plan = workoutPlanByUser[client.id];
           if (plan && workoutDaysByPlan[plan.id]) {
-            expectedWorkoutDays = (workoutDaysByPlan[plan.id] || []).filter((day: any) => !day.is_rest).length;
+            const workoutDays = workoutDaysByPlan[plan.id] || [];
+            expectedWorkoutDays = workoutDays.filter((day: any) => !day.is_rest).length;
+            restDays = workoutDays.filter((day: any) => day.is_rest).length;
           }
           // Expected meals (7 days worth)
           const mealPlan = mealPlanByUser[client.id];
@@ -203,12 +206,14 @@ export const loader: LoaderFunction = async ({ request }) => {
           const completedMeals = (mealCompletionsByUser[client.id] || []).length;
           const completedSupplements = (supplementCompletionsByUser[client.id] || []).length;
           // Calculate individual compliance percentages
-          const workoutCompliance = expectedWorkoutDays > 0 ? Math.round((completedWorkouts / expectedWorkoutDays) * 100) : 0;
+          const workoutCompliance = (expectedWorkoutDays + restDays) > 0
+            ? Math.round(((completedWorkouts + restDays) / (expectedWorkoutDays + restDays)) * 100)
+            : 0;
           const mealCompliance = expectedMeals > 0 ? Math.round((completedMeals / expectedMeals) * 100) : 0;
           const supplementCompliance = expectedSupplements > 0 ? Math.round((completedSupplements / expectedSupplements) * 100) : 0;
           // Calculate overall compliance
-          const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
-          const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
+          const totalCompleted = (completedWorkouts + restDays) + completedMeals + completedSupplements;
+          const totalExpected = (expectedWorkoutDays + restDays) + expectedMeals + expectedSupplements;
           const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
           return {
             id: client.id,
