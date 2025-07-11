@@ -3,6 +3,8 @@ import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import { useState } from "react";
+import { ChatBox } from "~/components/ui/ChatBox";
+import { useParams, useLoaderData, useMatches } from "@remix-run/react";
 
 interface Message {
   id: string;
@@ -35,21 +37,34 @@ export const meta: MetaFunction = () => {
 };
 
 export default function ClientChat() {
-  const [messages, setMessages] = useState<Message[]>(mockMessages);
+  // Move all hooks to the top level
+  const params = useParams();
   const [newMessage, setNewMessage] = useState("");
+  const matches = useMatches();
+  // Find the parent route with client loader data
+  const parentData = matches.find((m) => m.data && typeof m.data === 'object' && m.data !== null && 'client' in m.data) ?.data as { client: { id: string; name?: string } | null };
+
+  // Defensive: handle missing client
+  if (!parentData?.client) {
+    return (
+      <div className="p-6 text-center text-red-600">
+        Client not found or unavailable.
+      </div>
+    );
+  }
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
 
     const message: Message = {
-      id: (messages.length + 1).toString(),
+      id: (mockMessages.length + 1).toString(),
       sender: "coach",
       content: newMessage,
       timestamp: new Date().toISOString(),
     };
 
-    setMessages([...messages, message]);
+    // setMessages([...messages, message]); // This line is removed as per the new_code
     setNewMessage("");
   };
 
@@ -58,81 +73,21 @@ export default function ClientChat() {
       <div className="p-6">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-secondary dark:text-alabaster">
-            Chat with John Smith
+            Chat with {parentData.client.name || "Client"}
           </h1>
         </div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Left side - Chat Messages */}
           <div>
-            <Card title="Messages">
-              <div className="flex flex-col h-[600px]">
-                {/* Messages container */}
-                <div className="flex-1 overflow-y-auto space-y-4 p-2">
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`flex ${
-                        message.sender === "coach"
-                          ? "justify-end"
-                          : "justify-start"
-                      }`}
-                    >
-                      <div
-                        className={`max-w-[80%] rounded-2xl p-3 shadow-sm ${
-                          message.sender === "coach"
-                            ? "bg-primary text-white rounded-tr-md"
-                            : "bg-gray-light dark:bg-davyGray text-secondary dark:text-alabaster rounded-tl-md"
-                        }`}
-                      >
-                        <p className="text-sm">{message.content}</p>
-                        <span
-                          className={`text-xs mt-1 block ${
-                            message.sender === "coach"
-                              ? "text-white/80"
-                              : "text-gray-dark dark:text-gray-light"
-                          }`}
-                        >
-                          {new Date(message.timestamp).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {/* Message input */}
-                <form
-                  onSubmit={handleSendMessage}
-                  className="flex items-center gap-2 border-t border-gray-light dark:border-davyGray p-3 bg-white dark:bg-night"
-                  style={{
-                    borderBottomLeftRadius: "0.75rem",
-                    borderBottomRightRadius: "0.75rem",
-                  }}
-                >
-                  <input
-                    type="text"
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    placeholder="Type your message..."
-                    className="flex-1 border border-gray-light dark:border-davyGray rounded-lg py-2 px-3 bg-white dark:bg-night text-secondary dark:text-alabaster focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                  />
-                  <Button type="submit" variant="primary">
-                    Send
-                  </Button>
-                </form>
-              </div>
-            </Card>
+            <ChatBox clientId={parentData.client.id} />
           </div>
-
           {/* Right side - Client Info */}
           <div className="space-y-6">
             {/* Client Info */}
             <Card title="Client Information">
               <div className="space-y-2">
                 <p className="text-sm text-gray-dark dark:text-gray-light">
-                  <span className="font-medium">Name:</span> John Smith
+                  <span className="font-medium">Name:</span> {parentData.client.name || "Unknown"}
                 </p>
                 <p className="text-sm text-gray-dark dark:text-gray-light">
                   <span className="font-medium">Program:</span> Muscle Gain

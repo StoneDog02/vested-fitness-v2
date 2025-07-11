@@ -31,6 +31,7 @@ type LoaderData = {
     avatar_url?: string;
     email_notifications?: boolean;
     app_notifications?: boolean;
+    chat_bubble_color?: string;
   };
 };
 
@@ -83,14 +84,15 @@ export const loader: LoaderFunction = async ({ request }) => {
   );
 
   // Get user data
-  const { data: user, error } = await supabase
+  const { data: user } = await supabase
     .from("users")
-    .select("id, name, email, avatar_url, email_notifications, app_notifications")
+    .select("id, name, email, avatar_url, email_notifications, app_notifications, chat_bubble_color")
     .eq("auth_id", authId)
     .single();
 
-  if (error || !user) {
-    throw new Response("User not found", { status: 404 });
+  if (!user) {
+    // Redirect to login if user not found
+    return new Response(null, { status: 302, headers: { Location: "/auth/login" } });
   }
 
   const result = { user };
@@ -134,6 +136,7 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [emailNotifications, setEmailNotifications] = useState(user.email_notifications ?? true);
   const [appNotifications, setAppNotifications] = useState(user.app_notifications ?? true);
+  const [chatBubbleColor, setChatBubbleColor] = useState(user.chat_bubble_color || "#e5e7eb");
 
   const [avatarUrl, setAvatarUrl] = useState(user.avatar_url);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -179,6 +182,7 @@ export default function Settings() {
         email,
         email_notifications: emailNotifications,
         app_notifications: appNotifications,
+        chat_bubble_color: chatBubbleColor,
       },
       {
         method: "POST",
@@ -550,6 +554,39 @@ export default function Settings() {
                 {passwordFetcher.state !== "idle" ? "Changing..." : "Change Password"}
               </Button>
             </div>
+          </form>
+        </Card>
+
+        {/* Chat Settings */}
+        <Card title="Chat Settings">
+          <form onSubmit={handleSaveProfile} className="space-y-4">
+            <div>
+              <label htmlFor="chat-bubble-color" className="block text-sm font-medium text-secondary dark:text-alabaster mb-1">
+                Sent Message Bubble Color
+              </label>
+              <div className="flex items-center gap-4">
+                <input
+                  id="chat-bubble-color"
+                  type="color"
+                  value={chatBubbleColor}
+                  onChange={e => setChatBubbleColor(e.target.value)}
+                  className="w-10 h-10 p-0 border-0 bg-transparent cursor-pointer"
+                  style={{ background: "none" }}
+                />
+                <span className="text-sm">{chatBubbleColor}</span>
+                <div className="ml-4">
+                  <div
+                    className="rounded-lg px-4 py-2 shadow text-sm"
+                    style={{ background: chatBubbleColor, color: "#222", minWidth: 80, display: "inline-block" }}
+                  >
+                    Preview
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Button type="submit" variant="primary" disabled={profileFetcher.state !== "idle"}>
+              {profileFetcher.state !== "idle" ? "Saving..." : "Save Chat Settings"}
+            </Button>
           </form>
         </Card>
 

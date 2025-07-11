@@ -132,6 +132,9 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   );
   const clientIdParam = params.clientId;
 
+  // Debug logging
+  console.log("[DEBUG] clientIdParam:", clientIdParam);
+
   // Parse pagination params for check-ins
   const url = new URL(request.url);
   const checkInsPage = parseInt(url.searchParams.get("checkInsPage") || "1", 10);
@@ -151,6 +154,8 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     )
     .eq("slug", clientIdParam)
     .single();
+
+  console.log("[DEBUG] client by slug:", client, error);
 
   if (client) {
     client.id = String(client.id);
@@ -172,6 +177,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
       )
       .eq("id", clientIdParam)
       .single();
+    console.log("[DEBUG] client by id:", clientById, errorById);
     if (clientById) {
       clientById.id = String(clientById.id);
       clientById.slug = clientById.slug ? String(clientById.slug) : "";
@@ -187,6 +193,8 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     client = clientById;
     error = errorById;
   }
+
+  console.log("[DEBUG] final client:", client);
 
   if (error || !client) {
     const fallbackClient = {

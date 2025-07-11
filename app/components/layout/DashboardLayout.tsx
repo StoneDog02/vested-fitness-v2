@@ -58,6 +58,7 @@ export default function DashboardLayout({
     { name: "Meals", path: "/dashboard/meals" },
     { name: "Workouts", path: "/dashboard/workouts" },
     { name: "Supplements", path: "/dashboard/supplements" },
+    { name: "Chat", path: "/dashboard/chat" }, // Moved Chat tab to the end
   ];
 
   const navItems = userRole === "coach" ? coachNavItems : clientNavItems;

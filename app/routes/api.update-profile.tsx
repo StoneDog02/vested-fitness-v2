@@ -66,7 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Parse request body
-    const { name, email, email_notifications, app_notifications } = await request.json();
+    const { name, email, email_notifications, app_notifications, chat_bubble_color } = await request.json();
 
     // Build update object
     const updateData: any = {};
@@ -74,6 +74,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (email !== undefined) updateData.email = email;
     if (email_notifications !== undefined) updateData.email_notifications = email_notifications;
     if (app_notifications !== undefined) updateData.app_notifications = app_notifications;
+    if (chat_bubble_color !== undefined) updateData.chat_bubble_color = chat_bubble_color;
 
     // Update user in database
     const { data, error } = await supabase

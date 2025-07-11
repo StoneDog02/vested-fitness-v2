@@ -9,6 +9,8 @@ import {
 import { ThemeProvider } from "./context/ThemeContext";
 import { MealCompletionProvider } from "./context/MealCompletionContext";
 import { ToastProvider } from "./context/ToastContext";
+import { UserContext } from "./context/UserContext";
+import { useLoaderData } from "@remix-run/react";
 
 import styles from "./tailwind.css?url";
 
