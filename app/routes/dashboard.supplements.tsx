@@ -17,7 +17,7 @@ const supplementsLoaderCache: Record<string, { data: any; expires: number }> = {
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Supplements | Vested Fitness" },
+    { title: "Supplements | Kava Training" },
     { name: "description", content: "View and track your supplements" },
   ];
 };

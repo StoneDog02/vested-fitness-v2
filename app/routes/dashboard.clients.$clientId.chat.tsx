@@ -29,7 +29,7 @@ const mockMessages: Message[] = [
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Client Chat | Vested Fitness" },
+    { title: "Client Chat | Kava Training" },
     { name: "description", content: "Chat with your client" },
   ];
 };

@@ -53,7 +53,7 @@ interface WorkoutPlan {
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Clients | Vested Fitness" },
+    { title: "Clients | Kava Training" },
     { name: "description", content: "View and manage your clients" },
   ];
 };

@@ -80,7 +80,7 @@ const clientWorkoutsCache: Record<string, { data: any; expires: number }> = {};
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Client Workouts | Vested Fitness" },
+    { title: "Client Workouts | Kava Training" },
     { name: "description", content: "Manage client workout plans" },
   ];
 };

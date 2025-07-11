@@ -1,6 +1,6 @@
 # Netlify Deployment Guide
 
-This guide will help you deploy your Vested Fitness v2 Remix application to Netlify.
+This guide will help you deploy your Kava Training v2 Remix application to Netlify.
 
 ## Prerequisites
 

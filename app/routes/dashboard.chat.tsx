@@ -5,7 +5,7 @@ import Button from "~/components/ui/Button";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Chat | Vested Fitness" },
+    { title: "Chat | Kava Training" },
     { name: "description", content: "Chat with your coach" },
   ];
 };

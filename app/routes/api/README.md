@@ -1,6 +1,6 @@
 # API Routes
 
-This directory contains all API-related routes for the Vested Fitness application.
+This directory contains all API-related routes for the Kava Training application.
 
 ## Structure
 

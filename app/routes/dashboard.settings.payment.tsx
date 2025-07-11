@@ -17,7 +17,7 @@ import type { Database } from "~/lib/supabase";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Payment Settings | Vested Fitness" },
+    { title: "Payment Settings | Kava Training" },
     {
       name: "description",
       content: "Manage your payment methods and subscription",

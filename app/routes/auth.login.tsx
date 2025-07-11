@@ -11,8 +11,8 @@ import type { Database } from "~/lib/supabase";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Login | Vested Fitness" },
-    { name: "description", content: "Log in to your Vested Fitness account" },
+    { title: "Login | Kava Training" },
+    { name: "description", content: "Log in to your Kava Training account" },
   ];
 };
 

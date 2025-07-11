@@ -9,8 +9,8 @@ import { CardElement, Elements, useStripe, useElements } from '@stripe/react-str
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Register | Vested Fitness" },
-    { name: "description", content: "Create a new Vested Fitness account" },
+    { title: "Register | Kava Training" },
+    { name: "description", content: "Create a new Kava Training account" },
   ];
 };
 

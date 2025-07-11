@@ -4,8 +4,8 @@ import Card from "~/components/ui/Card";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Terms & Conditions | Vested Fitness" },
-    { name: "description", content: "Terms and conditions for Vested Fitness" },
+    { title: "Terms & Conditions | Kava Training" },
+    { name: "description", content: "Terms and conditions for Kava Training" },
   ];
 };
 
@@ -54,15 +54,15 @@ export default function TermsAndConditions() {
                 1. Introduction
               </h3>
               <p className="dark:text-gray-light transition-colors duration-200">
-                Welcome to Vested Fitness ("Company", "we", "our", "us")! As you
+                Welcome to Kava Training ("Company", "we", "our", "us")! As you
                 have just clicked our Terms of Service, please pause, grab a
                 bowl of Frosted Flakes and carefully read the following pages.
                 It will take you approximately 20 minutes.
               </p>
               <p className="dark:text-gray-light transition-colors duration-200">
                 These Terms of Service ("Terms", "Terms of Service") govern your
-                use of our web application Vested Fitness (the "Service")
-                operated by Vested Fitness.
+                use of our web application Kava Training (the "Service")
+                operated by Kava Training.
               </p>
               <p className="dark:text-gray-light transition-colors duration-200">
                 Our Privacy Policy also governs your use of our Service and
@@ -101,18 +101,18 @@ export default function TermsAndConditions() {
               <p className="dark:text-gray-light transition-colors duration-200">
                 At the end of each Billing Cycle, your Subscription will
                 automatically renew under the exact same conditions unless you
-                cancel it or Vested Fitness cancels it. You may cancel your
+                cancel it or Kava Training cancels it. You may cancel your
                 Subscription renewal either through your online account
-                management page or by contacting Vested Fitness customer support
+                management page or by contacting Kava Training customer support
                 team.
               </p>
               <p className="dark:text-gray-light transition-colors duration-200">
                 A valid payment method, including credit card, is required to
                 process the payment for your subscription. You shall provide
-                Vested Fitness with accurate and complete billing information
+                Kava Training with accurate and complete billing information
                 including full name, address, state, zip code, telephone number,
                 and valid payment method information. By submitting such payment
-                information, you automatically authorize Vested Fitness to
+                information, you automatically authorize Kava Training to
                 charge all Subscription fees incurred through your account to
                 any such payment instruments.
               </p>
@@ -124,8 +124,8 @@ export default function TermsAndConditions() {
               </h3>
               <p className="dark:text-gray-light transition-colors duration-200">
                 Certain refund requests for Subscriptions may be considered by
-                Vested Fitness on a case-by-case basis and granted at the sole
-                discretion of Vested Fitness. Any granted refund will be issued
+                Kava Training on a case-by-case basis and granted at the sole
+                discretion of Kava Training. Any granted refund will be issued
                 through the original method of payment.
               </p>
             </section>
@@ -190,7 +190,7 @@ export default function TermsAndConditions() {
                 7. Health Disclaimer
               </h3>
               <p className="dark:text-gray-light transition-colors duration-200">
-                Vested Fitness is not a medical organization and our staff
+                Kava Training is not a medical organization and our staff
                 cannot give you medical advice or diagnosis. The information
                 provided through our Service, including workout and nutrition
                 plans, is for informational and educational purposes only and is

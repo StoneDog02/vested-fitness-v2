@@ -17,7 +17,7 @@ import { ResponsiveContainer } from "recharts";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Coach Access | Vested Fitness" },
+    { title: "Coach Access | Kava Training" },
     {
       name: "description",
       content: "View updates and check-ins from your coach",

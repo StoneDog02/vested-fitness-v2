@@ -71,21 +71,21 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Send the invitation email
     const { error } = await resend.emails.send({
-      from: "Vested Fitness <onboarding@resend.dev>",
+      from: "Kava Training <onboarding@resend.dev>",
       to: email,
-      subject: `${name}, you've been invited to Vested Fitness`,
+      subject: `${name}, you've been invited to Kava Training`,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #6366F1;">Welcome to Vested Fitness!</h2>
+          <h2 style="color: #6366F1;">Welcome to Kava Training!</h2>
           <p>Hello ${name},</p>
-          <p>You've been invited to join Vested Fitness as a client. Your coach is ready to help you achieve your fitness goals!</p>
+          <p>You've been invited to join Kava Training as a client. Your coach is ready to help you achieve your fitness goals!</p>
           <p>To get started, click the button below to create your account:</p>
           <a href="${signupUrl}" style="display: inline-block; background-color: #6366F1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 16px 0;">
             Create Your Account
           </a>
           <p>This link will expire in 7 days.</p>
           <p>If you have any questions, please contact support@vestedfitness.com.</p>
-          <p>Looking forward to your fitness journey,<br />The Vested Fitness Team</p>
+          <p>Looking forward to your fitness journey,<br />The Kava Training Team</p>
         </div>
       `,
     });

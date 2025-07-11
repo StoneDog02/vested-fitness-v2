@@ -3,11 +3,11 @@ import type { MetaFunction } from "@remix-run/node";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Vested Fitness - Personalized Coaching Platform" },
+    { title: "Kava Training - Personalized Coaching Platform" },
     {
       name: "description",
       content:
-        "Connect with your coach and reach your fitness goals with Vested Fitness.",
+        "Connect with your coach and reach your fitness goals with Kava Training.",
     },
   ];
 };
@@ -46,7 +46,7 @@ export default function Index() {
         <section className="bg-white">
           <div className="max-w-7xl mx-auto py-20 px-4 sm:px-6 lg:px-8 text-center">
             <h1 className="text-4xl font-bold text-secondary mb-4">
-              Grow Your Coaching Business with Vested Fitness
+              Grow Your Coaching Business with Kava Training
             </h1>
             <p className="text-xl text-gray-dark max-w-3xl mx-auto mb-8">
               Manage your clients, deliver personalized plans, and scale your
@@ -179,9 +179,9 @@ export default function Index() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="mb-6 md:mb-0">
-              <span className="text-xl font-bold">Vested Fitness</span>
+              <span className="text-xl font-bold">Kava Training</span>
               <p className="mt-2 text-gray">
-                © 2024 Vested Fitness. All rights reserved.
+                © 2024 Kava Training. All rights reserved.
               </p>
             </div>
             <div className="flex gap-6">

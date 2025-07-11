@@ -20,7 +20,7 @@ dayjs.extend(timezone);
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Workouts | Vested Fitness" },
+    { title: "Workouts | Kava Training" },
     { name: "description", content: "View and track your workout plans" },
   ];
 };

@@ -22,7 +22,7 @@ import dayjs from "dayjs";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Client Details | Vested Fitness" },
+    { title: "Client Details | Kava Training" },
     { name: "description", content: "View and manage client details" },
   ];
 };
@@ -396,7 +396,7 @@ export const action: import("@remix-run/node").ActionFunction = async ({ request
     if (clientData?.email_notifications && clientData.email && coachData?.name) {
       try {
         await resend.emails.send({
-          from: "Vested Fitness <updates@resend.dev>",
+          from: "Kava Training <updates@resend.dev>",
           to: clientData.email,
           subject: `New update from your coach ${coachData.name}!`,
           html: `
@@ -417,7 +417,7 @@ export const action: import("@remix-run/node").ActionFunction = async ({ request
                 </div>
                 
                 <p style="margin: 20px 0; color: #374151; font-size: 16px;">
-                  Log in to your Vested Fitness dashboard to see this update and respond to your coach.
+                  Log in to your Kava Training dashboard to see this update and respond to your coach.
                 </p>
                 
                 <div style="text-align: center; margin: 32px 0;">

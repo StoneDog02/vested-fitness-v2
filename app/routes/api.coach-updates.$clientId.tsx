@@ -75,7 +75,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (clientUser.email_notifications && clientUser.email) {
     try {
       await resend.emails.send({
-        from: "Vested Fitness <updates@resend.dev>",
+        from: "Kava Training <updates@resend.dev>",
         to: clientUser.email,
         subject: `New update from your coach ${coachUser.name}!`,
         html: `
@@ -96,7 +96,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
               </div>
               
               <p style="margin: 20px 0; color: #374151; font-size: 16px;">
-                Log in to your Vested Fitness dashboard to see this update and respond to your coach.
+                Log in to your Kava Training dashboard to see this update and respond to your coach.
               </p>
               
               <div style="text-align: center; margin: 32px 0;">

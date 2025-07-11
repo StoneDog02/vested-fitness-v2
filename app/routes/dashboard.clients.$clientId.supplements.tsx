@@ -27,7 +27,7 @@ const clientSupplementsCache: Record<string, { data: any; expires: number }> = {
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Client Supplements | Vested Fitness" },
+    { title: "Client Supplements | Kava Training" },
     { name: "description", content: "Manage client supplement protocols" },
   ];
 };

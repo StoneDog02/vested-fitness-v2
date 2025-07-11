@@ -3,10 +3,10 @@ import ThemeToggle from "~/components/ui/ThemeToggle";
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Color Theme | Vested Fitness" },
+    { title: "Color Theme | Kava Training" },
     {
       name: "description",
-      content: "Vested Fitness color palette documentation",
+      content: "Kava Training color palette documentation",
     },
   ];
 };
@@ -67,7 +67,7 @@ export default function ThemePage() {
     <div className="max-w-6xl mx-auto py-12 px-4 transition-colors duration-200 bg-white dark:bg-night">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-4xl font-bold text-secondary dark:text-alabaster transition-colors duration-200">
-          Vested Fitness Color Palette
+          Kava Training Color Palette
         </h1>
         <ThemeToggle />
       </div>

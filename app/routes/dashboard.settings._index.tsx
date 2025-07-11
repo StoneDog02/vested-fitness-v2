@@ -18,7 +18,7 @@ const userSettingsCache: Record<string, { data: any; expires: number }> = {};
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Settings | Vested Fitness" },
+    { title: "Settings | Kava Training" },
     { name: "description", content: "Manage your account settings" },
   ];
 };

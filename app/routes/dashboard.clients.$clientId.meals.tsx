@@ -258,7 +258,7 @@ export const loader = async ({
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Client Meals | Vested Fitness" },
+    { title: "Client Meals | Kava Training" },
     { name: "description", content: "Manage client meal plans" },
   ];
 };

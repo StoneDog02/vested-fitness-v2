@@ -21,7 +21,7 @@ const mealsLoaderCache: Record<string, { data: any; expires: number }> = {};
 
 export const meta: MetaFunction = () => {
   return [
-    { title: "Meals | Vested Fitness" },
+    { title: "Meals | Kava Training" },
     { name: "description", content: "View and track your meal plans" },
   ];
 };
