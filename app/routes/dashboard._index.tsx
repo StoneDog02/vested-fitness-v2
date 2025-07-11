@@ -538,11 +538,14 @@ export const loader: LoaderFunction = async ({ request }) => {
           let totalOverallCompliance = 0;
           let countedClients = 0;
           for (const clientId of activeClientIds) {
-            // Expected workouts
+            // Expected workouts (non-rest days)
             let expectedWorkoutDays = 0;
+            let restDays = 0;
             const plan = workoutPlanByUser[clientId];
             if (plan && workoutDaysByPlan[plan.id]) {
-              expectedWorkoutDays = (workoutDaysByPlan[plan.id] || []).filter((day: any) => !day.is_rest).length;
+              const workoutDays = workoutDaysByPlan[plan.id] || [];
+              expectedWorkoutDays = workoutDays.filter((day: any) => !day.is_rest).length;
+              restDays = workoutDays.filter((day: any) => day.is_rest).length;
             }
             // Expected meals (7 days worth)
             let expectedMeals = 0;
@@ -557,9 +560,9 @@ export const loader: LoaderFunction = async ({ request }) => {
             const completedWorkouts = (workoutCompletionsByUser[clientId] || []).length;
             const completedMeals = (mealCompletionsByUser[clientId] || []).length;
             const completedSupplements = (supplementCompletionsByUser[clientId] || []).length;
-            // Calculate overall compliance
-            const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
-            const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
+            // --- FIX: Add rest days as compliant (100%) ---
+            const totalCompleted = (completedWorkouts + restDays) + completedMeals + completedSupplements;
+            const totalExpected = (expectedWorkoutDays + restDays) + expectedMeals + expectedSupplements;
             const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
             if (totalExpected > 0) {
               totalOverallCompliance += overallCompliance;
