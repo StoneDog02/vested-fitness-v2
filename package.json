@@ -19,7 +19,8 @@
     "@remix-run/node": "^2.16.1",
     "@remix-run/react": "^2.16.1",
     "@remix-run/serve": "^2.16.1",
-    "@stripe/stripe-js": "^7.2.0",
+    "@stripe/react-stripe-js": "^3.7.0",
+    "@stripe/stripe-js": "^7.4.0",
     "@supabase/auth-helpers-remix": "^0.4.0",
     "@supabase/supabase-js": "^2.49.1",
     "@types/jsonwebtoken": "^9.0.9",
@@ -36,7 +37,7 @@
     "react-router-dom": "^7.3.0",
     "recharts": "^2.15.3",
     "resend": "^4.1.2",
-    "stripe": "^18.0.0",
+    "stripe": "^18.3.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

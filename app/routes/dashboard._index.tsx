@@ -720,6 +720,39 @@ export default function Dashboard() {
     activityFetcher.load(`/api/dashboard-noncritical?page=${activityPage + 1}`);
   };
   
+  const [commitment, setCommitment] = useState<{ count: number; }>({ count: 0 });
+  const [loadingCommitment, setLoadingCommitment] = useState(true);
+  const [commitmentError, setCommitmentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchCommitment() {
+      setLoadingCommitment(true);
+      setCommitmentError(null);
+      try {
+        const res = await fetch("/api/subscription-info");
+        const data = await res.json();
+        if (data && Array.isArray(data.billingHistory)) {
+          const uniquePaidPeriods = new Set();
+          const paidInvoices = data.billingHistory.filter((inv: any) =>
+            inv.status === "paid" &&
+            (inv.billing_reason === "subscription_cycle" || inv.billing_reason === "subscription_create") &&
+            inv.lines && inv.lines.data && inv.lines.data[0] && inv.lines.data[0].period && inv.lines.data[0].period.end &&
+            !uniquePaidPeriods.has(inv.lines.data[0].period.end) &&
+            uniquePaidPeriods.add(inv.lines.data[0].period.end)
+          );
+          setCommitment({ count: paidInvoices.length });
+        } else {
+          setCommitment({ count: 0 });
+        }
+      } catch (err) {
+        setCommitmentError("Could not load commitment progress.");
+      } finally {
+        setLoadingCommitment(false);
+      }
+    }
+    fetchCommitment();
+  }, []);
+  
   return (
     <>
       {role === "coach" ? (
@@ -896,6 +929,7 @@ export default function Dashboard() {
               Shop KAVA
             </Button>
           </div>
+          {/* Commitment banner moved to settings pages */}
 
           {/* Client Metrics Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

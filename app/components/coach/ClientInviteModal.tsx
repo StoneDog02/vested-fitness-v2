@@ -25,6 +25,15 @@ export default function ClientInviteModal({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
 
+  // Add plan selection (single plan for now)
+  const plans = [
+    {
+      id: 'price_1RiNciJvda6rmtQRI6KDxRYj',
+      name: 'Premium Coaching',
+    },
+  ];
+  const [selectedPlanId] = useState(plans[0].id);
+
   // Close modal and reload route on successful invite
   React.useEffect(() => {
     if (fetcher.data?.success) {
@@ -104,6 +113,24 @@ export default function ClientInviteModal({
               <p className="text-xs text-gray-dark dark:text-gray-light mt-1">
                 We&apos;ll send a special signup link to this email address
               </p>
+            </div>
+
+            {/* Plan selection (read-only for now) */}
+            <div>
+              <label htmlFor="plan_price_id" className="block text-sm font-medium text-secondary dark:text-alabaster mb-1">
+                Subscription Plan
+              </label>
+              <select
+                id="plan_price_id"
+                name="plan_price_id"
+                value={selectedPlanId}
+                disabled
+                className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg bg-gray-100 dark:bg-night text-secondary dark:text-alabaster cursor-not-allowed"
+              >
+                {plans.map((plan) => (
+                  <option key={plan.id} value={plan.id}>{plan.name}</option>
+                ))}
+              </select>
             </div>
 
             <div className="pt-2">

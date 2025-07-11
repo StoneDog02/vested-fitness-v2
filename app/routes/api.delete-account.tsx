@@ -66,12 +66,30 @@ export const action: ActionFunction = async ({ request }) => {
     // Get user data first
     const { data: user, error: userError } = await supabaseAdmin
       .from("users")
-      .select("id, email")
+      .select("id, email, stripe_customer_id")
       .eq("auth_id", authId)
       .single();
 
     if (userError || !user) {
       return json({ error: "User not found" }, { status: 404 });
+    }
+
+    // ENFORCE 4-MONTH COMMITMENT: Block deletion if <4 paid subscription payments
+    if (user.stripe_customer_id) {
+      try {
+        const stripeModule = await import("~/utils/stripe.server");
+        const invoices = await stripeModule.getBillingHistory(user.stripe_customer_id);
+        // Only count paid, non-prorated, non-setup subscription cycle invoices
+        const paidInvoices = invoices.filter((inv: any) =>
+          inv.status === "paid" &&
+          inv.billing_reason === "subscription_cycle"
+        );
+        if (paidInvoices.length < 4) {
+          return json({ error: `You must complete at least 4 monthly payments before you can delete your account. You have completed ${paidInvoices.length} of 4 required payments.` }, { status: 403 });
+        }
+      } catch (err) {
+        return json({ error: "Failed to check payment commitment. Please try again later." }, { status: 500 });
+      }
     }
 
     // Verify password by attempting to sign in with it

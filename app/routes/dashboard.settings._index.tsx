@@ -5,6 +5,7 @@ import { Link, useLoaderData, useFetcher, useNavigate } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import Modal from "~/components/ui/Modal";
+import Tooltip from "~/components/ui/Tooltip";
 
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
@@ -136,6 +137,39 @@ export default function Settings() {
 
   const [avatarUrl, setAvatarUrl] = useState(user.avatar_url);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+  const [commitment, setCommitment] = useState<{ count: number }>({ count: 0 });
+  const [loadingCommitment, setLoadingCommitment] = useState(true);
+  const [commitmentError, setCommitmentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchCommitment() {
+      setLoadingCommitment(true);
+      setCommitmentError(null);
+      try {
+        const res = await fetch("/api/subscription-info");
+        const data = await res.json();
+        if (data && Array.isArray(data.billingHistory)) {
+          const uniquePaidPeriods = new Set();
+          const paidInvoices = data.billingHistory.filter((inv: any) =>
+            inv.status === "paid" &&
+            (inv.billing_reason === "subscription_cycle" || inv.billing_reason === "subscription_create") &&
+            inv.lines && inv.lines.data && inv.lines.data[0] && inv.lines.data[0].period && inv.lines.data[0].period.end &&
+            !uniquePaidPeriods.has(inv.lines.data[0].period.end) &&
+            uniquePaidPeriods.add(inv.lines.data[0].period.end)
+          );
+          setCommitment({ count: paidInvoices.length });
+        } else {
+          setCommitment({ count: 0 });
+        }
+      } catch (err) {
+        setCommitmentError("Could not load commitment progress.");
+      } finally {
+        setLoadingCommitment(false);
+      }
+    }
+    fetchCommitment();
+  }, []);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -299,6 +333,18 @@ export default function Settings() {
 
   return (
     <div className="p-6">
+      {/* Commitment Progress Banner (only for clients, less than 4 payments) */}
+      {typeof window !== 'undefined' && window.location.pathname.includes('/dashboard/settings') && (
+        loadingCommitment ? (
+          <div className="bg-blue-100 text-blue-800 rounded px-4 py-2 text-sm font-medium mb-4">Loading commitment progress...</div>
+        ) : commitmentError ? (
+          <div className="bg-red-100 text-red-800 rounded px-4 py-2 text-sm font-medium mb-4">{commitmentError}</div>
+        ) : (typeof commitment.count === "number" && commitment.count < 4) ? (
+          <div className="bg-green-100 text-green-900 rounded px-4 py-2 text-sm font-medium mb-4">
+            Commitment: {commitment.count} of 4 payments completed. You must complete 4 monthly payments before you can cancel your account.
+          </div>
+        ) : null
+      )}
       {/* Success Message */}
       {showSuccess && (
         <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-primary text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-fade-in">
@@ -508,7 +554,7 @@ export default function Settings() {
         </Card>
 
         {/* Account Security */}
-        <Card title="Account Security">
+        <Card title="Account Security" className="overflow-visible">
           <div className="space-y-4">
             <div>
               <h3 className="text-sm font-medium text-secondary dark:text-alabaster mb-1">
@@ -531,14 +577,29 @@ export default function Settings() {
               <p className="text-sm text-gray-dark dark:text-gray-light mb-2">
                 Once you delete your account, there is no going back.
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowDeleteModal(true)}
-                className="text-red-500 border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-              >
-                Delete Account
-              </Button>
+              {typeof commitment.count === "number" && commitment.count < 4 ? (
+                <Tooltip content="You must complete 4 monthly payments before you can cancel your account.">
+                  <span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      className="text-red-500 border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-not-allowed"
+                    >
+                      Delete Account
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowDeleteModal(true)}
+                  className="text-red-500 border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                >
+                  Delete Account
+                </Button>
+              )}
             </div>
           </div>
         </Card>

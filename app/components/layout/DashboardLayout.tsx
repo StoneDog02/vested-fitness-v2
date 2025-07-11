@@ -19,6 +19,7 @@ interface DashboardLayoutProps {
     email: string;
     avatar_url?: string;
     font_size?: string;
+    access_status?: string;
   } | null;
 }
 

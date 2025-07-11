@@ -2,6 +2,10 @@ import { Form, Link, useActionData, useSearchParams } from "@remix-run/react";
 import { json, type ActionFunction, type MetaFunction } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import { getOrCreateStripeCustomer, createStripeSubscription, attachPaymentMethod } from "~/utils/stripe.server";
+import React from "react";
+import { loadStripe } from '@stripe/stripe-js';
+import { CardElement, Elements, useStripe, useElements } from '@stripe/react-stripe-js';
 
 export const meta: MetaFunction = () => {
   return [
@@ -22,6 +26,7 @@ type ActionData = {
   };
   success?: boolean;
   message?: string;
+  clientSecret?: string | null;
 };
 
 // Utility to generate a slug from a name
@@ -40,6 +45,8 @@ export const action: ActionFunction = async ({ request }) => {
   const email = formData.get("email")?.toString();
   const password = formData.get("password")?.toString();
   const goal = formData.get("goal")?.toString();
+  const planPriceId = formData.get("plan_price_id")?.toString();
+  const paymentMethodId = formData.get("paymentMethodId")?.toString();
   const inviteCodeRaw =
     formData.get("invite")?.toString() ||
     new URL(request.url).searchParams.get("invite");
@@ -142,6 +149,46 @@ export const action: ActionFunction = async ({ request }) => {
     });
   }
 
+  // Create Stripe customer and update user record
+  let stripeCustomerId: string | undefined = undefined;
+  try {
+    stripeCustomerId = await getOrCreateStripeCustomer({ userId: auth_id, email });
+    await supabase.from("users").update({ stripe_customer_id: stripeCustomerId }).eq("auth_id", auth_id);
+    // If paymentMethodId is present, attach it and set as default
+    if (stripeCustomerId && paymentMethodId) {
+      await attachPaymentMethod({ customerId: stripeCustomerId, paymentMethodId });
+    }
+  } catch (e) {
+    // Optionally log or handle error, but don't block registration
+    console.error("Failed to create Stripe customer or attach payment method:", e);
+  }
+
+  // If planPriceId is present, create a Stripe subscription for the user
+  if (stripeCustomerId && planPriceId) {
+    try {
+      // Use the API endpoint to create the subscription and get clientSecret
+      const res = await fetch(`${process.env.ORIGIN || 'http://localhost:3000'}/api/create-subscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priceId: planPriceId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to create subscription');
+      }
+      // Pass clientSecret to the frontend for Stripe.js confirmation
+      return json<ActionData>({
+        fields: { name: '', email: '', password: '', userType: role },
+        error: undefined,
+        success: true,
+        message: `Account created! We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
+        clientSecret: data.clientSecret || null,
+      });
+    } catch (e) {
+      console.error('Failed to create Stripe subscription:', e);
+    }
+  }
+
   // If client, mark invite as accepted
   if (inviteCode) {
     await supabase
@@ -160,18 +207,115 @@ export const action: ActionFunction = async ({ request }) => {
   });
 };
 
+// Add a CardForm component for client invite registration
+function CardForm({ onPaymentMethodCreated, loading }: { onPaymentMethodCreated: (paymentMethodId: string) => void, loading: boolean }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [error, setError] = React.useState<string | null>(null);
+
+  const handleCardChange = (event: any) => {
+    setError(event.error ? event.error.message : null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!stripe || !elements) {
+      setError('Stripe is not loaded');
+      return;
+    }
+    const cardElement = elements.getElement(CardElement);
+    if (!cardElement) {
+      setError('Card element not found');
+      return;
+    }
+    const { error: stripeError, paymentMethod } = await stripe.createPaymentMethod({
+      type: 'card',
+      card: cardElement,
+    });
+    if (stripeError) {
+      setError(stripeError.message || 'Failed to create payment method');
+      return;
+    }
+    onPaymentMethodCreated(paymentMethod.id);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <label htmlFor="card-element" className="block text-sm font-medium text-secondary mb-1">Card Details</label>
+      <div id="card-element" className="border rounded-md p-2 bg-white">
+        <CardElement onChange={handleCardChange} options={{ style: { base: { fontSize: '16px' } } }} />
+      </div>
+      {error && <div className="text-red-600 text-sm mt-1">{error}</div>}
+      <button
+        type="submit"
+        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+        disabled={loading}
+      >
+        {loading ? 'Processing...' : 'Add Card & Subscribe'}
+      </button>
+    </form>
+  );
+}
+
 export default function Register() {
   const actionData = useActionData<ActionData>();
   const formError = actionData?.error || "";
   const success = actionData?.success;
   const message = actionData?.message;
+  const clientSecret = actionData?.clientSecret;
   const [searchParams] = useSearchParams();
   const invite = searchParams.get("invite");
   const type = searchParams.get("type");
   const emailParam = searchParams.get("email") || "";
   const nameParam = searchParams.get("name") || "";
-
   const isClientInvite = invite && type === "client";
+  const [planName, setPlanName] = React.useState<string>("");
+  const [planPriceId, setPlanPriceId] = React.useState<string>("");
+  const [paymentLoading, setPaymentLoading] = React.useState(false);
+  const [paymentError, setPaymentError] = React.useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = React.useState(false);
+  const [cardPaymentMethodId, setCardPaymentMethodId] = React.useState<string | null>(null);
+  const [cardLoading, setCardLoading] = React.useState(false);
+  React.useEffect(() => {
+    if (clientSecret) {
+      // Confirm payment intent with Stripe.js
+      setPaymentLoading(true);
+      setPaymentError(null);
+      setPaymentSuccess(false);
+      const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!);
+      stripePromise.then(async (stripe) => {
+        if (!stripe) {
+          setPaymentError('Stripe.js failed to load');
+          setPaymentLoading(false);
+          return;
+        }
+        const result = await stripe.confirmCardPayment(clientSecret);
+        if (result.error) {
+          setPaymentError(result.error.message || 'Payment confirmation failed');
+        } else if (result.paymentIntent && result.paymentIntent.status === 'succeeded') {
+          setPaymentSuccess(true);
+        }
+        setPaymentLoading(false);
+      });
+    }
+  }, [clientSecret]);
+
+  // Fetch plan info from invite (for client registration)
+  React.useEffect(() => {
+    if (isClientInvite && invite) {
+      // Fetch invite info from API (or Supabase directly)
+      fetch(`/api/invite-client?invite=${invite}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.plan_price_id) {
+            setPlanPriceId(data.plan_price_id);
+            // For now, hardcode plan name for your only plan
+            setPlanName("Premium Coaching");
+          }
+        });
+    }
+  }, [isClientInvite, invite]);
 
   return (
     <div className="min-h-screen bg-gray-lightest flex flex-col justify-center py-12 sm:px-6 lg:px-8">
@@ -208,9 +352,46 @@ export default function Register() {
               </div>
             </div>
           )}
+          {paymentLoading && (
+            <div className="rounded-md bg-yellow-50 p-4 mb-4">
+              <div className="flex">
+                <div className="text-sm text-yellow-700">
+                  {paymentError || "Processing payment..."}
+                </div>
+              </div>
+            </div>
+          )}
+          {paymentError && (
+            <div className="rounded-md bg-red-50 p-4 mb-4">
+              <div className="flex">
+                <div className="text-sm text-red-700">{paymentError}</div>
+              </div>
+            </div>
+          )}
+          {paymentSuccess && (
+            <div className="rounded-md bg-green-50 p-4 mb-4">
+              <div className="flex">
+                <div className="text-sm text-green-700">
+                  Payment confirmed successfully!
+                </div>
+              </div>
+            </div>
+          )}
           <Form method="post" className="space-y-6">
             {isClientInvite && (
               <input type="hidden" name="invite" value={invite} />
+            )}
+            {isClientInvite && planPriceId && (
+              <Elements stripe={loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!)}>
+                <CardForm
+                  onPaymentMethodCreated={(paymentMethodId) => {
+                    setCardPaymentMethodId(paymentMethodId);
+                    setCardLoading(false);
+                  }}
+                  loading={cardLoading}
+                />
+                <input type="hidden" name="paymentMethodId" value={cardPaymentMethodId || ''} />
+              </Elements>
             )}
             <div>
               <label
@@ -296,14 +477,37 @@ export default function Register() {
                 />
               </div>
             </div>
-            <div>
+            {isClientInvite && (
+              <div className="mt-6 border border-gray-200 rounded-md p-4 bg-gray-50">
+                <h3 className="text-md font-semibold mb-2 text-secondary">Terms and Conditions</h3>
+                <p className="text-sm text-gray-700 mb-2">
+                  <strong>Minimum Commitment:</strong> By registering, you agree to a <span className="font-semibold">4-month minimum commitment</span> to your coaching plan. For legal and contractual reasons, your account cannot be deleted or cancelled until you have completed 4 monthly payments.
+                </p>
+                <p className="text-sm text-gray-700 mb-2">
+                  If you have questions about this policy, please contact your coach before completing registration.
+                </p>
+                <div className="flex items-center mt-3">
+                  <input
+                    id="terms"
+                    name="terms"
+                    type="checkbox"
+                    required
+                    className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
+                  />
+                  <label htmlFor="terms" className="ml-2 block text-sm text-gray-800">
+                    I have read and agree to the Terms and Conditions above
+                  </label>
+                </div>
+              </div>
+            )}
+            {!isClientInvite && (
               <button
                 type="submit"
                 className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
               >
                 Create Account
               </button>
-            </div>
+            )}
           </Form>
         </div>
       </div>
