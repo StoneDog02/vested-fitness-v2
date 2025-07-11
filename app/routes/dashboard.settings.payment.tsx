@@ -453,6 +453,64 @@ export default function PaymentSettings() {
     return "Subscription";
   };
 
+  // Coach UI: render tabbed client billing table if isCoach
+  if (data.isCoach) {
+    const clients = data.clientBilling || [];
+    // Helper to get status
+    const getStatus = (invoice: any) => {
+      if (!invoice) return 'No Invoice';
+      if (invoice.status === 'paid') return 'Paid';
+      if (invoice.status === 'open' || invoice.status === 'unpaid' || invoice.status === 'past_due') return 'Unpaid/Late';
+      return invoice.status;
+    };
+    // Filter by tab
+    const filtered = clients.filter((c: any) => {
+      if (tab === 'all') return true;
+      if (tab === 'paid') return c.invoice && c.invoice.status === 'paid';
+      if (tab === 'unpaid') return c.invoice && (c.invoice.status === 'open' || c.invoice.status === 'unpaid' || c.invoice.status === 'past_due');
+      return true;
+    });
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-6">Client Billing Overview</h1>
+        <div className="flex space-x-4 mb-4">
+          <button className={`px-4 py-2 rounded ${tab === 'all' ? 'bg-primary text-white' : 'bg-gray-100'}`} onClick={() => setTab('all')}>All</button>
+          <button className={`px-4 py-2 rounded ${tab === 'paid' ? 'bg-primary text-white' : 'bg-gray-100'}`} onClick={() => setTab('paid')}>Paid</button>
+          <button className={`px-4 py-2 rounded ${tab === 'unpaid' ? 'bg-primary text-white' : 'bg-gray-100'}`} onClick={() => setTab('unpaid')}>Unpaid/Late</button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full bg-white dark:bg-eerieBlack border rounded shadow">
+            <thead>
+              <tr>
+                <th className="px-4 py-2 text-left">Client Name</th>
+                <th className="px-4 py-2 text-left">Email</th>
+                <th className="px-4 py-2 text-left">Amount</th>
+                <th className="px-4 py-2 text-left">Date</th>
+                <th className="px-4 py-2 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((c: any) => (
+                <tr key={c.id} className="border-t">
+                  <td className="px-4 py-2">{c.name}</td>
+                  <td className="px-4 py-2">{c.email}</td>
+                  <td className="px-4 py-2">{c.invoice ? `$${(c.invoice.amount_due / 100).toFixed(2)}` : '-'}</td>
+                  <td className="px-4 py-2">{c.invoice ? new Date(c.invoice.created * 1000).toLocaleDateString() : '-'}</td>
+                  <td className="px-4 py-2">
+                    <span className={`px-2 py-1 rounded text-xs font-semibold ${getStatus(c.invoice) === 'Paid' ? 'bg-green-100 text-green-800' : getStatus(c.invoice) === 'Unpaid/Late' ? 'bg-red-100 text-red-800' : 'bg-gray-200 text-gray-700'}`}>{getStatus(c.invoice)}</span>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={5} className="text-center py-4 text-gray-500">No clients found for this tab.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Commitment Progress Banner (only for clients, less than 4 payments) */}
