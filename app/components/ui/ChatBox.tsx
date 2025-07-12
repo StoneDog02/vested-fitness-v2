@@ -188,6 +188,24 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
     return luminance < 0.6;
   }
 
+  // Mark chat as seen when opened or clientId changes
+  useEffect(() => {
+    async function markChatAsSeen() {
+      try {
+        const formData = new FormData();
+        formData.append("clientId", clientId);
+        await fetch("/api/chat-last-seen", {
+          method: "POST",
+          body: formData,
+        });
+      } catch (e) {
+        // Ignore errors for now
+      }
+    }
+    markChatAsSeen();
+    // eslint-disable-next-line
+  }, [clientId]);
+
   return (
     <Card className="flex flex-col h-full max-h-[500px] w-full">
       <div className="flex-1 overflow-y-auto p-4" onScroll={handleScroll} style={{ minHeight: 300 }}>

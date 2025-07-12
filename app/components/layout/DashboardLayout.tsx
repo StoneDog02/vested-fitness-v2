@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "@remix-run/react";
 import { UserRole } from "~/lib/supabase";
 import AccountDrawer from "../ui/AccountDrawer";
@@ -31,6 +31,30 @@ export default function DashboardLayout({
   const location = useLocation();
   const [isAccountDrawerOpen, setIsAccountDrawerOpen] = useState(false);
   const [isMenuDrawerOpen, setIsMenuDrawerOpen] = useState(false);
+
+  // Notification pill state for client chat
+  const [chatUnread, setChatUnread] = useState(false);
+  useEffect(() => {
+    let ignore = false;
+    async function fetchUnread() {
+      if (userRole === "client" && user?.id) {
+        try {
+          const res = await fetch(`/api/chat-unread-count?clientId=${user.id}`);
+          const data = await res.json();
+          if (!ignore) setChatUnread((data.unreadCount ?? 0) > 0);
+        } catch {
+          if (!ignore) setChatUnread(false);
+        }
+      }
+    }
+    fetchUnread();
+    // Optionally poll every 10s for live updates
+    const interval = setInterval(fetchUnread, 10000);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
+  }, [userRole, user?.id]);
 
   const isActive = (path: string) => {
     // For dashboard path, only match exact
@@ -154,7 +178,13 @@ export default function DashboardLayout({
                           : "border-transparent text-secondary dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:text-primary dark:hover:border-primary/50"
                       }`}
                     >
-                      {item.name}
+                      <span className="relative">
+                        {item.name}
+                        {/* Show pill for Chat tab if client and unread */}
+                        {userRole === "client" && item.name === "Chat" && chatUnread && (
+                          <span className="absolute -top-1 -right-2 inline-block w-2 h-2 bg-red-500 rounded-full" />
+                        )}
+                      </span>
                     </Link>
                   ))}
                 </div>

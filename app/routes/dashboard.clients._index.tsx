@@ -172,6 +172,27 @@ export default function ClientsIndex() {
   const [hasMore, setHasMore] = useState(initialData.hasMore);
   const [loadingMore, setLoadingMore] = useState(false);
   const fetcher = useFetcher();
+  const [unreadCounts, setUnreadCounts] = useState<{ [clientId: string]: number }>({});
+
+  useEffect(() => {
+    let ignore = false;
+    async function fetchUnreadCounts() {
+      try {
+        const res = await fetch("/api/chat-unread-counts");
+        const data = await res.json();
+        if (!ignore) setUnreadCounts(data.unreadCounts || {});
+      } catch {
+        if (!ignore) setUnreadCounts({});
+      }
+    }
+    fetchUnreadCounts();
+    // Optionally poll every 10s for live updates
+    const interval = setInterval(fetchUnreadCounts, 10000);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   // When fetcher loads more clients, append them
   useEffect(() => {
@@ -240,26 +261,32 @@ export default function ClientsIndex() {
         {filteredClients.length === 0 && (
           <div className="text-gray-500 dark:text-gray-light">No clients found.</div>
         )}
-        {filteredClients.map((client) => (
-          <Link
-            key={client.id}
-            to={`/dashboard/clients/${client.slug || client.id}`}
-            className="block hover:shadow-lg transition-all"
-            style={{ textDecoration: "none", color: "inherit" }}
-          >
-            <div className="p-4 border rounded-md bg-white dark:bg-night flex flex-col sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="font-semibold text-lg text-secondary dark:text-alabaster">{client.name}</div>
-                <div className="text-sm text-gray-500 dark:text-gray-light">{client.email}</div>
+        {filteredClients.map((client) => {
+          console.log("Client in list:", client);
+          return (
+            <Link
+              key={client.id}
+              to={`/dashboard/clients/${client.slug || client.id}`}
+              className="block hover:shadow-lg transition-all"
+              style={{ textDecoration: "none", color: "inherit" }}
+            >
+              <div className="p-4 border rounded-md bg-white dark:bg-night flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="font-semibold text-lg text-secondary dark:text-alabaster">{client.name}</div>
+                  {/* Notification pill for unread chat */}
+                  {unreadCounts[client.id] > 0 && (
+                    <span className="inline-block w-2 h-2 bg-red-500 rounded-full ml-1" title="Unread chat" />
+                  )}
+                </div>
+                <div className="mt-2 sm:mt-0">
+                  <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${client.status === "active" ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-600"}`}>
+                    {client.status || "Unknown"}
+                  </span>
+                </div>
               </div>
-              <div className="mt-2 sm:mt-0">
-                <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${client.status === "active" ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-600"}`}>
-                  {client.status || "Unknown"}
-                </span>
-              </div>
-            </div>
-          </Link>
-        ))}
+            </Link>
+          );
+        })}
       </div>
 
       {/* Load More Button */}
