@@ -71,7 +71,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Send the invitation email
     const { error } = await resend.emails.send({
-      from: "Kava Training <onboarding@resend.dev>",
+      from: "Kava Training <noreply@kavatraining.com>",
       to: email,
       subject: `${name}, you've been invited to Kava Training`,
       html: `

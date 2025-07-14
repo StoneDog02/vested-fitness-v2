@@ -75,7 +75,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (clientUser.email_notifications && clientUser.email) {
     try {
       await resend.emails.send({
-        from: "Kava Training <updates@resend.dev>",
+        from: "Kava Training <noreply@kavatraining.com>",
         to: clientUser.email,
         subject: `New update from your coach ${coachUser.name}!`,
         html: `

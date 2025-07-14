@@ -404,7 +404,7 @@ export const action: import("@remix-run/node").ActionFunction = async ({ request
     if (clientData?.email_notifications && clientData.email && coachData?.name) {
       try {
         await resend.emails.send({
-          from: "Kava Training <updates@resend.dev>",
+          from: "Kava Training <noreply@kavatraining.com>",
           to: clientData.email,
           subject: `New update from your coach ${coachData.name}!`,
           html: `
