@@ -143,8 +143,15 @@ export const action: ActionFunction = async ({ request }) => {
   });
 
   if (insertError) {
+    let errorMessage = insertError.message;
+    if (
+      insertError.message.includes('duplicate key value') &&
+      insertError.message.includes('users_email_key')
+    ) {
+      errorMessage = "An account with this email already exists. Please log in or use a different email.";
+    }
     return json<ActionData>({
-      error: insertError.message,
+      error: errorMessage,
       fields: { name, email, password, userType: role, inviteCode },
     });
   }
