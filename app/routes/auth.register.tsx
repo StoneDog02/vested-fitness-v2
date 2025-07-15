@@ -262,10 +262,9 @@ export default function Register() {
   const [cardLoading, setCardLoading] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const [cardError, setCardError] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
-
   const stripe = useStripe();
   const elements = useElements();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -368,6 +367,13 @@ export default function Register() {
       e.preventDefault();
       setPaymentLoading(true);
       setCardError(null);
+
+      // Only proceed if mounted (client)
+      if (!mounted) {
+        setCardError("Stripe is not loaded");
+        setPaymentLoading(false);
+        return;
+      }
       if (!stripe || !elements) {
         setCardError("Stripe is not loaded");
         setPaymentLoading(false);
@@ -391,7 +397,6 @@ export default function Register() {
       setCardPaymentMethodId(paymentMethod.id);
       setCardError(null);
       setPaymentLoading(false);
-      // Submit the form after setting the payment method id
       setTimeout(() => {
         formRef.current?.submit();
       }, 0);
