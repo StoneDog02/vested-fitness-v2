@@ -443,40 +443,6 @@ export default function Register() {
             {isClientInvite && (
               <input type="hidden" name="invite" value={invite} />
             )}
-            {/* Plan name and price (read-only) for client invite */}
-            {isClientInvite && planPriceId && planName && (
-              <div>
-                <label htmlFor="plan_name" className="block text-sm font-medium text-secondary mb-1">
-                  Subscription Plan
-                </label>
-                <input
-                  id="plan_name"
-                  name="plan_name"
-                  type="text"
-                  value={planName}
-                  readOnly
-                  className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg bg-gray-100 text-secondary dark:text-alabaster cursor-not-allowed"
-                  tabIndex={-1}
-                />
-                {planPrice && (
-                  <div className="mt-1 text-xs text-secondary dark:text-alabaster opacity-60">
-                    {planPrice}
-                  </div>
-                )}
-              </div>
-            )}
-            {isClientInvite && planPriceId && (
-              <Elements stripe={loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!)}>
-                <CardForm
-                  onPaymentMethodCreated={(paymentMethodId) => {
-                    setCardPaymentMethodId(paymentMethodId);
-                    setCardLoading(false);
-                  }}
-                  loading={cardLoading}
-                />
-                <input type="hidden" name="paymentMethodId" value={cardPaymentMethodId || ''} />
-              </Elements>
-            )}
             <div>
               <label
                 htmlFor="name"
@@ -523,6 +489,40 @@ export default function Register() {
                 />
               </div>
             </div>
+            {/* Plan name and price (read-only) for client invite */}
+            {isClientInvite && planPriceId && planName && (
+              <div>
+                <label htmlFor="plan_name" className="block text-sm font-medium text-secondary mb-1">
+                  Subscription Plan
+                </label>
+                <input
+                  id="plan_name"
+                  name="plan_name"
+                  type="text"
+                  value={planName}
+                  readOnly
+                  className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg bg-gray-100 text-secondary dark:text-alabaster cursor-not-allowed"
+                  tabIndex={-1}
+                />
+                {planPrice && (
+                  <div className="mt-1 text-xs text-secondary dark:text-alabaster opacity-60">
+                    {planPrice}
+                  </div>
+                )}
+              </div>
+            )}
+            {isClientInvite && planPriceId && (
+              <Elements stripe={loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!)}>
+                <CardForm
+                  onPaymentMethodCreated={(paymentMethodId) => {
+                    setCardPaymentMethodId(paymentMethodId);
+                    setCardLoading(false);
+                  }}
+                  loading={cardLoading}
+                />
+                <input type="hidden" name="paymentMethodId" value={cardPaymentMethodId || ''} />
+              </Elements>
+            )}
             {isClientInvite && (
               <div>
                 <label
