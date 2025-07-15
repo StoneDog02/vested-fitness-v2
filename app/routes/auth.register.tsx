@@ -279,6 +279,7 @@ export default function Register() {
   const isClientInvite = invite && type === "client";
   const [planName, setPlanName] = React.useState<string>("");
   const [planPriceId, setPlanPriceId] = React.useState<string>("");
+  const [planPrice, setPlanPrice] = React.useState<string>("");
   const [paymentLoading, setPaymentLoading] = React.useState(false);
   const [paymentError, setPaymentError] = React.useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = React.useState(false);
@@ -317,8 +318,20 @@ export default function Register() {
         .then((data) => {
           if (data && data.plan_price_id) {
             setPlanPriceId(data.plan_price_id);
-            // For now, hardcode plan name for your only plan
-            setPlanName("Premium Coaching");
+            // Fetch plan details from Stripe plans API
+            fetch("/api/get-stripe-plans")
+              .then((res) => res.json())
+              .then((plansData) => {
+                const plan = (plansData.plans || []).find((p: any) => p.id === data.plan_price_id);
+                if (plan) {
+                  setPlanName(plan.name);
+                  const price = plan.amount != null ? (plan.amount / 100).toLocaleString(undefined, { style: "currency", currency: plan.currency }) : "";
+                  setPlanPrice(plan.interval ? `${price} / ${plan.interval}` : price);
+                } else {
+                  setPlanName("Unknown Plan");
+                  setPlanPrice("");
+                }
+              });
           }
         });
     }
@@ -387,6 +400,28 @@ export default function Register() {
           <Form method="post" className="space-y-6">
             {isClientInvite && (
               <input type="hidden" name="invite" value={invite} />
+            )}
+            {/* Plan name and price (read-only) for client invite */}
+            {isClientInvite && planName && (
+              <div>
+                <label htmlFor="plan_name" className="block text-sm font-medium text-secondary mb-1">
+                  Subscription Plan
+                </label>
+                <input
+                  id="plan_name"
+                  name="plan_name"
+                  type="text"
+                  value={planName}
+                  readOnly
+                  className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg bg-gray-100 text-secondary dark:text-alabaster cursor-not-allowed"
+                  tabIndex={-1}
+                />
+                {planPrice && (
+                  <div className="mt-1 text-xs text-secondary dark:text-alabaster opacity-60">
+                    {planPrice}
+                  </div>
+                )}
+              </div>
             )}
             {isClientInvite && planPriceId && (
               <Elements stripe={loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!)}>
