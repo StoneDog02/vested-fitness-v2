@@ -224,44 +224,12 @@ interface CardSectionProps {
   setPaymentLoading: (loading: boolean) => void;
 }
 
-function CardSection({ cardError, setCardError, cardPaymentMethodId, setCardPaymentMethodId, paymentLoading, setPaymentLoading }: CardSectionProps) {
-  const stripe = useStripe();
-  const elements = useElements();
-
-  // Handler for card changes
-  const handleCardChange = (e: any) => {
-    setCardError(e.error ? e.error.message : null);
-  };
-
-  // Handler for form submit (called from parent)
-  const createPaymentMethod = async () => {
-    if (!stripe || !elements) return null;
-    setPaymentLoading(true);
-    const cardElement = elements.getElement(CardElement);
-    if (!cardElement) {
-      setCardError("Card input not found");
-      setPaymentLoading(false);
-      return null;
-    }
-    const { error, paymentMethod } = await stripe.createPaymentMethod({
-      type: "card",
-      card: cardElement,
-    });
-    setPaymentLoading(false);
-    if (error) {
-      setCardError(error.message || "Card error");
-      return null;
-    }
-    setCardPaymentMethodId(paymentMethod.id);
-    setCardError(null);
-    return paymentMethod.id;
-  };
-
+function CardSection({ cardError, setCardError, cardPaymentMethodId }: { cardError: string | null, setCardError: (err: string | null) => void, cardPaymentMethodId: string | null }) {
   return (
     <div>
       <label htmlFor="card-element" className="block text-sm font-medium text-secondary mb-1">Card Details</label>
       <div id="card-element" className="border rounded-md p-2 bg-white">
-        <CardElement onChange={handleCardChange} options={{ style: { base: { fontSize: '16px' } } }} />
+        <CardElement onChange={e => setCardError(e.error ? e.error.message : null)} options={{ style: { base: { fontSize: '16px' } } }} />
       </div>
       <input type="hidden" name="paymentMethodId" value={cardPaymentMethodId || ''} />
       {cardError && <div className="text-red-600 text-sm mt-1">{cardError}</div>}
@@ -295,6 +263,9 @@ export default function Register() {
   const formRef = useRef<HTMLFormElement>(null);
   const [cardError, setCardError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+
+  const stripe = useStripe();
+  const elements = useElements();
 
   useEffect(() => {
     setMounted(true);
@@ -395,20 +366,36 @@ export default function Register() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     if (isClientInvite && planPriceId) {
       e.preventDefault();
-      // Only try to create payment method if on client
-      if (mounted && formRef.current) {
-        setPaymentLoading(true);
-        // Use CardSection's createPaymentMethod logic here
-        // We'll need to get the payment method from the CardSection
-        // For now, assume cardPaymentMethodId is set by CardSection
-        if (!cardPaymentMethodId) {
-          setCardError("Please enter your card details.");
-          setPaymentLoading(false);
-          return;
-        }
+      setPaymentLoading(true);
+      setCardError(null);
+      if (!stripe || !elements) {
+        setCardError("Stripe is not loaded");
         setPaymentLoading(false);
-        formRef.current.submit();
+        return;
       }
+      const cardElement = elements.getElement(CardElement);
+      if (!cardElement) {
+        setCardError("Card input not found");
+        setPaymentLoading(false);
+        return;
+      }
+      const { error, paymentMethod } = await stripe.createPaymentMethod({
+        type: "card",
+        card: cardElement,
+      });
+      if (error) {
+        setCardError(error.message || "Card error");
+        setPaymentLoading(false);
+        return;
+      }
+      setCardPaymentMethodId(paymentMethod.id);
+      setCardError(null);
+      setPaymentLoading(false);
+      // Submit the form after setting the payment method id
+      setTimeout(() => {
+        formRef.current?.submit();
+      }, 0);
+      return;
     }
     // For non-client-invite, allow normal submit
   };
@@ -553,9 +540,6 @@ export default function Register() {
                       cardError={cardError}
                       setCardError={setCardError}
                       cardPaymentMethodId={cardPaymentMethodId}
-                      setCardPaymentMethodId={setCardPaymentMethodId}
-                      paymentLoading={paymentLoading}
-                      setPaymentLoading={setPaymentLoading}
                     />
                   )}
                 </div>
