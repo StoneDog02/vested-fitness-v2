@@ -276,15 +276,85 @@ export default function Register() {
   const type = searchParams.get("type");
   const emailParam = searchParams.get("email") || "";
   const nameParam = searchParams.get("name") || "";
+  const urlPlanPriceId = searchParams.get("plan_price_id") || "";
   const isClientInvite = invite && type === "client";
   const [planName, setPlanName] = React.useState<string>("");
-  const [planPriceId, setPlanPriceId] = React.useState<string>("");
+  const [planPriceId, setPlanPriceId] = React.useState<string>(urlPlanPriceId);
   const [planPrice, setPlanPrice] = React.useState<string>("");
   const [paymentLoading, setPaymentLoading] = React.useState(false);
   const [paymentError, setPaymentError] = React.useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = React.useState(false);
   const [cardPaymentMethodId, setCardPaymentMethodId] = React.useState<string | null>(null);
   const [cardLoading, setCardLoading] = React.useState(false);
+
+  // Fetch plan info robustly: use plan_price_id from invite fetch if available, else fallback to URL
+  React.useEffect(() => {
+    if (isClientInvite) {
+      let didSetFromInvite = false;
+      if (invite) {
+        fetch(`/api/invite-client?invite=${invite}`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data && data.plan_price_id) {
+              setPlanPriceId(data.plan_price_id);
+              didSetFromInvite = true;
+              // Fetch plan details from Stripe plans API
+              fetch("/api/get-stripe-plans")
+                .then((res) => res.json())
+                .then((plansData) => {
+                  const plan = (plansData.plans || []).find((p: any) => p.id === data.plan_price_id);
+                  if (plan) {
+                    setPlanName(plan.name);
+                    const price = plan.amount != null ? (plan.amount / 100).toLocaleString(undefined, { style: "currency", currency: plan.currency }) : "";
+                    setPlanPrice(plan.interval ? `${price} / ${plan.interval}` : price);
+                  } else {
+                    setPlanName("Unknown Plan");
+                    setPlanPrice("");
+                  }
+                });
+            }
+          })
+          .catch(() => {
+            // ignore fetch error, fallback below
+          })
+          .finally(() => {
+            // Fallback: if plan_price_id is in URL and not set from invite, use it
+            if (!didSetFromInvite && urlPlanPriceId) {
+              setPlanPriceId(urlPlanPriceId);
+              fetch("/api/get-stripe-plans")
+                .then((res) => res.json())
+                .then((plansData) => {
+                  const plan = (plansData.plans || []).find((p: any) => p.id === urlPlanPriceId);
+                  if (plan) {
+                    setPlanName(plan.name);
+                    const price = plan.amount != null ? (plan.amount / 100).toLocaleString(undefined, { style: "currency", currency: plan.currency }) : "";
+                    setPlanPrice(plan.interval ? `${price} / ${plan.interval}` : price);
+                  } else {
+                    setPlanName("Unknown Plan");
+                    setPlanPrice("");
+                  }
+                });
+            }
+          });
+      } else if (urlPlanPriceId) {
+        setPlanPriceId(urlPlanPriceId);
+        fetch("/api/get-stripe-plans")
+          .then((res) => res.json())
+          .then((plansData) => {
+            const plan = (plansData.plans || []).find((p: any) => p.id === urlPlanPriceId);
+            if (plan) {
+              setPlanName(plan.name);
+              const price = plan.amount != null ? (plan.amount / 100).toLocaleString(undefined, { style: "currency", currency: plan.currency }) : "";
+              setPlanPrice(plan.interval ? `${price} / ${plan.interval}` : price);
+            } else {
+              setPlanName("Unknown Plan");
+              setPlanPrice("");
+            }
+          });
+      }
+    }
+  }, [isClientInvite, invite, urlPlanPriceId]);
+
   React.useEffect(() => {
     if (clientSecret) {
       // Confirm payment intent with Stripe.js
@@ -308,34 +378,6 @@ export default function Register() {
       });
     }
   }, [clientSecret]);
-
-  // Fetch plan info from invite (for client registration)
-  React.useEffect(() => {
-    if (isClientInvite && invite) {
-      // Fetch invite info from API (or Supabase directly)
-      fetch(`/api/invite-client?invite=${invite}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data && data.plan_price_id) {
-            setPlanPriceId(data.plan_price_id);
-            // Fetch plan details from Stripe plans API
-            fetch("/api/get-stripe-plans")
-              .then((res) => res.json())
-              .then((plansData) => {
-                const plan = (plansData.plans || []).find((p: any) => p.id === data.plan_price_id);
-                if (plan) {
-                  setPlanName(plan.name);
-                  const price = plan.amount != null ? (plan.amount / 100).toLocaleString(undefined, { style: "currency", currency: plan.currency }) : "";
-                  setPlanPrice(plan.interval ? `${price} / ${plan.interval}` : price);
-                } else {
-                  setPlanName("Unknown Plan");
-                  setPlanPrice("");
-                }
-              });
-          }
-        });
-    }
-  }, [isClientInvite, invite]);
 
   return (
     <div className="min-h-screen bg-gray-lightest flex flex-col justify-center py-12 sm:px-6 lg:px-8">
@@ -402,7 +444,7 @@ export default function Register() {
               <input type="hidden" name="invite" value={invite} />
             )}
             {/* Plan name and price (read-only) for client invite */}
-            {isClientInvite && planName && (
+            {isClientInvite && planPriceId && planName && (
               <div>
                 <label htmlFor="plan_name" className="block text-sm font-medium text-secondary mb-1">
                   Subscription Plan
@@ -541,6 +583,16 @@ export default function Register() {
                   </label>
                 </div>
               </div>
+            )}
+            {/* Always show submit button for client invite */}
+            {isClientInvite && (
+              <button
+                type="submit"
+                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+                disabled={paymentLoading || cardLoading}
+              >
+                {paymentLoading || cardLoading ? 'Processing...' : 'Create Account'}
+              </button>
             )}
             {!isClientInvite && (
               <button
