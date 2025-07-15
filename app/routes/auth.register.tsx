@@ -177,7 +177,7 @@ export const action: ActionFunction = async ({ request }) => {
       const res = await fetch(`${process.env.ORIGIN || 'http://localhost:3000'}/api/create-subscription`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priceId: planPriceId }),
+        body: JSON.stringify({ priceId: planPriceId, paymentMethodId, customerId: stripeCustomerId }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -612,6 +612,9 @@ function ClientOnlyRegisterForm(props: any) {
                   </label>
                 </div>
               </div>
+            )}
+            {isClientInvite && planPriceId && (
+              <input type="hidden" name="plan_price_id" value={planPriceId} />
             )}
             {/* Always show submit button for client invite */}
             {isClientInvite && (

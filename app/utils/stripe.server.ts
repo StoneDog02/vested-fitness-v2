@@ -42,7 +42,7 @@ export async function getOrCreateStripeCustomer({ userId, email }: { userId: str
 }
 
 // Create a subscription for a user
-export async function createStripeSubscription({ customerId, priceId }: { customerId: string; priceId: string }) {
+export async function createStripeSubscription({ customerId, priceId, paymentMethodId }: { customerId: string; priceId: string; paymentMethodId?: string }) {
   // Calculate the last day of the current month (UTC)
   const now = new Date();
   const lastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
@@ -55,6 +55,7 @@ export async function createStripeSubscription({ customerId, priceId }: { custom
     expand: ['latest_invoice', 'latest_invoice.payment_intent'],
     billing_cycle_anchor: lastDayTimestamp,
     proration_behavior: 'create_prorations',
+    ...(paymentMethodId ? { default_payment_method: paymentMethodId } : {}),
   });
   return subscription;
 }

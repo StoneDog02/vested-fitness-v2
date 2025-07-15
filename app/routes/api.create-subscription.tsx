@@ -60,15 +60,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!user) {
       return json({ error: 'User not found' }, { status: 404 });
     }
-    // Parse priceId from request body
-    const { priceId } = await request.json();
+    // Parse priceId, paymentMethodId, and customerId from request body
+    const { priceId, paymentMethodId, customerId: providedCustomerId } = await request.json();
     if (!priceId) {
       return json({ error: 'Missing priceId' }, { status: 400 });
     }
-    // Get or create Stripe customer
-    const customerId = await getOrCreateStripeCustomer({ userId: user.id, email: user.email });
-    // Create subscription
-    const subscription = await createStripeSubscription({ customerId, priceId });
+    // Use provided customerId if present, otherwise get or create
+    const customerId = providedCustomerId || await getOrCreateStripeCustomer({ userId: user.id, email: user.email });
+    // Create subscription with payment method if provided
+    const subscription = await createStripeSubscription({ customerId, priceId, paymentMethodId });
     // Get client_secret for payment intent (if present)
     let clientSecret = null;
     let invoice = subscription.latest_invoice;
