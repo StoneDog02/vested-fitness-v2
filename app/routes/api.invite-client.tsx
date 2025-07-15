@@ -79,17 +79,20 @@ export async function action({ request }: ActionFunctionArgs) {
       subject: `${name}, you've been invited to Kava Training`,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #6366F1;">Welcome to Kava Training!</h2>
+          <h2 style="color: #22c55e;">Welcome to Kava Training!</h2>
           <p>Hello ${name},</p>
           <p>You've been invited to join Kava Training as a client. Your coach is ready to help you achieve your fitness goals!</p>
           <p><strong>Your selected subscription plan will be applied when you sign up.</strong></p>
           <p>To get started, click the button below to create your account:</p>
-          <a href="${signupUrl}" style="display: inline-block; background-color: #6366F1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 16px 0;">
+          <a href="${signupUrl}" style="display: inline-block; background-color: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 16px 0; font-weight: bold;">
             Create Your Account
           </a>
           <p>This link will expire in 7 days.</p>
           <p>If you have any questions, please contact support@vestedfitness.com.</p>
           <p>Looking forward to your fitness journey,<br />The Kava Training Team</p>
+          <div style="margin-top: 32px; text-align: center;">
+            <img src="https://kavatraining.com/KAVA-TRAINING.svg" alt="KAVA TRAINING Logo" style="height: 48px; margin: 0 auto;" />
+          </div>
         </div>
       `,
     });
