@@ -14,6 +14,7 @@ import ClientProfile from "~/components/coach/ClientProfile";
 import { Link } from "@remix-run/react";
 import { calculateMacros } from "~/lib/utils";
 import { URL } from "url";
+import { useUser } from "~/context/UserContext";
 
 interface Supplement {
   id: string;
@@ -173,6 +174,7 @@ export default function ClientsIndex() {
   const [loadingMore, setLoadingMore] = useState(false);
   const fetcher = useFetcher();
   const [unreadCounts, setUnreadCounts] = useState<{ [clientId: string]: number }>({});
+  const user = useUser();
 
   useEffect(() => {
     let ignore = false;
@@ -301,7 +303,7 @@ export default function ClientsIndex() {
       <ClientInviteModal
         isOpen={isInviteModalOpen}
         onClose={() => setIsInviteModalOpen(false)}
-        coachId={undefined}
+        coachId={user.id}
       />
     </div>
   );
