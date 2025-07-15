@@ -12,7 +12,7 @@
 
 [dev]
   command = "npm run dev"
-  port = 3000
+  port = 8888
   targetPort = 3000
   publish = "build/client"
 
