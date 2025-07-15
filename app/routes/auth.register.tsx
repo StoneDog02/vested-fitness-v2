@@ -3,7 +3,7 @@ import { json, type ActionFunction, type MetaFunction } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { getOrCreateStripeCustomer, createStripeSubscription, attachPaymentMethod } from "~/utils/stripe.server";
-import React from "react";
+import React, { useRef } from "react";
 import { loadStripe } from '@stripe/stripe-js';
 import { CardElement, Elements, useStripe, useElements } from '@stripe/react-stripe-js';
 
@@ -286,6 +286,8 @@ export default function Register() {
   const [paymentSuccess, setPaymentSuccess] = React.useState(false);
   const [cardPaymentMethodId, setCardPaymentMethodId] = React.useState<string | null>(null);
   const [cardLoading, setCardLoading] = React.useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [cardError, setCardError] = React.useState<string | null>(null);
 
   // Fetch plan info robustly: use plan_price_id from invite fetch if available, else fallback to URL
   React.useEffect(() => {
@@ -379,6 +381,44 @@ export default function Register() {
     }
   }, [clientSecret]);
 
+  // Stripe hooks for card creation
+  const stripe = useStripe();
+  const elements = useElements();
+
+  // Unified form submit handler
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    if (isClientInvite && planPriceId) {
+      e.preventDefault();
+      setCardError(null);
+      if (!stripe || !elements) {
+        setCardError("Stripe is not loaded");
+        return;
+      }
+      const cardElement = elements.getElement(CardElement);
+      if (!cardElement) {
+        setCardError("Card element not found");
+        return;
+      }
+      const { error: stripeError, paymentMethod } = await stripe.createPaymentMethod({
+        type: "card",
+        card: cardElement,
+      });
+      if (stripeError) {
+        setCardError(stripeError.message || "Failed to create payment method");
+        return;
+      }
+      // Set the payment method ID in the hidden input and submit the form
+      setCardPaymentMethodId(paymentMethod.id);
+      // Use a timeout to ensure state is updated before submit
+      setTimeout(() => {
+        if (formRef.current) {
+          formRef.current.submit();
+        }
+      }, 0);
+    }
+    // For non-client-invite, allow normal submit
+  };
+
   return (
     <div className="min-h-screen bg-gray-lightest flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -439,7 +479,7 @@ export default function Register() {
               </div>
             </div>
           )}
-          <Form method="post" className="space-y-6">
+          <Form method="post" className="space-y-6" ref={formRef} onSubmit={handleSubmit}>
             {isClientInvite && (
               <input type="hidden" name="invite" value={invite} />
             )}
@@ -512,16 +552,16 @@ export default function Register() {
               </div>
             )}
             {isClientInvite && planPriceId && (
-              <Elements stripe={loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!)}>
-                <CardForm
-                  onPaymentMethodCreated={(paymentMethodId) => {
-                    setCardPaymentMethodId(paymentMethodId);
-                    setCardLoading(false);
-                  }}
-                  loading={cardLoading}
-                />
+              <div>
+                <label htmlFor="card-element" className="block text-sm font-medium text-secondary mb-1">Card Details</label>
+                <Elements stripe={loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!)}>
+                  <div id="card-element" className="border rounded-md p-2 bg-white">
+                    <CardElement onChange={e => setCardError(e.error ? e.error.message : null)} options={{ style: { base: { fontSize: '16px' } } }} />
+                  </div>
+                </Elements>
                 <input type="hidden" name="paymentMethodId" value={cardPaymentMethodId || ''} />
-              </Elements>
+                {cardError && <div className="text-red-600 text-sm mt-1">{cardError}</div>}
+              </div>
             )}
             {isClientInvite && (
               <div>
