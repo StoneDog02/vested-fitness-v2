@@ -239,7 +239,16 @@ function CardSection({ cardError, setCardError, cardPaymentMethodId }: { cardErr
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!);
 
-export default function Register() {
+// 1. Top-level Register component: only renders ClientOnlyRegisterForm after mount
+export default function Register(props: any) {
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+  return <ClientOnlyRegisterForm {...props} />;
+}
+
+// 2. Move all previous Register logic (except the mount check) into ClientOnlyRegisterForm
+function ClientOnlyRegisterForm(props: any) {
   const actionData = useActionData<ActionData>();
   const formError = actionData?.error || "";
   const success = actionData?.success;
@@ -258,17 +267,13 @@ export default function Register() {
   const [paymentLoading, setPaymentLoading] = React.useState(false);
   const [paymentError, setPaymentError] = React.useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = React.useState(false);
-  const [cardPaymentMethodId, setCardPaymentMethodId] = useState<string | null>(null);
-  const [cardLoading, setCardLoading] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
-  const [cardError, setCardError] = useState<string | null>(null);
+  const [cardPaymentMethodId, setCardPaymentMethodId] = React.useState<string | null>(null);
+  const [cardLoading, setCardLoading] = React.useState(false);
+  const formRef = React.useRef<HTMLFormElement>(null);
+  const [cardError, setCardError] = React.useState<string | null>(null);
+
   const stripe = useStripe();
   const elements = useElements();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   // Fetch plan info robustly: use plan_price_id from invite fetch if available, else fallback to URL
   React.useEffect(() => {
@@ -369,12 +374,7 @@ export default function Register() {
       setCardError(null);
 
       // Only proceed if mounted (client)
-      if (!mounted) {
-        setCardError("Stripe is not loaded");
-        setPaymentLoading(false);
-        return;
-      }
-      if (!stripe || !elements) {
+      if (!elements || !stripe) {
         setCardError("Stripe is not loaded");
         setPaymentLoading(false);
         return;
@@ -540,7 +540,7 @@ export default function Register() {
               )}
               {isClientInvite && planPriceId && (
                 <div>
-                  {mounted && (
+                  {elements && (
                     <CardSection
                       cardError={cardError}
                       setCardError={setCardError}
