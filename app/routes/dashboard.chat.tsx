@@ -12,14 +12,6 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-// Mock coach data
-const mockCoach = {
-  id: "coach1",
-  name: "Sarah Johnson",
-  role: "Head Coach",
-  avatar: null,
-};
-
 export default function Chat() {
   // TODO: Replace with actual clientId from user context or params
   const { clientId } = useParams();

@@ -28,60 +28,6 @@ export const meta: MetaFunction = () => {
 // In-memory cache for user payment settings (expires after 30s)
 const userPaymentCache: Record<string, { data: any; expires: number }> = {};
 
-// Mock payment data
-const mockPaymentMethods = [
-  {
-    id: "pm_1",
-    type: "card",
-    brand: "visa",
-    last4: "4242",
-    expMonth: 12,
-    expYear: 2025,
-    isDefault: true,
-  },
-  {
-    id: "pm_2",
-    type: "card",
-    brand: "mastercard",
-    last4: "5555",
-    expMonth: 3,
-    expYear: 2026,
-    isDefault: false,
-  },
-];
-
-const mockSubscription = {
-  plan: "Premium Coaching",
-  amount: 149.99,
-  interval: "month",
-  status: "active",
-  nextBillingDate: "2023-06-15",
-};
-
-const mockBillingHistory = [
-  {
-    id: "inv_1",
-    date: "2023-05-15",
-    amount: 149.99,
-    status: "paid",
-    description: "Premium Coaching - Monthly",
-  },
-  {
-    id: "inv_2",
-    date: "2023-04-15",
-    amount: 149.99,
-    status: "paid",
-    description: "Premium Coaching - Monthly",
-  },
-  {
-    id: "inv_3",
-    date: "2023-03-15",
-    amount: 149.99,
-    status: "paid",
-    description: "Premium Coaching - Monthly",
-  },
-];
-
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY!);
 
 export const loader: LoaderFunction = async ({ request }) => {

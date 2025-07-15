@@ -1,4 +1,5 @@
 import type { Exercise } from "~/types/workout";
+import { useUser } from "~/context/UserContext";
 import { useState, useEffect, useRef } from "react";
 
 interface WorkoutCardProps {
@@ -18,7 +19,28 @@ export default function WorkoutCard({
   onCompletionChange,
   dayOffset,
 }: WorkoutCardProps) {
+  const { id: userId } = useUser();
   const [weights, setWeights] = useState<Record<string, string>>({});
+  const [personalBests, setPersonalBests] = useState<Record<string, number>>({});
+  // Fetch PBs for each exercise on mount
+  useEffect(() => {
+    async function fetchPBs() {
+      const pbMap: Record<string, number> = {};
+      await Promise.all(
+        exercises.map(async (exercise) => {
+          const res = await fetch(`/api/personal-best?exerciseId=${exercise.id}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && typeof data.weight === "number") {
+              pbMap[exercise.id] = data.weight;
+            }
+          }
+        })
+      );
+      setPersonalBests(pbMap);
+    }
+    fetchPBs();
+  }, [exercises]);
 
   // Reset state when day changes
   useEffect(() => {
@@ -49,6 +71,19 @@ export default function WorkoutCard({
       ...prev,
       [`${exerciseId}-${setNumber}`]: value,
     }));
+    // If this is set 1 and value is a new PB, update PB in Supabase
+    if (setNumber === 1 && value && !isNaN(Number(value))) {
+      const newWeight = Number(value);
+      if (!personalBests[exerciseId] || newWeight > personalBests[exerciseId]) {
+        setPersonalBests((prev) => ({ ...prev, [exerciseId]: newWeight }));
+        // Update PB in Supabase
+        fetch("/api/personal-best", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ exerciseId, weight: newWeight }),
+        });
+      }
+    }
   };
 
 
@@ -143,9 +178,9 @@ export default function WorkoutCard({
                             }`}
                             placeholder="0"
                           />
-                          {/* Personal Best mock display */}
+                          {/* Personal Best display */}
                           <span className="ml-2 text-xs text-green-600 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded">
-                            PB: 185 lbs
+                            PB: {personalBests[exercise.id] ? `${personalBests[exercise.id]} lbs` : "-"}
                           </span>
                         </div>
                       ) : (

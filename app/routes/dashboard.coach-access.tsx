@@ -25,30 +25,6 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-// Mock check-in notes
-const mockCheckInNotes = {
-  lastWeek:
-    "Client reported feeling stronger in workouts. Sleep has improved to 7-8 hours per night. Compliance with meal plan at 90%.",
-  thisWeek:
-    "Client is continuing to make progress. Weight down by 1 lb. Requested some modifications to the leg day workout.",
-};
-
-// Mock weight data
-const initialWeightData = [
-  { date: "2024-03-01", weight: 185 },
-  { date: "2024-03-08", weight: 183 },
-  { date: "2024-03-15", weight: 181 },
-  { date: "2024-03-22", weight: 179 },
-  { date: "2024-03-29", weight: 177 },
-  { date: "2024-04-05", weight: 176 },
-  { date: "2024-04-12", weight: 175 },
-];
-
-// Mock client data
-const mockClientData = {
-  goal: "Build muscle and increase strength",
-};
-
 // Function to determine if the goal is weight loss oriented
 const isWeightLossGoal = (goal: string) => {
   const weightLossKeywords = ["lose", "cut", "lean", "reduce", "drop"];
@@ -128,7 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
   if (!authId) {
-    return json({ updates: [], goal: mockClientData.goal, checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [] });
+    return json({ updates: [], goal: "Build muscle and increase strength", checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [] });
   }
 
   // Check cache (per user)
@@ -143,7 +119,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     .eq("auth_id", authId)
     .single();
   if (!clientUser) {
-    return json({ updates: [], goal: mockClientData.goal, checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [] });
+    return json({ updates: [], goal: "Build muscle and increase strength", checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [] });
   }
 
   // Parse page params for check-in, update, and meal log pagination
@@ -256,7 +232,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const result = {
     updates: updates || [],
-    goal: clientUser.goal || mockClientData.goal,
+    goal: clientUser.goal || "Build muscle and increase strength",
     checkInNotes: {
       thisWeek: thisWeekNote || null,
       lastWeek: lastWeekNote || null,

@@ -13,22 +13,6 @@ interface Message {
   timestamp: string;
 }
 
-const mockMessages: Message[] = [
-  {
-    id: "1",
-    sender: "coach",
-    content: "How are you feeling about your progress this week?",
-    timestamp: "2024-03-15T10:30:00",
-  },
-  {
-    id: "2",
-    sender: "client",
-    content:
-      "Great! I've been following the meal plan and hitting my workouts consistently.",
-    timestamp: "2024-03-15T10:35:00",
-  },
-];
-
 export const meta: MetaFunction = () => {
   return [
     { title: "Client Chat | Kava Training" },
@@ -58,7 +42,7 @@ export default function ClientChat() {
     if (!newMessage.trim()) return;
 
     const message: Message = {
-      id: (mockMessages.length + 1).toString(),
+      id: Date.now().toString(), // Use timestamp as a temporary id if needed
       sender: "coach",
       content: newMessage,
       timestamp: new Date().toISOString(),

@@ -130,43 +130,11 @@ export interface Database {
   };
 }
 
-// Mock user data for testing
-export const mockUsers: User[] = [
-  {
-    id: "1",
-    email: "coach@example.com",
-    name: "Test Coach",
-    role: "coach",
-    created_at: new Date().toISOString(),
-    auth_id: "coach-auth-id",
-  },
-  {
-    id: "2",
-    email: "client@example.com",
-    name: "Test Client",
-    role: "client",
-    coach_id: "1",
-    starting_weight: 180,
-    current_weight: 175,
-    workout_split: "4 day split",
-    created_at: new Date().toISOString(),
-    auth_id: "client-auth-id",
-  },
-];
+// Replace mock resetPassword with real implementation
+import { createClient } from "@supabase/supabase-js";
 
-// Helper function to get a mock user
-export const getMockUser = (role: UserRole = "coach"): User => {
-  return mockUsers.find((user) => user.role === role) || mockUsers[0];
-};
-
-// Mock function to switch roles for testing
-export const switchRole = (currentRole: UserRole): UserRole => {
-  return currentRole === "coach" ? "client" : "coach";
-};
-
-// Mock resetPassword function to fix build
 export const resetPassword = async (email: string): Promise<{ error: Error | null }> => {
-  // Mock implementation for now
-  // In a real implementation, this would call Supabase auth.resetPasswordForEmail
-  return { error: null };
+  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  return { error };
 };
