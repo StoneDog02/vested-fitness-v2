@@ -20,12 +20,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const email = formData.get("email")?.toString();
   const name = formData.get("name")?.toString();
   const coach_id = formData.get("coach_id")?.toString();
+  const plan_price_id = formData.get("plan_price_id")?.toString();
 
   // Validate the form data
-  if (!email || !name || !coach_id) {
+  if (!email || !name || !coach_id || !plan_price_id) {
     return json(
       {
-        error: "Email, name, and coach_id are required",
+        error: "Email, name, coach_id, and plan_price_id are required",
         success: false,
       },
       { status: 400 }
@@ -47,6 +48,7 @@ export async function action({ request }: ActionFunctionArgs) {
         email,
         name,
         coach_id,
+        plan_price_id,
         token: inviteCode,
         accepted: false,
         created_at: new Date().toISOString(),
@@ -62,12 +64,13 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Create the signup URL with the invitation code
+    // Create the signup URL with the invitation code and plan
     const signupUrl = new URL("/auth/register", request.url);
     signupUrl.searchParams.append("invite", inviteCode);
     signupUrl.searchParams.append("email", email);
     signupUrl.searchParams.append("name", name);
     signupUrl.searchParams.append("type", "client");
+    signupUrl.searchParams.append("plan_price_id", plan_price_id);
 
     // Send the invitation email
     const { error } = await resend.emails.send({
@@ -79,6 +82,7 @@ export async function action({ request }: ActionFunctionArgs) {
           <h2 style="color: #6366F1;">Welcome to Kava Training!</h2>
           <p>Hello ${name},</p>
           <p>You've been invited to join Kava Training as a client. Your coach is ready to help you achieve your fitness goals!</p>
+          <p><strong>Your selected subscription plan will be applied when you sign up.</strong></p>
           <p>To get started, click the button below to create your account:</p>
           <a href="${signupUrl}" style="display: inline-block; background-color: #6366F1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 16px 0;">
             Create Your Account
