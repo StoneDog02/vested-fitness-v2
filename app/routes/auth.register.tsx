@@ -150,49 +150,73 @@ export const action: ActionFunction = async ({ request }) => {
     ) {
       errorMessage = "An account with this email already exists. Please log in or use a different email.";
     }
+    console.error('[REGISTRATION] Failed to insert user:', errorMessage);
     return json<ActionData>({
       error: errorMessage,
       fields: { name, email, password, userType: role, inviteCode },
     });
   }
 
-  // Create Stripe customer and update user record
-  let stripeCustomerId: string | undefined = undefined;
-  try {
-    stripeCustomerId = await getOrCreateStripeCustomer({ userId: auth_id, email });
-    await supabase.from("users").update({ stripe_customer_id: stripeCustomerId }).eq("auth_id", auth_id);
-    // If paymentMethodId is present, attach it and set as default
-    if (stripeCustomerId && paymentMethodId) {
-      await attachPaymentMethod({ customerId: stripeCustomerId, paymentMethodId });
-    }
-  } catch (e) {
-    // Optionally log or handle error, but don't block registration
-    console.error("Failed to create Stripe customer or attach payment method:", e);
+  // Fetch the user row by auth_id to get the correct id (primary key)
+  const { data: userRow, error: fetchUserError } = await supabase
+    .from("users")
+    .select("id, email")
+    .eq("auth_id", auth_id)
+    .single();
+  if (fetchUserError || !userRow) {
+    console.error('[REGISTRATION] Failed to fetch user after insert:', fetchUserError);
+    return json<ActionData>({
+      error: "Failed to fetch user after registration.",
+      fields: { name, email, password, userType: role, inviteCode },
+    });
   }
+  const userId = userRow.id;
 
-  // If planPriceId is present, create a Stripe subscription for the user
-  if (stripeCustomerId && planPriceId) {
+  // Only run Stripe logic for clients
+  if (role === 'client') {
+    // Create Stripe customer and update user record
+    let stripeCustomerId: string | undefined = undefined;
     try {
-      // Use the API endpoint to create the subscription and get clientSecret
-      const res = await fetch(`${process.env.ORIGIN || 'http://localhost:3000'}/api/create-subscription`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priceId: planPriceId, paymentMethodId, customerId: stripeCustomerId }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to create subscription');
+      stripeCustomerId = await getOrCreateStripeCustomer({ userId, email });
+      console.log('[REGISTRATION] stripeCustomerId:', stripeCustomerId);
+      await supabase.from("users").update({ stripe_customer_id: stripeCustomerId }).eq("auth_id", auth_id);
+      // If paymentMethodId is present, attach it and set as default
+      if (stripeCustomerId && paymentMethodId) {
+        console.log('[REGISTRATION] Attaching payment method:', paymentMethodId, 'to customer:', stripeCustomerId);
+        await attachPaymentMethod({ customerId: stripeCustomerId, paymentMethodId });
+        console.log('[REGISTRATION] Payment method attached');
       }
-      // Pass clientSecret to the frontend for Stripe.js confirmation
-      return json<ActionData>({
-        fields: { name: '', email: '', password: '', userType: role },
-        error: undefined,
-        success: true,
-        message: `Account created! We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
-        clientSecret: data.clientSecret || null,
-      });
     } catch (e) {
-      console.error('Failed to create Stripe subscription:', e);
+      // Optionally log or handle error, but don't block registration
+      console.error("Failed to create Stripe customer or attach payment method:", e);
+    }
+
+    // If planPriceId is present, create a Stripe subscription for the user
+    if (stripeCustomerId && planPriceId) {
+      try {
+        console.log('[REGISTRATION] Creating subscription with:', { planPriceId, paymentMethodId, stripeCustomerId });
+        // Use the API endpoint to create the subscription and get clientSecret
+        const res = await fetch(`${process.env.ORIGIN || 'http://localhost:3000'}/api/create-subscription`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ priceId: planPriceId, paymentMethodId, customerId: stripeCustomerId }),
+        });
+        const data = await res.json();
+        console.log('[REGISTRATION] Subscription creation response:', data);
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to create subscription');
+        }
+        // Pass clientSecret to the frontend for Stripe.js confirmation
+        return json<ActionData>({
+          fields: { name: '', email: '', password: '', userType: role },
+          error: undefined,
+          success: true,
+          message: `Account created! We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
+          clientSecret: data.clientSecret || null,
+        });
+      } catch (e) {
+        console.error('Failed to create Stripe subscription:', e);
+      }
     }
   }
 

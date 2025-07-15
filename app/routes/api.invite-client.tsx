@@ -1,4 +1,4 @@
-import { json, ActionFunctionArgs } from "@remix-run/node";
+import { json, ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
@@ -123,4 +123,25 @@ export async function action({ request }: ActionFunctionArgs) {
       { status: 500 }
     );
   }
+}
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const inviteToken = url.searchParams.get("invite");
+  if (!inviteToken) {
+    return json({ error: "Missing invite token" }, { status: 400 });
+  }
+  const supabase = createClient<Database>(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
+  const { data: invite, error } = await supabase
+    .from("client_invitations")
+    .select("email, name, coach_id, plan_price_id, token, accepted, created_at")
+    .eq("token", inviteToken)
+    .single();
+  if (error || !invite) {
+    return json({ error: "Invite not found" }, { status: 404 });
+  }
+  return json(invite);
 }

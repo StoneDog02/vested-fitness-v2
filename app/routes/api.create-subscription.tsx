@@ -62,6 +62,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     // Parse priceId, paymentMethodId, and customerId from request body
     const { priceId, paymentMethodId, customerId: providedCustomerId } = await request.json();
+    console.log('[API] Received subscription creation request:', { priceId, paymentMethodId, providedCustomerId });
     if (!priceId) {
       return json({ error: 'Missing priceId' }, { status: 400 });
     }
@@ -69,6 +70,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customerId = providedCustomerId || await getOrCreateStripeCustomer({ userId: user.id, email: user.email });
     // Create subscription with payment method if provided
     const subscription = await createStripeSubscription({ customerId, priceId, paymentMethodId });
+    console.log('[API] Created subscription:', subscription && subscription.id, 'for customer:', customerId);
     // Get client_secret for payment intent (if present)
     let clientSecret = null;
     let invoice = subscription.latest_invoice;
