@@ -53,7 +53,9 @@ export default function App() {
         <ThemeProvider>
           <MealCompletionProvider>
             <ToastProvider>
-              <Outlet />
+              <UserContext.Provider value={undefined}>
+                <Outlet />
+              </UserContext.Provider>
             </ToastProvider>
           </MealCompletionProvider>
         </ThemeProvider>
