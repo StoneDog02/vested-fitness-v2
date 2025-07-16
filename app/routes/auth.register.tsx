@@ -195,8 +195,10 @@ export const action: ActionFunction = async ({ request }) => {
     if (stripeCustomerId && planPriceId) {
       try {
         console.log('[REGISTRATION] Creating subscription with:', { planPriceId, paymentMethodId, stripeCustomerId });
-        // Use a relative URL for the API endpoint to create the subscription and get clientSecret
-        const res = await fetch('/api/create-subscription', {
+        // Use an absolute URL for the API endpoint to create the subscription and get clientSecret
+        const url = new URL(request.url);
+        const origin = url.origin;
+        const res = await fetch(`${origin}/api/create-subscription`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ priceId: planPriceId, paymentMethodId, customerId: stripeCustomerId }),
