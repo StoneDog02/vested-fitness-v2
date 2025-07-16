@@ -200,7 +200,10 @@ export const action: ActionFunction = async ({ request }) => {
         const origin = url.origin;
         const res = await fetch(`${origin}/api/create-subscription`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'cookie': request.headers.get('cookie') || '',
+          },
           body: JSON.stringify({ priceId: planPriceId, paymentMethodId, customerId: stripeCustomerId }),
         });
         const data = await res.json();
