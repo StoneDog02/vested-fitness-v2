@@ -11,6 +11,13 @@ import { MealCompletionProvider } from "./context/MealCompletionContext";
 import { ToastProvider } from "./context/ToastContext";
 import { UserContext } from "./context/UserContext";
 import { useLoaderData } from "@remix-run/react";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { createClient } from "@supabase/supabase-js";
+import { parse } from "cookie";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
+import type { Database } from "~/lib/supabase";
+import type { UserContextType } from "./context/UserContext";
 
 import styles from "./tailwind.css?url";
 
@@ -38,7 +45,55 @@ const themeScript = `
   })();
 `;
 
+export async function loader({ request }: LoaderFunctionArgs) {
+  const cookies = parse(request.headers.get("cookie") || "");
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  let accessToken;
+  if (supabaseAuthCookieKey) {
+    try {
+      const decoded = Buffer.from(
+        cookies[supabaseAuthCookieKey],
+        "base64"
+      ).toString("utf-8");
+      const [access] = JSON.parse(JSON.parse(decoded));
+      accessToken = access;
+    } catch (e) {
+      accessToken = undefined;
+    }
+  }
+  let user = null;
+  let role = null;
+  let authId;
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken);
+      authId = decoded && typeof decoded === "object" && "sub" in decoded ? decoded.sub : undefined;
+    } catch (e) {
+      authId = undefined;
+    }
+  }
+  if (authId) {
+    const supabase = createClient<Database>(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+    const { data: userData } = await supabase
+      .from("users")
+      .select("id, name, email, role, avatar_url, font_size, access_status, stripe_customer_id, chat_bubble_color")
+      .eq("auth_id", authId)
+      .single();
+    if (userData) {
+      role = userData.role;
+      user = userData;
+    }
+  }
+  return json({ user: user ? { id: String(user.id), role: user.role as 'coach' | 'client', chat_bubble_color: user.chat_bubble_color } as UserContextType : undefined });
+}
+
 export default function App() {
+  const { user } = useLoaderData<typeof loader>();
   return (
     <html lang="en">
       <head>
@@ -53,7 +108,7 @@ export default function App() {
         <ThemeProvider>
           <MealCompletionProvider>
             <ToastProvider>
-              <UserContext.Provider value={undefined}>
+              <UserContext.Provider value={user as UserContextType | undefined}>
                 <Outlet />
               </UserContext.Provider>
             </ToastProvider>
