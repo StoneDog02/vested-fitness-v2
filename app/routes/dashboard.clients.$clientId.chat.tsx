@@ -5,6 +5,7 @@ import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import { useState } from "react";
 import { ChatBox } from "~/components/ui/ChatBox";
 import { useParams, useLoaderData, useMatches } from "@remix-run/react";
+import dayjs from "dayjs";
 
 interface Message {
   id: string;
@@ -26,7 +27,7 @@ export default function ClientChat() {
   const [newMessage, setNewMessage] = useState("");
   const matches = useMatches();
   // Find the parent route with client loader data
-  const parentData = matches.find((m) => m.data && typeof m.data === 'object' && m.data !== null && 'client' in m.data) ?.data as { client: { id: string; name?: string } | null };
+  const parentData = matches.find((m) => m.data && typeof m.data === 'object' && m.data !== null && 'client' in m.data) ?.data as { client: { id: string; name?: string; created_at?: string; goal?: string } | null };
 
   // Defensive: handle missing client
   if (!parentData?.client) {
@@ -36,6 +37,9 @@ export default function ClientChat() {
       </div>
     );
   }
+
+  const startDate = parentData.client.created_at ? dayjs(parentData.client.created_at).format("MMM D, YYYY") : "N/A";
+  const goal = parentData.client.goal || "N/A";
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,10 +78,10 @@ export default function ClientChat() {
                   <span className="font-medium">Name:</span> {parentData.client.name || "Unknown"}
                 </p>
                 <p className="text-sm text-gray-dark dark:text-gray-light">
-                  <span className="font-medium">Program:</span> Muscle Gain
+                  <span className="font-medium">Goal:</span> {goal}
                 </p>
                 <p className="text-sm text-gray-dark dark:text-gray-light">
-                  <span className="font-medium">Start Date:</span> Jan 15, 2024
+                  <span className="font-medium">Start Date:</span> {startDate}
                 </p>
               </div>
             </Card>

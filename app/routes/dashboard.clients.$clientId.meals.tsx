@@ -19,6 +19,7 @@ import {
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import NABadge from "../components/ui/NABadge";
 
 // Helper function to determine activation status for coaches
 const getActivationStatus = (plan: { isActive: boolean; activatedAt?: string }) => {
@@ -62,16 +63,16 @@ export const loader = async ({
   );
 
   // Try to find client by slug first, then by id
-  let client: { id: string; name: string } | null = null;
+  let client: { id: string; name: string; created_at: string } | null = null;
   const [initialClientResult, clientByIdResult] = await Promise.all([
     supabase
       .from("users")
-      .select("id, name")
+      .select("id, name, created_at")
       .eq("slug", clientIdParam)
       .single(),
     supabase
       .from("users")
-      .select("id, name")
+      .select("id, name, created_at")
       .eq("id", clientIdParam)
       .single(),
   ]);
@@ -637,7 +638,7 @@ export default function ClientMeals() {
   const loaderData = useLoaderData<{
     mealPlans: MealPlan[];
     libraryPlans: MealPlan[];
-    client: { name: string, id: string } | null;
+    client: { name: string, id: string, created_at?: string } | null;
     complianceData: number[];
     mealPlansHasMore?: boolean;
   }>();
@@ -1015,6 +1016,21 @@ export default function ClientMeals() {
                       displayPercentage = 0;
                     }
                     
+                    const signupDate = client?.created_at ? new Date(client.created_at) : null;
+                    if (signupDate) signupDate.setHours(0,0,0,0);
+                    thisDate.setHours(0,0,0,0);
+                    const isBeforeSignup = signupDate && thisDate < signupDate;
+                    // Find if a plan exists for this day
+                    const planForDay = mealPlans.find((p) => {
+                      const activated = p.activatedAt ? new Date(p.activatedAt) : null;
+                      const deactivated = p.deactivatedAt ? new Date(p.deactivatedAt) : null;
+                      const dayStr = thisDate.toISOString().slice(0, 10);
+                      const activatedStr = activated ? activated.toISOString().slice(0, 10) : null;
+                      return (
+                        activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated > thisDate)
+                      );
+                    });
+                    const isNoPlan = !planForDay;
                     return (
                       <div key={label} className="flex items-center gap-4">
                         <span className="text-xs text-gray-500 w-10 text-left flex-shrink-0">
@@ -1032,21 +1048,18 @@ export default function ClientMeals() {
                               }}
                             />
                           </div>
-                          <span
-                            className={`ml-4 text-xs font-medium text-right whitespace-nowrap ${
-                              isToday && compliancePercentages[i] === 0 
-                                ? 'bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20' 
-                                : isFuture || (isToday && compliancePercentages[i] === 0)
-                                ? 'text-gray-500 min-w-[60px]'
-                                : 'min-w-[40px]'
-                            }`}
-                            style={{ 
-                              color: !(isFuture || (isToday && compliancePercentages[i] === 0)) 
-                                ? getBarColor(compliancePercentages[i] || 0)
-                                : undefined
-                            }}
-                          >
-                            {isFuture || (isToday && compliancePercentages[i] === 0) ? 'Pending' : `${percentage}%`}
+                          <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
+                            {isBeforeSignup ? (
+                              <NABadge reason="Client was not signed up yet" />
+                            ) : isToday ? (
+                              <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
+                            ) : isFuture ? (
+                              <span className="text-gray-500">Pending</span>
+                            ) : isNoPlan ? (
+                              <NABadge reason="Plan hasn’t been created for client yet" />
+                            ) : (
+                              `${percentage}%`
+                            )}
                           </span>
                         </div>
                       </div>

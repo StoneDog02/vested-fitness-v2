@@ -109,7 +109,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   let { data: client, error } = await supabase
     .from("users")
     .select(
-      "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
+      "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug, created_at"
     )
     .eq("slug", clientIdParam)
     .single();
@@ -129,7 +129,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     const { data: clientById, error: errorById } = await supabase
       .from("users")
       .select(
-        "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug"
+        "id, name, email, goal, starting_weight, current_weight, workout_split, role, coach_id, slug, created_at"
       )
       .eq("id", clientIdParam)
       .single();

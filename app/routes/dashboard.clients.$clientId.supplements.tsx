@@ -12,6 +12,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
 } from "@heroicons/react/24/outline";
+import NABadge from "../components/ui/NABadge";
 
 interface Supplement {
   id: string;
@@ -54,12 +55,12 @@ export const loader = async ({
   const [initialClientResult, clientByIdResult] = await Promise.all([
     supabase
       .from("users")
-      .select("id")
+      .select("id, created_at")
       .eq("slug", clientIdParam)
       .single(),
     supabase
       .from("users")
-      .select("id")
+      .select("id, created_at")
       .eq("id", clientIdParam)
       .single(),
   ]);
@@ -170,7 +171,7 @@ export const loader = async ({
     supplements,
     complianceData,
     weekStart: weekStart.toISOString(),
-    client: { id: client.id, name: "Client" },
+    client: { id: client.id, created_at: client.created_at, name: "Client" },
   };
   // Cache result
   if (clientIdParam) {
@@ -272,7 +273,7 @@ export default function ClientSupplements() {
     supplements: Supplement[];
     complianceData: number[];
     weekStart: string;
-    client: { id: string; name: string } | null;
+    client: { id: string; name: string; created_at?: string } | null;
   }>();
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
@@ -485,12 +486,18 @@ export default function ClientSupplements() {
                 </div>
                 <div className="flex flex-col gap-2">
                   {dayLabels.map((label, i) => {
-                    // Determine if this is today or future/past
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
                     const thisDate = new Date(calendarStart);
                     thisDate.setDate(calendarStart.getDate() + i);
-                    thisDate.setHours(0, 0, 0, 0);
+                    thisDate.setHours(0,0,0,0);
+                    const signupDate = client?.created_at ? new Date(client.created_at) : null;
+                    if (signupDate) signupDate.setHours(0,0,0,0);
+                    const isBeforeSignup = signupDate && thisDate < signupDate;
+                    // Find if a plan exists for this day
+                    const planForDay = supplements && supplements.length > 0 ? true : false;
+                    const isNoPlan = !planForDay;
+                    // Determine if today or future
+                    const today = new Date();
+                    today.setHours(0,0,0,0);
                     const isToday = thisDate.getTime() === today.getTime();
                     const isFuture = thisDate.getTime() > today.getTime();
                     
@@ -520,21 +527,18 @@ export default function ClientSupplements() {
                               }}
                             />
                           </div>
-                          <span
-                            className={`ml-4 text-xs font-medium text-right whitespace-nowrap ${
-                              isToday && complianceData[i] === 0 
-                                ? 'bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20' 
-                                : isFuture || (isToday && complianceData[i] === 0)
-                                ? 'text-gray-500 min-w-[60px]'
-                                : 'min-w-[40px]'
-                            }`}
-                            style={{ 
-                              color: !(isFuture || (isToday && complianceData[i] === 0)) 
-                                ? getBarColor(complianceData[i] || 0)
-                                : undefined
-                            }}
-                          >
-                            {isFuture || (isToday && complianceData[i] === 0) ? 'Pending' : `${percentage}%`}
+                          <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
+                            {isBeforeSignup ? (
+                              <NABadge reason="Client was not signed up yet" />
+                            ) : isToday ? (
+                              <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
+                            ) : isFuture ? (
+                              <span className="text-gray-500">Pending</span>
+                            ) : isNoPlan ? (
+                              <NABadge reason="Plan hasn’t been created for client yet" />
+                            ) : (
+                              `${percentage}%`
+                            )}
                           </span>
                         </div>
                       </div>
