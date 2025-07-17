@@ -27,6 +27,7 @@ type ActionData = {
   success?: boolean;
   message?: string;
   clientSecret?: string | null;
+  free?: boolean;
 };
 
 // Utility to generate a slug from a name
@@ -211,7 +212,21 @@ export const action: ActionFunction = async ({ request }) => {
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to create subscription');
         }
-        // Pass clientSecret to the frontend for Stripe.js confirmation
+        
+        // Handle free products - no payment confirmation needed
+        if (data.free) {
+          console.log('[REGISTRATION] Free product detected, skipping payment confirmation');
+          return json<ActionData>({
+            fields: { name: '', email: '', password: '', userType: role },
+            error: undefined,
+            success: true,
+            message: `Account created! ${data.message} We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
+            clientSecret: null,
+            free: true,
+          });
+        }
+        
+        // Pass clientSecret to the frontend for Stripe.js confirmation (paid products)
         return json<ActionData>({
           fields: { name: '', email: '', password: '', userType: role },
           error: undefined,
@@ -327,7 +342,8 @@ function ClientOnlyRegisterForm(props: any) {
                   if (plan) {
                     setPlanName(plan.name);
                     const price = plan.amount != null ? (plan.amount / 100).toLocaleString(undefined, { style: "currency", currency: plan.currency }) : "";
-                    setPlanPrice(plan.interval ? `${price} / ${plan.interval}` : price);
+                    const displayPrice = plan.amount === 0 ? "Free" : (plan.interval ? `${price} / ${plan.interval}` : price);
+                    setPlanPrice(displayPrice);
                   } else {
                     setPlanName("Unknown Plan");
                     setPlanPrice("");
@@ -349,7 +365,8 @@ function ClientOnlyRegisterForm(props: any) {
                   if (plan) {
                     setPlanName(plan.name);
                     const price = plan.amount != null ? (plan.amount / 100).toLocaleString(undefined, { style: "currency", currency: plan.currency }) : "";
-                    setPlanPrice(plan.interval ? `${price} / ${plan.interval}` : price);
+                    const displayPrice = plan.amount === 0 ? "Free" : (plan.interval ? `${price} / ${plan.interval}` : price);
+                    setPlanPrice(displayPrice);
                   } else {
                     setPlanName("Unknown Plan");
                     setPlanPrice("");
@@ -366,7 +383,8 @@ function ClientOnlyRegisterForm(props: any) {
             if (plan) {
               setPlanName(plan.name);
               const price = plan.amount != null ? (plan.amount / 100).toLocaleString(undefined, { style: "currency", currency: plan.currency }) : "";
-              setPlanPrice(plan.interval ? `${price} / ${plan.interval}` : price);
+              const displayPrice = plan.amount === 0 ? "Free" : (plan.interval ? `${price} / ${plan.interval}` : price);
+              setPlanPrice(displayPrice);
             } else {
               setPlanName("Unknown Plan");
               setPlanPrice("");
@@ -377,6 +395,14 @@ function ClientOnlyRegisterForm(props: any) {
   }, [isClientInvite, invite, urlPlanPriceId]);
 
   React.useEffect(() => {
+    // Handle free products - show success immediately without payment confirmation
+    if (actionData?.free) {
+      setPaymentSuccess(true);
+      setPaymentLoading(false);
+      setPaymentError(null);
+      return;
+    }
+    
     if (clientSecret) {
       // Confirm payment intent with Stripe.js
       setPaymentLoading(true);
@@ -397,7 +423,7 @@ function ClientOnlyRegisterForm(props: any) {
         setPaymentLoading(false);
       });
     }
-  }, [clientSecret]);
+  }, [clientSecret, actionData?.free]);
 
   // Unified form submit handler
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -405,6 +431,19 @@ function ClientOnlyRegisterForm(props: any) {
       e.preventDefault();
       setPaymentLoading(true);
       setCardError(null);
+
+      // Check if this is a free plan by looking at the plan price
+      const isFreePlan = planPrice === "Free";
+      
+      if (isFreePlan) {
+        // For free plans, skip payment method creation and submit directly
+        console.log('[REGISTRATION] Free plan detected, skipping payment method creation');
+        setPaymentLoading(false);
+        setTimeout(() => {
+          formRef.current?.submit();
+        }, 0);
+        return;
+      }
 
       // Only proceed if mounted (client)
       if (!elements || !stripe) {
@@ -477,7 +516,7 @@ function ClientOnlyRegisterForm(props: any) {
             <div className="rounded-md bg-yellow-50 p-4 mb-4">
               <div className="flex">
                 <div className="text-sm text-yellow-700">
-                  {paymentError || "Processing payment..."}
+                  {paymentError || (actionData?.free ? "Activating free plan..." : "Processing payment...")}
                 </div>
               </div>
             </div>
@@ -493,7 +532,7 @@ function ClientOnlyRegisterForm(props: any) {
             <div className="rounded-md bg-green-50 p-4 mb-4">
               <div className="flex">
                 <div className="text-sm text-green-700">
-                  Payment confirmed successfully!
+                  {actionData?.free ? "Free plan activated successfully!" : "Payment confirmed successfully!"}
                 </div>
               </div>
             </div>
@@ -566,12 +605,12 @@ function ClientOnlyRegisterForm(props: any) {
                   />
                   {planPrice && (
                     <div className="mt-1 text-xs text-secondary dark:text-alabaster opacity-60">
-                      {planPrice}
+                      {planPrice === "$0.00" || planPrice === "$0.00 / month" || planPrice === "$0.00 / year" ? "Free" : planPrice}
                     </div>
                   )}
                 </div>
               )}
-              {isClientInvite && planPriceId && (
+              {isClientInvite && planPriceId && planPrice !== "Free" && (
                 <div>
                   {elements && (
                     <CardSection

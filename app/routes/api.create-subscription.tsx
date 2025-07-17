@@ -71,7 +71,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Retrieve the price from Stripe to determine if it's recurring or one_time
     const price = await stripe.prices.retrieve(priceId);
-    console.log('[API] Stripe price type:', price.type, 'id:', price.id);
+    console.log('[API] Stripe price type:', price.type, 'id:', price.id, 'amount:', price.unit_amount);
+
+    // Check if this is a free product (unit_amount === 0)
+    if (price.unit_amount === 0) {
+      console.log('[API] Free product detected, skipping payment creation');
+      
+      if (price.type === 'recurring') {
+        // Create subscription for free recurring product
+        const subscription = await createStripeSubscription({ customerId, priceId, paymentMethodId });
+        console.log('[API] Created free subscription:', subscription && subscription.id, 'for customer:', customerId);
+        return json({ 
+          success: true, 
+          subscription, 
+          free: true, 
+          message: "Free plan activated successfully" 
+        });
+      } else if (price.type === 'one_time') {
+        // For free one-time products, just return success without PaymentIntent
+        console.log('[API] Free one-time product, no payment required');
+        return json({ 
+          success: true, 
+          free: true, 
+          message: "Free product activated successfully" 
+        });
+      }
+    }
 
     if (price.type === 'recurring') {
       // Create subscription with payment method if provided
