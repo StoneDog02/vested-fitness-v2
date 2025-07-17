@@ -1008,11 +1008,12 @@ export default function ClientMeals() {
                     const isFuture = thisDate.getTime() > today.getTime();
                     
                     // Determine percentage for display
-                    const percentage = Math.round((compliancePercentages[i] || 0) * 100);
+                    const complianceValue = compliancePercentages[i] || 0;
+                    const percentage = Math.round(complianceValue * 100);
                     let displayPercentage = percentage;
                     
-                    // For pending days, show 0% in the bar but don't show percentage text
-                    if (isFuture || (isToday && compliancePercentages[i] === 0)) {
+                    // For pending days or N/A days, show 0% in the bar but don't show percentage text
+                    if (isFuture || (isToday && complianceValue === 0) || complianceValue === -1) {
                       displayPercentage = 0;
                     }
                     
@@ -1051,6 +1052,8 @@ export default function ClientMeals() {
                           <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
                             {isBeforeSignup ? (
                               <NABadge reason="Client was not signed up yet" />
+                            ) : complianceValue === -1 ? (
+                              <NABadge reason="Plan was created today. Compliance will be recorded starting tomorrow" />
                             ) : isToday ? (
                               <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                             ) : isFuture ? (

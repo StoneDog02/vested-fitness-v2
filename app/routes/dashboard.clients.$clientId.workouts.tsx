@@ -1397,6 +1397,8 @@ export default function ClientWorkouts() {
                         <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
                           {isBeforeSignup ? (
                             <NABadge reason="Client was not signed up yet" />
+                          ) : complianceData[i] === -1 ? (
+                            <NABadge reason="Plan was created today. Compliance will be recorded starting tomorrow" />
                           ) : isToday ? (
                             <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                           ) : isFuture ? (

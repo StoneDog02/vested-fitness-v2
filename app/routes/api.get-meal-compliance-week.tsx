@@ -84,25 +84,41 @@ export const loader = async ({ request }: { request: Request }) => {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
     day.setHours(0, 0, 0, 0);
+    const dayStr = day.toISOString().slice(0, 10); // Get YYYY-MM-DD format
+    
     // Find the plan active on this day
     const plan = mealPlans.find((p) => {
       const activated = p.activatedAt ? new Date(p.activatedAt) : null;
       const deactivated = p.deactivatedAt ? new Date(p.deactivatedAt) : null;
-      const dayStr = day.toISOString().slice(0, 10);
       const activatedStr = activated ? activated.toISOString().slice(0, 10) : null;
       return (
         activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated > day)
       );
     });
+    
     if (!plan) {
       complianceData.push(0);
       continue;
     }
+    
+    // Check if this is the day the plan was first activated
+    const planActivated = plan.activatedAt ? new Date(plan.activatedAt) : null;
+    const planActivatedStr = planActivated ? planActivated.toISOString().slice(0, 10) : null;
+    const isActivationDay = planActivatedStr === dayStr;
+    
+    // Check if this is the first plan for this client (to handle immediate activation)
+    const isFirstPlan = mealPlans.length === 1 || mealPlans.every(p => p.id === plan.id || p.activatedAt === null);
+    
+    if (isActivationDay || (isFirstPlan && planActivatedStr === dayStr)) {
+      // Return -1 to indicate N/A for activation day
+      complianceData.push(-1);
+      continue;
+    }
+    
     // Meals for this plan
     const meals = plan.meals;
     // Completions for this day and these meals
     const mealIds = new Set(meals.map((m) => m.id));
-    const dayStr = day.toISOString().slice(0, 10); // Get YYYY-MM-DD format
     const completions = (completionsRaw || []).filter((c) => {
       const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
       return completedDateStr === dayStr && mealIds.has(c.meal_id);

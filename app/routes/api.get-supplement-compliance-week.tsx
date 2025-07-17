@@ -25,7 +25,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Fetch all supplements for this client
   const { data: supplementsRaw } = await supabase
     .from("supplements")
-    .select("id")
+    .select("id, created_at")
     .eq("user_id", clientId);
 
   // Fetch all supplement completions for this user for the week
@@ -42,6 +42,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
     const dayStr = day.toISOString().split('T')[0]; // Get YYYY-MM-DD format
+    
+    // Check if any supplements were created today
+    const supplementsCreatedToday = (supplementsRaw || []).some(supplement => {
+      if (!supplement.created_at) return false;
+      const createdStr = supplement.created_at.slice(0, 10);
+      return createdStr === dayStr;
+    });
+    
+    if (supplementsCreatedToday) {
+      // Return -1 to indicate N/A for creation day
+      complianceData.push(-1);
+      continue;
+    }
     
     // For each supplement, check if a completion exists for this day
     const supplementIds = (supplementsRaw || []).map((s) => s.id);
