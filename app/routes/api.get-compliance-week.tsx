@@ -2,7 +2,7 @@ import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import dayjs from "dayjs";
-import { USER_TIMEZONE } from "~/lib/timezone";
+import { USER_TIMEZONE, toUserTimezone } from "~/lib/timezone";
 
 export const loader = async ({ request }: { request: Request }) => {
   const url = new URL(request.url);
@@ -54,11 +54,11 @@ export const loader = async ({ request }: { request: Request }) => {
     const isFirstPlan = workoutPlans && activePlan && (
       workoutPlans.length === 1 || 
       workoutPlans.every(p => p.id === activePlan.id || p.activated_at === null) ||
-      workoutPlans.every(p => p.id === activePlan.id || new Date(p.created_at) > new Date(activePlan.created_at))
+      workoutPlans.every(p => p.id === activePlan.id || toUserTimezone(p.created_at).isAfter(toUserTimezone(activePlan.created_at)))
     );
     
     // Check if plan was created today (for immediate activation)
-    const isCreatedToday = activePlan && new Date(activePlan.created_at).toISOString().slice(0, 10) === dayStr;
+    const isCreatedToday = activePlan && toUserTimezone(activePlan.created_at).format("YYYY-MM-DD") === dayStr;
     
     if (activePlan && (isFirstPlan || activePlan.activated_at?.slice(0, 10) === dayStr || isCreatedToday)) {
       // Return -1 to indicate N/A for activation/creation day

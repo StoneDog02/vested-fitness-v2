@@ -8,6 +8,7 @@ import { Buffer } from "buffer";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
+import { USER_TIMEZONE } from "~/lib/timezone";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -73,7 +74,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     return json({ error: "User not found" }, { status: 404 });
   }
 
-  const requestedDate = dayjs(date).tz("America/Denver").startOf("day");
+  const requestedDate = dayjs(date).tz(USER_TIMEZONE).startOf("day");
   const requestedDateStr = requestedDate.format("YYYY-MM-DD");
   const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const dayOfWeek = daysOfWeek[requestedDate.day()];

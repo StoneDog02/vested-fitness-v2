@@ -8,6 +8,7 @@ import { Buffer } from "buffer";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
+import { USER_TIMEZONE } from "~/lib/timezone";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -110,7 +111,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     .order("sequence_order", { ascending: true });
 
   // Parse week start date and get week range
-  const weekStart = dayjs(weekStartParam).tz("America/Denver").startOf("day");
+  const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE).startOf("day");
   const weekEnd = weekStart.add(7, "day");
   
   // Get completion data for the week
@@ -127,8 +128,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   const completions: Record<string, string[]> = {};
   
   // TODO: In the future, use user-specific timezone from profile if available
-  const userTz = "America/Denver"; // Northern Utah timezone
-  const currentDate = dayjs().tz(userTz).startOf("day");
+  const currentDate = dayjs().tz(USER_TIMEZONE).startOf("day");
   const currentDateStr = currentDate.format("YYYY-MM-DD");
   
 

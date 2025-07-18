@@ -19,6 +19,7 @@ import {
   getCurrentDateISO, 
   getCurrentTimestampISO,
   getStartOfWeek,
+  getEndOfWeek,
   isToday,
   isFuture,
   USER_TIMEZONE 
@@ -467,9 +468,9 @@ export default function Workouts() {
   // Function to refresh compliance data
   const refreshComplianceData = async () => {
     try {
-      const today = dayjs().tz("America/Denver").startOf("day");
-      const startOfWeek = today.subtract(today.day(), "day");
-      const endOfWeek = startOfWeek.add(6, "day");
+      const today = getCurrentDate();
+      const startOfWeek = getStartOfWeek();
+      const endOfWeek = getEndOfWeek();
       const response = await fetch(`/api/get-workout-completions?start=${startOfWeek.format("YYYY-MM-DD")}&end=${endOfWeek.format("YYYY-MM-DD")}`);
       if (response.ok) {
         const data = await response.json();
@@ -866,7 +867,7 @@ export default function Workouts() {
             <div className="space-y-3">
               {dayLabels.map((label, i) => {
                 // Determine if this is today or future/past
-                const today = dayjs().tz("America/Denver").startOf("day");
+                const today = getCurrentDate();
                 const thisDate = startOfWeek.add(i, "day");
                 const isToday = thisDate.isSame(today, "day");
                 const isFuture = thisDate.isAfter(today, "day");
@@ -884,7 +885,7 @@ export default function Workouts() {
                 const percentage = Math.round((safeComplianceData[i] || 0) * 100);
                 
                 // Check if this day is before the user signed up
-                const signupDate = user?.created_at ? dayjs(user.created_at).tz("America/Denver").startOf("day") : null;
+                const signupDate = user?.created_at ? dayjs(user.created_at).tz(USER_TIMEZONE).startOf("day") : null;
                 const isBeforeSignup = signupDate && thisDate.isBefore(signupDate, "day");
                 
                 if (isBeforeSignup) {

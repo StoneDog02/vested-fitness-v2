@@ -8,6 +8,7 @@ import { Buffer } from "buffer";
 import dayjs from "dayjs";
 import timezone from "dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
+import { USER_TIMEZONE } from "~/lib/timezone";
 
 dayjs.extend(timezone);
 dayjs.extend(utc);
@@ -73,7 +74,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   }
   
   // Parse week start date and get week range
-  const weekStart = dayjs(weekStartParam).tz("America/Denver").startOf("day");
+  const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE).startOf("day");
   const weekEnd = weekStart.add(7, "day");
   
   // Get meal plans that were active during this week
@@ -112,8 +113,8 @@ export const loader: LoaderFunction = async ({ request }) => {
     
     // Find the meal plan active on this day
     const activePlan = (mealPlansRaw || []).find((plan) => {
-      const activated = plan.activated_at ? dayjs(plan.activated_at).tz("America/Denver") : null;
-      const deactivated = plan.deactivated_at ? dayjs(plan.deactivated_at).tz("America/Denver") : null;
+      const activated = plan.activated_at ? dayjs(plan.activated_at).tz(USER_TIMEZONE) : null;
+      const deactivated = plan.deactivated_at ? dayjs(plan.deactivated_at).tz(USER_TIMEZONE) : null;
       
       return activated && 
              activated.format("YYYY-MM-DD") <= dateStr && 
