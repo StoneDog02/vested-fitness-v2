@@ -5,6 +5,12 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import dayjs from "dayjs";
+import timezone from "dayjs/plugin/timezone";
+import utc from "dayjs/plugin/utc";
+
+dayjs.extend(timezone);
+dayjs.extend(utc);
 
 export const loader: LoaderFunction = async ({ request }) => {
   const url = new URL(request.url);
@@ -67,9 +73,8 @@ export const loader: LoaderFunction = async ({ request }) => {
   }
   
   // Parse week start date and get week range
-  const weekStart = new Date(weekStartParam);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+  const weekStart = dayjs(weekStartParam).tz("America/Denver").startOf("day");
+  const weekEnd = weekStart.add(7, "day");
   
   // Get meal plans that were active during this week
   const { data: mealPlansRaw } = await supabase
@@ -84,8 +89,8 @@ export const loader: LoaderFunction = async ({ request }) => {
     .from("meal_completions")
     .select("completed_at, meal_id")
     .eq("user_id", user.id)
-    .gte("completed_at", weekStart.toISOString().slice(0, 10))
-    .lt("completed_at", weekEnd.toISOString().slice(0, 10));
+    .gte("completed_at", weekStart.format("YYYY-MM-DD"))
+    .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
 
   // Build meals object for each day of the week
   const meals: Record<string, any> = {};
@@ -102,18 +107,17 @@ export const loader: LoaderFunction = async ({ request }) => {
   });
   
   for (let i = 0; i < 7; i++) {
-    const date = new Date(weekStart);
-    date.setDate(weekStart.getDate() + i);
-    const dateStr = date.toISOString().slice(0, 10);
+    const date = weekStart.add(i, "day");
+    const dateStr = date.format("YYYY-MM-DD");
     
     // Find the meal plan active on this day
     const activePlan = (mealPlansRaw || []).find((plan) => {
-      const activated = plan.activated_at ? new Date(plan.activated_at) : null;
-      const deactivated = plan.deactivated_at ? new Date(plan.deactivated_at) : null;
+      const activated = plan.activated_at ? dayjs(plan.activated_at).tz("America/Denver") : null;
+      const deactivated = plan.deactivated_at ? dayjs(plan.deactivated_at).tz("America/Denver") : null;
       
       return activated && 
-             activated.toISOString().slice(0, 10) <= dateStr && 
-             (!deactivated || deactivated > date);
+             activated.format("YYYY-MM-DD") <= dateStr && 
+             (!deactivated || deactivated.isAfter(date));
     });
     
     if (!activePlan) {

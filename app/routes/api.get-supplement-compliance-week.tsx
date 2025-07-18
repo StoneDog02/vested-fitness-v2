@@ -2,6 +2,8 @@ import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import dayjs from "dayjs";
+import { USER_TIMEZONE, getCurrentDate } from "~/lib/timezone";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const supabase = createClient<Database>(
@@ -17,10 +19,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({ error: "Missing weekStart or clientId parameter" }, { status: 400 });
   }
 
-  const weekStart = new Date(weekStartParam);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+  const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE).startOf("day");
+  const weekEnd = weekStart.add(7, "day");
 
   // Fetch all supplements for this client
   const { data: supplementsRaw } = await supabase
@@ -33,33 +33,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     .from("supplement_completions")
     .select("supplement_id, completed_at")
     .eq("user_id", clientId)
-    .gte("completed_at", weekStart.toISOString())
-    .lt("completed_at", weekEnd.toISOString());
+    .gte("completed_at", weekStart.format("YYYY-MM-DD"))
+    .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
 
   // Build complianceData: for each day, percent of supplements completed
   const complianceData: number[] = [];
   const hasSupplementsAssigned = (supplementsRaw || []).length > 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getCurrentDate();
   
   for (let i = 0; i < 7; i++) {
-    const day = new Date(weekStart);
-    day.setDate(weekStart.getDate() + i);
-    const dayStr = day.toISOString().split('T')[0]; // Get YYYY-MM-DD format
-    day.setHours(0, 0, 0, 0);
+    const day = weekStart.add(i, "day");
+    const dayStr = day.format("YYYY-MM-DD"); // Get YYYY-MM-DD format
     
     // If no supplements are assigned, handle past vs future days differently
     if (!hasSupplementsAssigned) {
-      if (day < today) {
+      if (day.isBefore(today)) {
         // Past days with no supplements: show -2 (no supplements assigned)
         complianceData.push(-2);
-      } else if (day.getTime() === today.getTime()) {
+      } else if (day.isSame(today, "day")) {
         // Today with no supplements: check if it's end of day (after 11:59 PM)
-        const now = new Date();
-        const endOfDay = new Date(today);
-        endOfDay.setHours(23, 59, 59, 999);
+        const now = dayjs().tz(USER_TIMEZONE);
+        const endOfDay = today.endOf("day");
         
-        if (now > endOfDay) {
+        if (now.isAfter(endOfDay)) {
           // End of day with no supplements: show -2 (no supplements assigned)
           complianceData.push(-2);
         } else {

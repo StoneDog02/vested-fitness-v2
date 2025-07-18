@@ -13,13 +13,16 @@ import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import { useMealCompletion } from "../context/MealCompletionContext";
 import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-import timezone from "dayjs/plugin/timezone";
+import { 
+  getCurrentDate, 
+  getCurrentDateISO, 
+  getCurrentTimestampISO,
+  getStartOfWeek,
+  isToday,
+  isFuture,
+  USER_TIMEZONE 
+} from "~/lib/timezone";
 import React from "react";
-
-// Configure dayjs
-dayjs.extend(utc);
-dayjs.extend(timezone);
 
 type LoaderData = {
   clientData?: ClientDashboardData;
@@ -170,9 +173,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     if (user) {
       coachId = user.role === "coach" ? user.id : user.coach_id;
       if (user.role === "client") {
-        // TODO: In the future, use user-specific timezone from profile if available
-        const userTz = "America/Denver"; // Northern Utah timezone
-        const today = dayjs().tz(userTz).startOf("day");
+        const today = getCurrentDate();
         const todayStr = today.format("YYYY-MM-DD");
         const tomorrowStr = today.add(1, "day").format("YYYY-MM-DD");
         // Get ALL meal plans for this user (both active and recently deactivated)
@@ -188,14 +189,14 @@ export const loader: LoaderFunction = async ({ request }) => {
           planToShow = allPlans.find(plan => {
             if (!plan.is_active) return false;
             if (!plan.activated_at) return true; // Legacy plans without activation date
-            const activatedDate = dayjs(plan.activated_at).tz(userTz).format("YYYY-MM-DD");
+            const activatedDate = dayjs(plan.activated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
             return activatedDate < todayStr; // Only show plans activated before today (not on activation day)
           });
           // If no active plan found, look for plan deactivated today (was active until today)
           if (!planToShow) {
             planToShow = allPlans.find(plan => {
               if (!plan.deactivated_at) return false;
-              const deactivatedDate = dayjs(plan.deactivated_at).tz(userTz).format("YYYY-MM-DD");
+              const deactivatedDate = dayjs(plan.deactivated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
               return deactivatedDate === todayStr; // Deactivated today, so show until end of day
             });
           }
@@ -282,7 +283,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         // Build updates
         const updates = (updatesRawResult.data || []).map((u: any) => ({
           message: u.message,
-          timestamp: u.created_at ? dayjs(u.created_at).tz(userTz).format("YYYY-MM-DD HH:mm") : ""
+                      timestamp: u.created_at ? dayjs(u.created_at).tz(USER_TIMEZONE).format("YYYY-MM-DD HH:mm") : ""
         }));
         // Weight change
         let weightChange = 0;
@@ -343,7 +344,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           // Only show workout if plan was activated before today (not on activation day)
           let shouldShowWorkout = true;
           if (workoutPlan.activated_at) {
-            const activatedDate = dayjs(workoutPlan.activated_at).tz(userTz).format("YYYY-MM-DD");
+            const activatedDate = dayjs(workoutPlan.activated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
             shouldShowWorkout = activatedDate < todayStr; // Only show if activated before today
           }
           
@@ -450,10 +451,9 @@ export const loader: LoaderFunction = async ({ request }) => {
         const activeClientIds = clients.filter(c => c.status === "active").map(c => c.id);
         let compliance = 0;
         if (activeClientIds.length > 0) {
-          const weekAgo = new Date();
-          weekAgo.setDate(weekAgo.getDate() - 7);
+          const weekAgo = getCurrentDate().subtract(7, "day");
           const weekAgoISO = weekAgo.toISOString();
-          const nowISO = new Date().toISOString();
+          const nowISO = getCurrentTimestampISO();
           // First, fetch workoutPlansRaw and mealPlansRaw
           const [workoutPlansRaw, mealPlansRaw] = await Promise.all([
             supabase

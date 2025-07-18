@@ -14,6 +14,8 @@ import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
 import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
 import LineChart from "~/components/ui/LineChart";
 import { ResponsiveContainer } from "recharts";
+import dayjs from "dayjs";
+import { getCurrentDate } from "~/lib/timezone";
 
 export const meta: MetaFunction = () => {
   return [
@@ -195,12 +197,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return d;
   }
 
-  const today = new Date();
+  const today = getCurrentDate().toDate();
   const thisWeekStart = getWeekStart(today);
-  const lastWeekStart = new Date(thisWeekStart);
-  lastWeekStart.setDate(thisWeekStart.getDate() - 7);
-  const nextWeekStart = new Date(thisWeekStart);
-  nextWeekStart.setDate(thisWeekStart.getDate() + 7);
+  const lastWeekStart = dayjs(thisWeekStart).subtract(7, "day").toDate();
+  const nextWeekStart = dayjs(thisWeekStart).add(7, "day").toDate();
 
   let thisWeekNote = null;
   let lastWeekNote = null;
@@ -219,9 +219,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   // Filter updates to only those from the last 7 days
-  const now = new Date();
-  const oneWeekAgo = new Date(now);
-  oneWeekAgo.setDate(now.getDate() - 7);
+  const now = getCurrentDate().toDate();
+  const oneWeekAgo = dayjs(now).subtract(7, "day").toDate();
   const recentUpdates = (updates || []).filter((u: any) => {
     const created = new Date(u.created_at);
     return created >= oneWeekAgo;
@@ -324,9 +323,8 @@ export default function CoachAccess() {
   };
 
   // Filter updates to only those from the last 7 days
-  const now = new Date();
-  const oneWeekAgo = new Date(now);
-  oneWeekAgo.setDate(now.getDate() - 7);
+  const now = getCurrentDate().toDate();
+  const oneWeekAgo = dayjs(now).subtract(7, "day").toDate();
   const recentUpdates = (updates || []).filter((u: any) => {
     const created = new Date(u.created_at);
     return created >= oneWeekAgo;

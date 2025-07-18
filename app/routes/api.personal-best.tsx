@@ -1,5 +1,6 @@
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 export const loader = async ({ request }: { request: Request }) => {
   const url = new URL(request.url);
@@ -36,7 +37,7 @@ export const action = async ({ request }: { request: Request }) => {
   // Upsert PB
   const { error } = await supabase
     .from("workouts_personal_bests")
-    .upsert({ user_id: user.id, exercise_id: exerciseId, weight, date_achieved: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "user_id,exercise_id" });
+    .upsert({ user_id: user.id, exercise_id: exerciseId, weight, date_achieved: getCurrentTimestampISO(), updated_at: getCurrentTimestampISO() }, { onConflict: "user_id,exercise_id" });
   if (error) return json({ error: error.message }, { status: 500 });
   return json({ success: true });
 }; 

@@ -5,6 +5,12 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export const loader: LoaderFunction = async ({ request }) => {
   const url = new URL(request.url);
@@ -67,10 +73,10 @@ export const loader: LoaderFunction = async ({ request }) => {
     return json({ error: "User not found" }, { status: 404 });
   }
 
-  const requestedDate = new Date(date);
-  const requestedDateStr = requestedDate.toISOString().slice(0, 10);
+  const requestedDate = dayjs(date).tz("America/Denver").startOf("day");
+  const requestedDateStr = requestedDate.format("YYYY-MM-DD");
   const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const dayOfWeek = daysOfWeek[requestedDate.getDay()];
+  const dayOfWeek = daysOfWeek[requestedDate.day()];
 
   // Get ALL workout plans for this user (both active and recently deactivated)
   const { data: allPlans } = await supabase

@@ -5,6 +5,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== "POST") {
@@ -98,7 +99,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         .insert({
           user_id: user.id,
           supplement_id: supplementId,
-          completed_at: new Date().toISOString() // Use current timestamp instead of date
+          completed_at: getCurrentTimestampISO() // Use current timestamp instead of date
         });
 
       if (insertError) {

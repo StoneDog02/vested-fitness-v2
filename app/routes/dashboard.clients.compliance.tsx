@@ -7,6 +7,7 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import type { Database } from "~/lib/supabase";
 import { Buffer } from "buffer";
+import { getCurrentDate, getCurrentTimestampISO } from "~/lib/timezone";
 
 // Type for compliance client with separate tracking
 type ComplianceClient = {
@@ -80,10 +81,9 @@ export const loader: LoaderFunction = async ({ request }) => {
         .eq("role", "client");
       if (clients && clients.length > 0) {
         const clientIds = clients.map((c) => c.id);
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekAgo = getCurrentDate().subtract(7, "day");
         const weekAgoISO = weekAgo.toISOString();
-        const nowISO = new Date().toISOString();
+        const nowISO = getCurrentTimestampISO();
         // First, fetch workoutPlansRaw and mealPlansRaw
         const [
           workoutPlansRaw,

@@ -8,13 +8,17 @@ import NABadge from "~/components/ui/NABadge";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-import timezone from "dayjs/plugin/timezone";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import { parse } from "cookie";
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { 
+  USER_TIMEZONE, 
+  getCurrentDate, 
+  getStartOfWeek, 
+  getEndOfWeek,
+  isToday,
+  isFuture 
+} from "~/lib/timezone";
 
 // In-memory cache for supplements loader (per user, 30s TTL)
 const supplementsLoaderCache: Record<string, { data: any; expires: number }> = {};
@@ -153,9 +157,7 @@ export default function Supplements() {
   const [isDaySubmitted, setIsDaySubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // TODO: In the future, use user-specific timezone from profile if available
-  const userTz = "America/Denver"; // Northern Utah timezone
-  const currentDate = dayjs().tz(userTz).startOf("day");
+  const currentDate = getCurrentDate();
   const currentDateString = currentDate.format("YYYY-MM-DD");
 
   // Load supplement completions for the current date
@@ -196,8 +198,8 @@ export default function Supplements() {
   const loadComplianceData = async () => {
     console.log('🔍 Loading compliance data...', { userId, supplementsCount: supplements.length });
     
-    const today = dayjs().tz(userTz).startOf("day");
-    const startOfWeek = today.startOf("week");
+    const today = getCurrentDate();
+    const startOfWeek = getStartOfWeek();
     
     console.log('📅 Week range:', { 
       startOfWeek: startOfWeek.format('YYYY-MM-DD'),
@@ -297,8 +299,8 @@ export default function Supplements() {
     setTimeout(() => setShowSuccess(false), 3000);
 
     // Optionally, update complianceData optimistically for today
-    const today = dayjs().tz(userTz).startOf("day");
-    const startOfWeek = today.startOf("week");
+    const today = getCurrentDate();
+    const startOfWeek = getStartOfWeek();
     const todayIdx = (today.day() + 7 - startOfWeek.day()) % 7;
     setComplianceData(prev => {
       const newData = [...prev];
@@ -567,9 +569,9 @@ export default function Supplements() {
               <span className="text-sm font-medium">This Week</span>
               <div className="text-xs text-gray-500">
                 {(() => {
-                  const today = dayjs().tz(userTz).startOf("day");
-                  const startOfWeek = today.startOf("week");
-                  const endOfWeek = startOfWeek.endOf("week");
+                  const today = getCurrentDate();
+                  const startOfWeek = getStartOfWeek();
+                  const endOfWeek = getEndOfWeek();
                   return `${startOfWeek.format("MMM D")} - ${endOfWeek.format("MMM D")}`;
                 })()}
               </div>
@@ -579,7 +581,7 @@ export default function Supplements() {
 
                 return complianceData.map((day: any, index: number) => {
                   // Determine if this is today or future/past
-                  const today = dayjs().tz(userTz).startOf("day");
+                  const today = getCurrentDate();
                   const isToday = day.date.isSame(today, "day");
                   const isFuture = day.date.isAfter(today, "day");
                   
@@ -590,7 +592,7 @@ export default function Supplements() {
                   let naReason = "";
                   
                   // Check if this day is before the user signed up
-                  const signupDate = userCreatedAt ? dayjs(userCreatedAt).tz(userTz).startOf("day") : null;
+                  const signupDate = userCreatedAt ? dayjs(userCreatedAt).tz(USER_TIMEZONE).startOf("day") : null;
                   const isBeforeSignup = signupDate && day.date.isBefore(signupDate, "day");
                   
                   if (isBeforeSignup) {

@@ -4,6 +4,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { getCurrentDateISO } from "~/lib/timezone";
 
 function getDatesInRange(start: string, end: string): string[] {
   const dates = [];
@@ -85,7 +86,7 @@ export const loader = async ({ request }: { request: Request }) => {
       .lte("completed_at", end);
     // Map: date -> [meal_id]
     const result: Record<string, string[]> = {};
-    const current = new Date().toISOString().slice(0, 10);
+    const current = getCurrentDateISO();
     for (const d of getDatesInRange(start, end)) {
       result[d] = [];
     }

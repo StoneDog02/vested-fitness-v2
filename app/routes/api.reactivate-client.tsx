@@ -4,6 +4,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 export const action: ActionFunction = async ({ request }) => {
   if (request.method !== "POST") {
@@ -160,7 +161,7 @@ export const action: ActionFunction = async ({ request }) => {
         auth_id: authUserId,
         status: 'active',
         inactive_since: null,
-        updated_at: new Date().toISOString()
+        updated_at: getCurrentTimestampISO()
       })
       .eq("id", client.id);
 

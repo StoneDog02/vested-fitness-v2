@@ -110,17 +110,16 @@ export const loader: LoaderFunction = async ({ request }) => {
     .order("sequence_order", { ascending: true });
 
   // Parse week start date and get week range
-  const weekStart = new Date(weekStartParam);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+  const weekStart = dayjs(weekStartParam).tz("America/Denver").startOf("day");
+  const weekEnd = weekStart.add(7, "day");
   
   // Get completion data for the week
   const { data: completionsRaw } = await supabase
     .from("workout_completions")
     .select("completed_at, completed_groups")
     .eq("user_id", user.id)
-    .gte("completed_at", weekStart.toISOString().slice(0, 10))
-    .lt("completed_at", weekEnd.toISOString().slice(0, 10));
+    .gte("completed_at", weekStart.format("YYYY-MM-DD"))
+    .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
 
   // Build workouts object for each day of the week
   const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -141,10 +140,9 @@ export const loader: LoaderFunction = async ({ request }) => {
   });
   
   for (let i = 0; i < 7; i++) {
-    const date = new Date(weekStart);
-    date.setDate(weekStart.getDate() + i);
-    const dateStr = date.toISOString().slice(0, 10);
-    const dayOfWeek = daysOfWeek[date.getDay()];
+    const date = weekStart.add(i, "day");
+    const dateStr = date.format("YYYY-MM-DD");
+    const dayOfWeek = daysOfWeek[date.day()];
     
 
     

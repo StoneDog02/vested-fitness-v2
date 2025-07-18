@@ -4,6 +4,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 export const action = async ({ request }: { request: Request }) => {
   if (request.method !== "POST") {
@@ -94,7 +95,7 @@ export const action = async ({ request }: { request: Request }) => {
         const { error: insertError } = await supabase.from("meal_completions").insert({
           user_id: user.id,
           meal_id: mealId,
-          completed_at: new Date().toISOString(), // Use current timestamp instead of just date
+          completed_at: getCurrentTimestampISO(), // Use current timestamp instead of just date
         });
         
         if (insertError) {

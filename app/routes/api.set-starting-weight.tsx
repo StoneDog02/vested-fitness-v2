@@ -4,6 +4,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 export const action = async ({ request }: { request: Request }) => {
   if (request.method !== "POST") {
@@ -62,7 +63,7 @@ export const action = async ({ request }: { request: Request }) => {
     {
       user_id: user.id,
       weight,
-      logged_at: new Date().toISOString(),
+      logged_at: getCurrentTimestampISO(),
     },
   ]);
   // Update user's starting_weight and current_weight

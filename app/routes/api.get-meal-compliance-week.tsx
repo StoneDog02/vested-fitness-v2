@@ -1,6 +1,8 @@
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import dayjs from "dayjs";
+import { USER_TIMEZONE } from "~/lib/timezone";
 
 export const loader = async ({ request }: { request: Request }) => {
   const url = new URL(request.url);
@@ -16,10 +18,8 @@ export const loader = async ({ request }: { request: Request }) => {
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  const weekStart = new Date(weekStartParam);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+  const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE).startOf("day");
+  const weekEnd = weekStart.add(7, "day");
 
   // Fetch meal plans for the client
   const dbStart = performance.now();
@@ -80,24 +80,21 @@ export const loader = async ({ request }: { request: Request }) => {
     .from("meal_completions")
     .select("meal_id, completed_at")
     .eq("user_id", clientId)
-    .gte("completed_at", weekStart.toISOString())
-    .lt("completed_at", weekEnd.toISOString());
+    .gte("completed_at", weekStart.format("YYYY-MM-DD"))
+    .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
 
 
 
   // For each day in the week, find the plan that was active on that day
   const complianceData: number[] = [];
   for (let i = 0; i < 7; i++) {
-    const day = new Date(weekStart);
-    day.setDate(weekStart.getDate() + i);
-    day.setHours(0, 0, 0, 0);
-    const dayStr = day.toISOString().slice(0, 10); // Get YYYY-MM-DD format
+    const day = weekStart.add(i, "day");
+    const dayStr = day.format("YYYY-MM-DD"); // Get YYYY-MM-DD format
     
     // Check if this day is before the user signed up
     if (user?.created_at) {
-      const signupDate = new Date(user.created_at);
-      signupDate.setHours(0, 0, 0, 0);
-      if (day < signupDate) {
+      const signupDate = dayjs(user.created_at).tz(USER_TIMEZONE).startOf("day");
+      if (day.isBefore(signupDate)) {
         // Return -1 to indicate N/A for days before signup
         complianceData.push(-1);
         continue;
@@ -106,11 +103,11 @@ export const loader = async ({ request }: { request: Request }) => {
     
     // Find the plan active on this day
     const plan = mealPlans.find((p) => {
-      const activated = p.activatedAt ? new Date(p.activatedAt) : null;
-      const deactivated = p.deactivatedAt ? new Date(p.deactivatedAt) : null;
-      const activatedStr = activated ? activated.toISOString().slice(0, 10) : null;
+      const activated = p.activatedAt ? dayjs(p.activatedAt).tz(USER_TIMEZONE) : null;
+      const deactivated = p.deactivatedAt ? dayjs(p.deactivatedAt).tz(USER_TIMEZONE) : null;
+      const activatedStr = activated ? activated.format("YYYY-MM-DD") : null;
       return (
-        activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated > day)
+        activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated.isAfter(day))
       );
     });
     
@@ -120,19 +117,19 @@ export const loader = async ({ request }: { request: Request }) => {
     }
     
     // Check if this is the day the plan was first activated
-    const planActivated = plan.activatedAt ? new Date(plan.activatedAt) : null;
-    const planActivatedStr = planActivated ? planActivated.toISOString().slice(0, 10) : null;
+    const planActivated = plan.activatedAt ? dayjs(plan.activatedAt).tz(USER_TIMEZONE) : null;
+    const planActivatedStr = planActivated ? planActivated.format("YYYY-MM-DD") : null;
     const isActivationDay = planActivatedStr === dayStr;
     
     // Check if this is the first plan for this client (to handle immediate activation)
     // A plan is considered the first if it's the only plan or if it's the earliest created plan
     const isFirstPlan = mealPlans.length === 1 || 
       mealPlans.every(p => p.id === plan.id || p.activatedAt === null) ||
-      mealPlans.every(p => p.id === plan.id || new Date(p.createdAt) > new Date(plan.createdAt));
+      mealPlans.every(p => p.id === plan.id || dayjs(p.createdAt).isAfter(dayjs(plan.createdAt)));
     
     // Check if plan was created today (for immediate activation)
-    const planCreated = new Date(plan.createdAt);
-    const planCreatedStr = planCreated.toISOString().slice(0, 10);
+    const planCreated = dayjs(plan.createdAt).tz(USER_TIMEZONE);
+    const planCreatedStr = planCreated.format("YYYY-MM-DD");
     const isCreatedToday = planCreatedStr === dayStr;
     
     if (isActivationDay || (isFirstPlan && planActivatedStr === dayStr) || isCreatedToday) {

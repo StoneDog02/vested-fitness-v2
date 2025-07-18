@@ -19,6 +19,7 @@ import LineChart from "~/components/ui/LineChart";
 import { calculateMacros } from "~/lib/utils";
 import { ResponsiveContainer } from "recharts";
 import dayjs from "dayjs";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 export const meta: MetaFunction = () => {
   return [
@@ -459,7 +460,7 @@ export const action: import("@remix-run/node").ActionFunction = async ({ request
   if (intent === "editUpdate" && id && message) {
     const { data, error } = await supabase
       .from("coach_updates")
-      .update({ message, updated_at: new Date().toISOString() })
+      .update({ message, updated_at: getCurrentTimestampISO() })
       .eq("id", id)
       .select()
       .single();

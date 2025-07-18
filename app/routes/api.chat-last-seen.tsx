@@ -5,6 +5,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 function getUserIdFromRequest(request: Request): string | undefined {
   const cookies = parse(request.headers.get("cookie") || "");
@@ -78,7 +79,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // Upsert last_seen_at for this user in this chat
-  const now = new Date().toISOString();
+  const now = getCurrentTimestampISO();
   const { error } = await supabase
     .from("chat_last_seen")
     .upsert({

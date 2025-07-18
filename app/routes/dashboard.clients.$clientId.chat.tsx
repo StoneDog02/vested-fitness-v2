@@ -6,6 +6,7 @@ import { useState } from "react";
 import { ChatBox } from "~/components/ui/ChatBox";
 import { useParams, useLoaderData, useMatches } from "@remix-run/react";
 import dayjs from "dayjs";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 interface Message {
   id: string;
@@ -49,7 +50,7 @@ export default function ClientChat() {
       id: Date.now().toString(), // Use timestamp as a temporary id if needed
       sender: "coach",
       content: newMessage,
-      timestamp: new Date().toISOString(),
+      timestamp: getCurrentTimestampISO(),
     };
 
     // setMessages([...messages, message]); // This line is removed as per the new_code

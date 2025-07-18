@@ -12,10 +12,15 @@ import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import { useMealCompletion } from "~/context/MealCompletionContext";
 import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-import timezone from "dayjs/plugin/timezone";
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { 
+  getCurrentDate, 
+  getCurrentDateISO, 
+  getCurrentTimestampISO,
+  getStartOfWeek,
+  isToday,
+  isFuture,
+  USER_TIMEZONE 
+} from "~/lib/timezone";
 
 // In-memory cache for meals loader (per user, 30s TTL)
 const mealsLoaderCache: Record<string, { data: any; expires: number }> = {};
@@ -69,9 +74,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       process.env.SUPABASE_SERVICE_KEY!
     );
     
-    // TODO: In the future, use user-specific timezone from profile if available
-    const userTz = "America/Denver"; // Northern Utah timezone
-    const today = dayjs().tz(userTz).startOf("day");
+    const today = getCurrentDate();
     const todayStr = today.format("YYYY-MM-DD");
     const tomorrowStr = today.add(1, "day").format("YYYY-MM-DD");
     
@@ -104,14 +107,14 @@ export const loader: LoaderFunction = async ({ request }) => {
       let planToShow = allPlans.find(plan => {
         if (!plan.is_active) return false;
         if (!plan.activated_at) return true; // Legacy plans without activation date
-        const activatedDate = dayjs(plan.activated_at).tz(userTz).format("YYYY-MM-DD");
+        const activatedDate = dayjs(plan.activated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
         return activatedDate <= todayStr; // Show plans activated today or before (activation day will be handled by UI)
       });
       // If no active plan found, look for plan deactivated today (was active until today)
       if (!planToShow) {
         planToShow = allPlans.find(plan => {
           if (!plan.deactivated_at) return false;
-          const deactivatedDate = dayjs(plan.deactivated_at).tz(userTz).format("YYYY-MM-DD");
+          const deactivatedDate = dayjs(plan.deactivated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
           return deactivatedDate === todayStr; // Deactivated today, so show until end of day
         });
       }
@@ -292,22 +295,15 @@ const calculateMacros = (
 
 // Function to generate calendar data for the current week
 const generateCalendarData = () => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay()); // Set to Sunday
+  const today = getCurrentDate();
+  const startOfWeek = getStartOfWeek();
 
   return Array.from({ length: 7 }).map((_, index) => {
-    const date = new Date(startOfWeek);
-    date.setDate(startOfWeek.getDate() + index);
+    const date = startOfWeek.add(index, "day");
 
     return {
-      date: date.toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      }),
-      status: date > today ? "pending" : "missed",
+      date: date.format("ddd, MMM D"),
+      status: date.isAfter(today, "day") ? "pending" : "missed",
       percentage: 0,
       complianceValue: 0,
     };
@@ -330,12 +326,7 @@ export default function Meals() {
   
   // Track current week and cached meal data
   const [currentWeekStart, setCurrentWeekStart] = useState(() => {
-    const now = new Date();
-    const day = now.getDay();
-    const sunday = new Date(now);
-    sunday.setDate(now.getDate() - day);
-    sunday.setHours(0, 0, 0, 0);
-    return sunday;
+    return getStartOfWeek().toDate();
   });
   const [weekMeals, setWeekMeals] = useState<Record<string, any>>({});
   const [weekCompletions, setWeekCompletions] = useState<Record<string, string[]>>({});
@@ -374,8 +365,8 @@ export default function Meals() {
     
     try {
       // Add today's meal plan to the week cache
-      const today = new Date();
-      const todayStr = today.toISOString().slice(0, 10);
+      const today = getCurrentDate();
+      const todayStr = today.format("YYYY-MM-DD");
       if (todaysMealPlan) {
         setWeekMeals(prev => ({
           ...prev,
@@ -417,9 +408,8 @@ export default function Meals() {
     lastDayOffsetRef.current = dayOffset;
     
     try {
-      const targetDate = new Date();
-      targetDate.setDate(targetDate.getDate() + dayOffset);
-      const dateStr = targetDate.toISOString().slice(0, 10);
+      const targetDate = getCurrentDate().add(dayOffset, "day");
+      const dateStr = targetDate.format("YYYY-MM-DD");
       
       // Check if we have this day's data in our cache
       const mealData = weekMeals[dateStr];
@@ -430,11 +420,7 @@ export default function Meals() {
         setIsLoadingMeals(false);
       } else {
         // Need to fetch this week's data
-        const weekStart = new Date(targetDate);
-        const dayOfWeek = weekStart.getDay();
-        weekStart.setDate(weekStart.getDate() - dayOfWeek);
-        weekStart.setHours(0, 0, 0, 0);
-        
+        const weekStart = getStartOfWeek(targetDate).toDate();
         const weekStartTime = weekStart.getTime();
         if (weekStartTime !== lastWeekStartRef.current) {
           lastWeekStartRef.current = weekStartTime;
@@ -449,19 +435,13 @@ export default function Meals() {
   }, [dayOffset, weekMeals, fetchMealWeek]);
 
   // Calculate the current date with offset
-  const today = new Date();
-  today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
-  const currentDate = new Date(today);
-  currentDate.setDate(today.getDate() + dayOffset);
+  const today = getCurrentDate();
+  const currentDate = today.add(dayOffset, "day");
 
   // Format current date for lookup
-  const currentDateFormatted = currentDate.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
+  const currentDateFormatted = currentDate.format("ddd, MMM D");
   // Format for API (YYYY-MM-DD)
-  const currentDateApi = currentDate.toISOString().slice(0, 10);
+  const currentDateApi = currentDate.format("YYYY-MM-DD");
 
   // Fetch completed meals for today from backend (for real-time updates) - MEMOIZED
   const fetchCompletedMealsForToday = useCallback(async () => {
@@ -523,10 +503,8 @@ export default function Meals() {
       if (!isMountedRef.current) return;
       
       // Get start and end of week (Sunday to Saturday)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const startOfWeek = new Date(today);
-      startOfWeek.setDate(today.getDate() - today.getDay());
+      const today = getCurrentDate();
+      const startOfWeek = getStartOfWeek();
       
       try {
         // Use the compliance week API to get proper N/A handling
@@ -536,32 +514,25 @@ export default function Meals() {
           const complianceData = data.complianceData || [];
           
           // Check if today is activation day by looking at compliance data
-          const todayIndex = new Date().getDay();
+          const todayIndex = getCurrentDate().day();
           const isTodayActivationDay = complianceData[todayIndex] === -1;
           setIsActivationDay(isTodayActivationDay);
           
           setCalendarData(
             Array.from({ length: 7 }).map((_, index) => {
-              const date = new Date(startOfWeek);
-              date.setDate(startOfWeek.getDate() + index);
-              date.setHours(0, 0, 0, 0);
-              const prettyDate = date.toLocaleDateString("en-US", {
-                weekday: "short",
-                month: "short",
-                day: "numeric",
-              });
+              const date = getStartOfWeek().add(index, "day");
+              const prettyDate = date.format("ddd, MMM D");
               
               const complianceValue = complianceData[index] || 0;
               const percentage = complianceValue === -1 ? 0 : Math.round(complianceValue * 100);
-              const todayDate = new Date();
-              todayDate.setHours(0, 0, 0, 0);
+              const todayDate = getCurrentDate();
               
               let status;
               if (complianceValue === -1) {
                 status = "na";
-              } else if (date.getTime() > todayDate.getTime()) {
+              } else if (date.isAfter(todayDate, "day")) {
                 status = "pending";
-              } else if (date.getTime() === todayDate.getTime()) {
+              } else if (date.isSame(todayDate, "day")) {
                 // Today
                 if (percentage === 0) {
                   status = "pending";
@@ -597,10 +568,8 @@ export default function Meals() {
   }, [currentDayMealPlan]); // Removed weekCompletions dependency to prevent circular updates
 
   // Format the date with relative labels
-  const getFormattedDate = (date: Date, today: Date) => {
-    const diffInDays = Math.floor(
-      (date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-    );
+  const getFormattedDate = (date: dayjs.Dayjs, today: dayjs.Dayjs) => {
+    const diffInDays = date.diff(today, "day");
 
     switch (diffInDays) {
       case 0:
@@ -610,11 +579,7 @@ export default function Meals() {
       case -1:
         return "Yesterday";
       default:
-        return date.toLocaleDateString("en-US", {
-          weekday: "long",
-          month: "long",
-          day: "numeric",
-        });
+        return date.format("dddd, MMMM D");
     }
   };
 
@@ -671,11 +636,7 @@ export default function Meals() {
     }));
     setCalendarData(prev =>
       prev.map(day => {
-        if (day.date === currentDate.toLocaleDateString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        })) {
+        if (day.date === currentDate.format("ddd, MMM D")) {
           const total = currentDayMealPlan?.meals?.length || 0;
           const percentage = total > 0 ? Math.round((mealIdsForBackend.length / total) * 100) : 0;
           return {
@@ -781,11 +742,7 @@ export default function Meals() {
                   {formattedDate}
                 </h2>
                 <div className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                  {currentDate.toLocaleDateString("en-US", {
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
+                  {currentDate.format("MMMM D, YYYY")}
                 </div>
                 {dayOffset !== 0 && (
                   <button
@@ -1108,23 +1065,18 @@ export default function Meals() {
               <div className="space-y-3">
                 {calendarData.map((day, index) => {
                   // Determine if this is today
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  const startOfWeek = new Date(today);
-                  startOfWeek.setDate(today.getDate() - today.getDay());
-                  const thisDate = new Date(startOfWeek);
-                  thisDate.setDate(startOfWeek.getDate() + index);
-                  thisDate.setHours(0, 0, 0, 0);
-                  const isToday = thisDate.getTime() === today.getTime();
+                  const today = getCurrentDate();
+                  const startOfWeek = getStartOfWeek();
+                  const thisDate = startOfWeek.add(index, "day");
+                  const isToday = thisDate.isSame(today, "day");
                   
                   // Determine status and display
                   let showNABadge = false;
                   let naReason = "";
                   
                   // Check if this day is before the user signed up
-                  const signupDate = user?.created_at ? new Date(user.created_at) : null;
-                  if (signupDate) signupDate.setHours(0, 0, 0, 0);
-                  const isBeforeSignup = signupDate && thisDate < signupDate;
+                  const signupDate = user?.created_at ? dayjs(user.created_at).tz(USER_TIMEZONE).startOf("day") : null;
+                  const isBeforeSignup = signupDate && thisDate.isBefore(signupDate, "day");
                   
                   if (isBeforeSignup) {
                     showNABadge = true;

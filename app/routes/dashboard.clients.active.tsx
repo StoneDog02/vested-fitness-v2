@@ -8,6 +8,7 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import type { Database } from "~/lib/supabase";
 import { Buffer } from "buffer";
+import { getCurrentDate } from "~/lib/timezone";
 
 type ActiveClient = {
   id: string;
@@ -81,8 +82,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       if (clients && clients.length > 0) {
         const clientIds = clients.map((c) => c.id);
         // Batch fetch all workout completions and workout plans first
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekAgo = getCurrentDate().subtract(7, "day");
         const [
           workoutCompletionsRaw,
           workoutPlansRaw
@@ -91,7 +91,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .from("workout_completions")
             .select("id, completed_at, user_id")
             .in("user_id", clientIds)
-            .gte("completed_at", weekAgo.toISOString().slice(0, 10)),
+            .gte("completed_at", weekAgo.format("YYYY-MM-DD")),
           supabase
             .from("workout_plans")
             .select("id, user_id, is_active")

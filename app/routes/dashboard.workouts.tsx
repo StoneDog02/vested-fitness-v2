@@ -14,10 +14,15 @@ import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import type { LoaderFunction } from "@remix-run/node";
 import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-import timezone from "dayjs/plugin/timezone";
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { 
+  getCurrentDate, 
+  getCurrentDateISO, 
+  getCurrentTimestampISO,
+  getStartOfWeek,
+  isToday,
+  isFuture,
+  USER_TIMEZONE 
+} from "~/lib/timezone";
 
 export const meta: MetaFunction = () => {
   return [
@@ -69,9 +74,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  // TODO: In the future, use user-specific timezone from profile if available
-  const userTz = "America/Denver"; // Northern Utah timezone
-  const currentDate = dayjs().tz(userTz).startOf("day");
+  const currentDate = getCurrentDate();
   const currentDateStr = currentDate.format("YYYY-MM-DD");
 
   // Get user data
@@ -176,8 +179,8 @@ export const loader: LoaderFunction = async ({ request }) => {
   }
 
   // Calculate compliance data for the current week
-  const today = dayjs().tz(userTz).startOf("day");
-  const startOfWeek = today.startOf("week");
+  const today = getCurrentDate();
+  const startOfWeek = getStartOfWeek();
   const endOfWeek = startOfWeek.endOf("week");
 
   // Fetch workout completions for this week
@@ -196,7 +199,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     
     // Check if this day is before the user signed up
     if (user.created_at) {
-      const signupDate = dayjs(user.created_at).tz(userTz).startOf("day");
+      const signupDate = dayjs(user.created_at).tz(USER_TIMEZONE).startOf("day");
       if (day.isBefore(signupDate)) {
         // Return -1 to indicate N/A for days before signup
         complianceData.push(-1);
@@ -277,12 +280,7 @@ export default function Workouts() {
   
   // Track current week and cached workout data
   const [currentWeekStart, setCurrentWeekStart] = useState(() => {
-    const now = new Date();
-    const day = now.getDay();
-    const sunday = new Date(now);
-    sunday.setDate(now.getDate() - day);
-    sunday.setHours(0, 0, 0, 0);
-    return sunday;
+    return getStartOfWeek().toDate();
   });
   const [weekWorkouts, setWeekWorkouts] = useState<Record<string, any>>({});
   const [weekCompletions, setWeekCompletions] = useState<Record<string, string[]>>({});
@@ -295,14 +293,12 @@ export default function Workouts() {
   }, [initialComplianceData]);
 
   // Calculate the current date with offset
-  const today = new Date();
-  today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
-  const currentDate = new Date(today);
-  currentDate.setDate(today.getDate() + dayOffset);
-  const currentDateApi = currentDate.toISOString().slice(0, 10);
+  const today = getCurrentDate();
+  const currentDate = today.add(dayOffset, "day");
+  const currentDateApi = currentDate.format("YYYY-MM-DD");
 
   // Check if today is activation day by looking at compliance data
-  const isTodayActivationDay = initialComplianceData && initialComplianceData.length > 0 && initialComplianceData[dayjs().tz("America/Denver").day()] === -1;
+  const isTodayActivationDay = initialComplianceData && initialComplianceData.length > 0 && initialComplianceData[today.day()] === -1;
 
   // Fetch completed workout groups for today from backend (for real-time updates)
   const fetchCompletedGroupsForToday = async () => {
@@ -333,9 +329,7 @@ export default function Workouts() {
 
   // Update completed groups and submission status when day changes or week data loads
   useEffect(() => {
-    // TODO: In the future, use user-specific timezone from profile if available
-    const userTz = "America/Denver"; // Northern Utah timezone
-    const today = dayjs().tz(userTz).startOf("day");
+    const today = getCurrentDate();
     const targetDate = today.add(dayOffset, "day");
     const dateStr = targetDate.format("YYYY-MM-DD");
     const workoutData = weekWorkouts[dateStr];
@@ -402,9 +396,7 @@ export default function Workouts() {
   // Initialize week data on mount
   useEffect(() => {
     // Add today's workout to the week cache
-    // TODO: In the future, use user-specific timezone from profile if available
-    const userTz = "America/Denver"; // Northern Utah timezone
-    const today = dayjs().tz(userTz).startOf("day");
+    const today = getCurrentDate();
     const todayStr = today.format("YYYY-MM-DD");
     if (todaysWorkout) {
       setWeekWorkouts(prev => ({
@@ -433,19 +425,10 @@ export default function Workouts() {
 
   // Get the formatted date display (UI only - no data fetching)
   const getDateDisplay = (offset: number) => {
-    // TODO: In the future, use user-specific timezone from profile if available
-    const userTz = "America/Denver"; // Northern Utah timezone
-    const today = dayjs().tz(userTz).startOf("day");
+    const today = getCurrentDate();
     const targetDate = today.add(offset, "day");
-    const targetDateObj = targetDate.toDate();
-    const weekdayName = targetDateObj.toLocaleDateString("en-US", {
-      weekday: "long",
-    });
-    const formattedDate = targetDateObj.toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
+    const weekdayName = targetDate.format("dddd");
+    const formattedDate = targetDate.format("MMMM D, YYYY");
     if (offset === 0) {
       return { title: "Today", subtitle: formattedDate, weekday: weekdayName };
     } else if (offset === 1) {
@@ -484,33 +467,23 @@ export default function Workouts() {
   // Function to refresh compliance data
   const refreshComplianceData = async () => {
     try {
-      const today = new Date();
-      const startOfWeek = new Date(today);
-      startOfWeek.setDate(today.getDate() - today.getDay());
-      startOfWeek.setHours(0, 0, 0, 0);
-      
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 7);
-      
-      const response = await fetch(`/api/get-workout-completions?start=${startOfWeek.toISOString().slice(0, 10)}&end=${endOfWeek.toISOString().slice(0, 10)}`);
+      const today = dayjs().tz("America/Denver").startOf("day");
+      const startOfWeek = today.subtract(today.day(), "day");
+      const endOfWeek = startOfWeek.add(6, "day");
+      const response = await fetch(`/api/get-workout-completions?start=${startOfWeek.format("YYYY-MM-DD")}&end=${endOfWeek.format("YYYY-MM-DD")}`);
       if (response.ok) {
         const data = await response.json();
-        const completionsByDate = data.completionsByDate || {};
-        
-        // Build compliance data for the week
         const newComplianceData = [];
         for (let i = 0; i < 7; i++) {
-          const day = new Date(startOfWeek);
-          day.setDate(startOfWeek.getDate() + i);
-          const dayStr = day.toISOString().slice(0, 10);
-          const hasCompletion = completionsByDate[dayStr] && completionsByDate[dayStr].length > 0;
+          const day = startOfWeek.add(i, "day");
+          const dayStr = day.format("YYYY-MM-DD");
+          const hasCompletion = data.completions.some((c: any) => c.completed_at === dayStr);
           newComplianceData.push(hasCompletion ? 1 : 0);
         }
-        
         setComplianceData(newComplianceData);
       }
     } catch (error) {
-      console.error('Failed to refresh compliance data:', error);
+      console.error('Error refreshing compliance data:', error);
     }
   };
 
@@ -519,8 +492,8 @@ export default function Workouts() {
     setIsSubmitting(true);
     setSubmitError(null);
 
-    const today = new Date();
-    const dateStr = today.toISOString().slice(0, 10);
+    const today = getCurrentDate();
+    const dateStr = today.format("YYYY-MM-DD");
     const completedGroupIds = Object.entries(completedGroups)
       .filter(([_, completed]) => completed)
       .map(([groupId]) => groupId);
@@ -532,7 +505,7 @@ export default function Workouts() {
     setTimeout(() => setShowSuccess(false), 3000);
 
     // Optionally, update complianceData optimistically for today
-    const todayIdx = (today.getDay() + 7 - currentWeekStart.getDay()) % 7;
+    const todayIdx = (today.day() + 7 - currentWeekStart.getDay()) % 7;
     setComplianceData(prev => {
       const newData = [...prev];
       newData[todayIdx] = 1;
@@ -582,12 +555,8 @@ export default function Workouts() {
   };
 
   // Week navigation
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
-  
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 6);
+  const startOfWeek = today.subtract(today.day(), "day");
+  const endOfWeek = startOfWeek.add(6, "day");
 
   const formatDateShort = (date: Date) => {
     return `${date.getMonth() + 1}/${date.getDate()}`;
@@ -891,22 +860,19 @@ export default function Workouts() {
             <div className="flex justify-between items-center mb-4">
               <span className="text-sm font-medium">This Week</span>
               <div className="text-xs text-gray-500">
-                {formatDateShort(startOfWeek)} - {formatDateShort(endOfWeek)}
+                {formatDateShort(startOfWeek.toDate())} - {formatDateShort(endOfWeek.toDate())}
               </div>
             </div>
             <div className="space-y-3">
               {dayLabels.map((label, i) => {
                 // Determine if this is today or future/past
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const thisDate = new Date(startOfWeek);
-                thisDate.setDate(startOfWeek.getDate() + i);
-                thisDate.setHours(0, 0, 0, 0);
-                const isToday = thisDate.getTime() === today.getTime();
-                const isFuture = thisDate.getTime() > today.getTime();
+                const today = dayjs().tz("America/Denver").startOf("day");
+                const thisDate = startOfWeek.add(i, "day");
+                const isToday = thisDate.isSame(today, "day");
+                const isFuture = thisDate.isAfter(today, "day");
                 
                 // Check if there are workouts assigned for this day
-                const dateStr = thisDate.toISOString().slice(0, 10);
+                const dateStr = thisDate.format("YYYY-MM-DD");
                 const dayWorkout = weekWorkouts[dateStr];
                 const hasWorkoutsAssigned = dayWorkout && !dayWorkout.isRest && dayWorkout.groups && dayWorkout.groups.length > 0;
                 
@@ -918,9 +884,8 @@ export default function Workouts() {
                 const percentage = Math.round((safeComplianceData[i] || 0) * 100);
                 
                 // Check if this day is before the user signed up
-                const signupDate = user?.created_at ? new Date(user.created_at) : null;
-                if (signupDate) signupDate.setHours(0, 0, 0, 0);
-                const isBeforeSignup = signupDate && thisDate < signupDate;
+                const signupDate = user?.created_at ? dayjs(user.created_at).tz("America/Denver").startOf("day") : null;
+                const isBeforeSignup = signupDate && thisDate.isBefore(signupDate, "day");
                 
                 if (isBeforeSignup) {
                   showNABadge = true;
@@ -969,7 +934,7 @@ export default function Workouts() {
                     className="flex items-center justify-between py-2 border-b dark:border-davyGray last:border-0"
                   >
                     <div className="text-sm font-medium text-secondary dark:text-alabaster">
-                      {thisDate.toLocaleDateString("en-US", {
+                      {thisDate.toDate().toLocaleDateString("en-US", {
                         weekday: "short",
                         month: "short",
                         day: "numeric",

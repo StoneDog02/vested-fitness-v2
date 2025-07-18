@@ -4,6 +4,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 export const action: ActionFunction = async ({ request }) => {
   if (request.method !== "DELETE") {
@@ -176,7 +177,7 @@ export const action: ActionFunction = async ({ request }) => {
         .from("users")
         .update({ 
           status: 'inactive',
-          inactive_since: new Date().toISOString()
+          inactive_since: getCurrentTimestampISO()
         })
         .eq("id", user.id);
 

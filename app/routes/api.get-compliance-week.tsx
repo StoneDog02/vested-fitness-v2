@@ -1,6 +1,8 @@
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import dayjs from "dayjs";
+import { USER_TIMEZONE } from "~/lib/timezone";
 
 export const loader = async ({ request }: { request: Request }) => {
   const url = new URL(request.url);
@@ -16,10 +18,8 @@ export const loader = async ({ request }: { request: Request }) => {
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  const weekStart = new Date(weekStartParam);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+  const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE).startOf("day");
+  const weekEnd = weekStart.add(7, "day");
 
   // Fetch workout plans for the client to check activation dates
   const { data: workoutPlans } = await supabase
@@ -33,15 +33,14 @@ export const loader = async ({ request }: { request: Request }) => {
     .from("workout_completions")
     .select("completed_at")
     .eq("user_id", clientId)
-    .gte("completed_at", weekStart.toISOString().slice(0, 10))
-    .lt("completed_at", weekEnd.toISOString().slice(0, 10));
+    .gte("completed_at", weekStart.format("YYYY-MM-DD"))
+    .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
 
   // Build complianceData: for each day, check if there's a completion
   const complianceData: number[] = [];
   for (let i = 0; i < 7; i++) {
-    const day = new Date(weekStart);
-    day.setDate(weekStart.getDate() + i);
-    const dayStr = day.toISOString().slice(0, 10);
+    const day = weekStart.add(i, "day");
+    const dayStr = day.format("YYYY-MM-DD");
     
     // Check if this is the activation day for any workout plan
     const activePlan = workoutPlans?.find(plan => {

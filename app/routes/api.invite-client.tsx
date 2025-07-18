@@ -2,6 +2,7 @@ import { json, ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import { getCurrentTimestampISO } from "~/lib/timezone";
 
 // Create a Resend instance
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -51,7 +52,7 @@ export async function action({ request }: ActionFunctionArgs) {
         plan_price_id,
         token: inviteCode,
         accepted: false,
-        created_at: new Date().toISOString(),
+        created_at: getCurrentTimestampISO(),
       });
     if (dbError) {
       console.error("Error storing invite in DB:", dbError);
