@@ -21,6 +21,8 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import NABadge from "../components/ui/NABadge";
+import { getCurrentDate, USER_TIMEZONE } from "~/lib/timezone";
+import dayjs from "dayjs";
 
 // Helper function to determine activation status for coaches
 const getActivationStatus = (plan: { isActive: boolean; activatedAt: string | null }) => {
@@ -1368,14 +1370,11 @@ export default function ClientWorkouts() {
               </div>
               <div className="flex flex-col gap-2">
                 {dayLabels.map((label, i) => {
-                  // Determine if this is today or future/past
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  const thisDate = new Date(calendarStart);
-                  thisDate.setDate(calendarStart.getDate() + i);
-                  thisDate.setHours(0, 0, 0, 0);
-                  const isToday = thisDate.getTime() === today.getTime();
-                  const isFuture = thisDate.getTime() > today.getTime();
+                  // Determine if this is today or future/past using dayjs consistently
+                  const today = getCurrentDate().startOf("day");
+                  const thisDate = dayjs(calendarStart).tz(USER_TIMEZONE).add(i, "day").startOf("day");
+                  const isToday = thisDate.isSame(today, "day");
+                  const isFuture = thisDate.isAfter(today, "day");
                   
                   // --- NEW: Check if this is a rest day in the active plan ---
                   const activePlan = sortedPlans.find((p) => p.isActive);
@@ -1392,19 +1391,17 @@ export default function ClientWorkouts() {
                   let barColor = getBarColor(complianceData[i] || 0);
                   
                   // Check for N/A conditions first
-                  const signupDate = client?.created_at ? new Date(client.created_at) : null;
-                  if (signupDate) signupDate.setHours(0,0,0,0);
-                  thisDate.setHours(0,0,0,0);
-                  const isBeforeSignup = signupDate && thisDate < signupDate;
+                  const signupDate = client?.created_at ? dayjs(client.created_at).tz(USER_TIMEZONE).startOf("day") : null;
+                  const isBeforeSignup = signupDate && thisDate.isBefore(signupDate, "day");
                   
                   // Find if a plan exists for this day
                   const planForDay = workoutPlans.find((p) => {
-                    const activated = p.activatedAt ? new Date(p.activatedAt) : null;
-                    const deactivated = p.deactivatedAt ? new Date(p.deactivatedAt) : null;
-                    const dayStr = thisDate.toISOString().slice(0, 10);
-                    const activatedStr = activated ? activated.toISOString().slice(0, 10) : null;
+                    const activated = p.activatedAt ? dayjs(p.activatedAt).tz(USER_TIMEZONE).startOf("day") : null;
+                    const deactivated = p.deactivatedAt ? dayjs(p.deactivatedAt).tz(USER_TIMEZONE).startOf("day") : null;
+                    const dayStr = thisDate.format("YYYY-MM-DD");
+                    const activatedStr = activated ? activated.format("YYYY-MM-DD") : null;
                     return (
-                      activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated > thisDate)
+                      activated && activatedStr && activatedStr <= dayStr && (!deactivated || deactivated.isAfter(thisDate, "day"))
                     );
                   });
                   const isNoPlan = !planForDay;

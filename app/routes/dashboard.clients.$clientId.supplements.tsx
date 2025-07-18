@@ -13,6 +13,8 @@ import {
   ChevronRightIcon,
 } from "@heroicons/react/24/outline";
 import NABadge from "../components/ui/NABadge";
+import { getCurrentDate, USER_TIMEZONE } from "~/lib/timezone";
+import dayjs from "dayjs";
 
 interface Supplement {
   id: string;
@@ -498,20 +500,16 @@ export default function ClientSupplements() {
                 </div>
                 <div className="flex flex-col gap-2">
                   {dayLabels.map((label, i) => {
-                    const thisDate = new Date(calendarStart);
-                    thisDate.setDate(calendarStart.getDate() + i);
-                    thisDate.setHours(0,0,0,0);
-                    const signupDate = client?.created_at ? new Date(client.created_at) : null;
-                    if (signupDate) signupDate.setHours(0,0,0,0);
-                    const isBeforeSignup = signupDate && thisDate < signupDate;
+                    const thisDate = dayjs(calendarStart).tz(USER_TIMEZONE).add(i, "day").startOf("day");
+                    const signupDate = client?.created_at ? dayjs(client.created_at).tz(USER_TIMEZONE).startOf("day") : null;
+                    const isBeforeSignup = signupDate && thisDate.isBefore(signupDate, "day");
                     // Find if a plan exists for this day
                     const planForDay = supplements && supplements.length > 0 ? true : false;
                     const isNoPlan = !planForDay;
-                    // Determine if today or future
-                    const today = new Date();
-                    today.setHours(0,0,0,0);
-                    const isToday = thisDate.getTime() === today.getTime();
-                    const isFuture = thisDate.getTime() > today.getTime();
+                    // Determine if today or future using dayjs consistently
+                    const today = getCurrentDate().startOf("day");
+                    const isToday = thisDate.isSame(today, "day");
+                    const isFuture = thisDate.isAfter(today, "day");
                     
                     // Determine percentage for display
                     const percentage = Math.round((complianceData[i] || 0) * 100);
