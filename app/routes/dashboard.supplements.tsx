@@ -585,6 +585,19 @@ export default function Supplements() {
                   const isToday = day.date.isSame(today, "day");
                   const isFuture = day.date.isAfter(today, "day");
                   
+                  // Debug logging for timezone issues
+                  if (index === 0) {
+                    console.log('🔍 [SUPPLEMENTS] Debug timezone info:', {
+                      today: today.format('YYYY-MM-DD HH:mm:ss'),
+                      todayTz: today.format('Z'),
+                      dayDate: day.date.format('YYYY-MM-DD HH:mm:ss'),
+                      dayDateTz: day.date.format('Z'),
+                      isToday,
+                      dayIndex: index,
+                      complianceValue: day.complianceValue
+                    });
+                  }
+                  
                   // Determine status and display
                   let status: string;
                   let displayText: string;
