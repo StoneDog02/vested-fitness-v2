@@ -13,7 +13,7 @@ import {
   ChevronRightIcon,
 } from "@heroicons/react/24/outline";
 import NABadge from "../components/ui/NABadge";
-import { getCurrentDate, USER_TIMEZONE } from "~/lib/timezone";
+import { getCurrentDate, USER_TIMEZONE, getStartOfWeek } from "~/lib/timezone";
 import dayjs from "dayjs";
 
 interface Supplement {
@@ -80,13 +80,13 @@ export const loader = async ({
   const weekStartParam = url.searchParams.get("weekStart");
   let weekStart: Date;
   if (weekStartParam) {
-    weekStart = new Date(weekStartParam);
-    weekStart.setHours(0, 0, 0, 0);
+    // Parse the date string as if it's in the user's timezone
+    const weekStartDayjs = dayjs.tz(weekStartParam, USER_TIMEZONE).startOf("day");
+    weekStart = weekStartDayjs.toDate();
   } else {
-    weekStart = new Date();
-    const day = weekStart.getDay();
-    weekStart.setDate(weekStart.getDate() - day);
-    weekStart.setHours(0, 0, 0, 0);
+    // Use timezone-aware week start calculation
+    const weekStartDayjs = getStartOfWeek();
+    weekStart = weekStartDayjs.toDate();
   }
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
