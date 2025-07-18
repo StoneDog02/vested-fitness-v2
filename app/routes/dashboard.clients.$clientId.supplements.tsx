@@ -511,6 +511,20 @@ export default function ClientSupplements() {
                     const isToday = thisDate.isSame(today, "day");
                     const isFuture = thisDate.isAfter(today, "day");
                     
+                    // Debug logging for timezone issues
+                    if (i === 0) {
+                      console.log('🔍 [COACH-SUPPLEMENTS] Debug timezone info:', {
+                        today: today.format('YYYY-MM-DD HH:mm:ss'),
+                        todayTz: today.format('Z'),
+                        calendarStart: calendarStart,
+                        thisDate: thisDate.format('YYYY-MM-DD HH:mm:ss'),
+                        thisDateTz: thisDate.format('Z'),
+                        isToday,
+                        dayIndex: i,
+                        label
+                      });
+                    }
+                    
                     // Determine percentage for display
                     const percentage = Math.round((complianceData[i] || 0) * 100);
                     let displayPercentage = percentage;

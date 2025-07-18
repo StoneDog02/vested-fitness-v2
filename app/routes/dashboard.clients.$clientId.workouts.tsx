@@ -1373,8 +1373,23 @@ export default function ClientWorkouts() {
                   // Determine if this is today or future/past using dayjs consistently
                   const today = getCurrentDate().startOf("day");
                   const thisDate = dayjs(calendarStart).tz(USER_TIMEZONE).add(i, "day").startOf("day");
+                  
                   const isToday = thisDate.isSame(today, "day");
                   const isFuture = thisDate.isAfter(today, "day");
+                  
+                  // Debug logging for timezone issues
+                  if (i === 0) {
+                    console.log('🔍 [COACH-WORKOUTS] Debug timezone info:', {
+                      today: today.format('YYYY-MM-DD HH:mm:ss'),
+                      todayTz: today.format('Z'),
+                      calendarStart: calendarStart,
+                      thisDate: thisDate.format('YYYY-MM-DD HH:mm:ss'),
+                      thisDateTz: thisDate.format('Z'),
+                      isToday,
+                      dayIndex: i,
+                      label
+                    });
+                  }
                   
                   // --- NEW: Check if this is a rest day in the active plan ---
                   const activePlan = sortedPlans.find((p) => p.isActive);
