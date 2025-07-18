@@ -18,7 +18,8 @@ export const loader = async ({ request }: { request: Request }) => {
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE).startOf("day");
+  // Parse the date string as if it's in the user's timezone, not UTC
+  const weekStart = dayjs.tz(weekStartParam, USER_TIMEZONE).startOf("day");
   const weekEnd = weekStart.add(7, "day");
   
   // Debug logging for server timezone
