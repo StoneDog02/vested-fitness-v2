@@ -48,8 +48,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
     );
     
-    console.log('🔍 [LOADER] Found auth cookie key:', supabaseAuthCookieKey ? 'Yes' : 'No');
-    console.log('🔍 [LOADER] Auth cookie key:', supabaseAuthCookieKey);
+
     
     let accessToken;
     if (supabaseAuthCookieKey) {
@@ -60,7 +59,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         ).toString("utf-8");
         const [access] = JSON.parse(JSON.parse(decoded));
         accessToken = access;
-        console.log('🎫 [LOADER] Access token extracted:', accessToken ? 'Yes' : 'No');
+
       } catch (e) {
         console.error('❌ [LOADER] Error extracting access token:', e);
         accessToken = undefined;
@@ -71,10 +70,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     if (accessToken) {
       try {
         const decoded = jwt.decode(accessToken);
-        console.log('🔓 [LOADER] JWT decoded:', decoded ? 'Yes' : 'No');
-        
         authId = decoded && typeof decoded === "object" && "sub" in decoded ? decoded.sub as string : undefined;
-        console.log('🔑 [LOADER] Auth token decoded:', { authId, hasAccessToken: !!accessToken });
       } catch (e) {
         console.error('❌ [LOADER] Error decoding auth token:', e);
       }
@@ -107,9 +103,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       process.env.SUPABASE_SERVICE_KEY!
     );
     
-    console.log('🔍 [LOADER] Looking up user with authId:', authId);
-    console.log('🌐 [LOADER] Supabase URL:', process.env.SUPABASE_URL ? 'Set' : 'Not set');
-    console.log('🔑 [LOADER] Service key available:', process.env.SUPABASE_SERVICE_KEY ? 'Yes' : 'No');
+
     
     const { data: user, error: userError } = await supabase
       .from("users")
@@ -127,10 +121,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       });
     }
     
-    console.log('👤 [LOADER] User lookup result:', { 
-      user: user ? { id: user.id } : null, 
-      userError: userError ? { code: userError.code, message: userError.message } : null 
-    });
+
     
     const result = { 
       supplements: supplementsData.supplements || [],
@@ -138,7 +129,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       userCreatedAt: user?.created_at || undefined
     } as LoaderData;
     
-    console.log('📦 [LOADER] Final result:', { userId: result.userId, supplementsCount: result.supplements.length });
+
     
     if (authId) supplementsLoaderCache[authId] = { data: result, expires: Date.now() + 30_000 };
     return json(result);
@@ -585,10 +576,7 @@ export default function Supplements() {
             </div>
             <div className="space-y-3">
               {(() => {
-                console.log('🎯 Rendering compliance data:', { 
-                  complianceDataLength: complianceData.length, 
-                  complianceData: complianceData 
-                });
+
                 return complianceData.map((day: any, index: number) => {
                   // Determine if this is today or future/past
                   const today = dayjs().tz(userTz).startOf("day");

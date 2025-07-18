@@ -1389,27 +1389,12 @@ export default function ClientWorkouts() {
                   let displayText = `${percentage}%`;
                   let barColor = getBarColor(complianceData[i] || 0);
                   
-                  // Handle N/A case (complianceData[i] === -1)
-                  if (complianceData[i] === -1) {
-                    displayPercentage = 0;
-                    displayText = "N/A";
-                    barColor = 'transparent';
-                  } else if (isRestDay) {
-                    // --- NEW: If rest day, always show 100% ---
-                    displayPercentage = 100;
-                    displayText = "100%";
-                    barColor = getBarColor(1); // 100% green
-                  } else if (isFuture || (isToday && complianceData[i] === 0)) {
-                    displayPercentage = 0;
-                    displayText = "Pending";
-                    barColor = 'transparent';
-                  }
-                  // --- END NEW ---
-                  
+                  // Check for N/A conditions first
                   const signupDate = client?.created_at ? new Date(client.created_at) : null;
                   if (signupDate) signupDate.setHours(0,0,0,0);
                   thisDate.setHours(0,0,0,0);
                   const isBeforeSignup = signupDate && thisDate < signupDate;
+                  
                   // Find if a plan exists for this day
                   const planForDay = workoutPlans.find((p) => {
                     const activated = p.activatedAt ? new Date(p.activatedAt) : null;
@@ -1421,6 +1406,26 @@ export default function ClientWorkouts() {
                     );
                   });
                   const isNoPlan = !planForDay;
+                  
+                  // Handle N/A cases - these should show gray bars
+                  if (isBeforeSignup || complianceData[i] === -1 || isNoPlan) {
+                    displayPercentage = 0;
+                    displayText = "N/A";
+                    barColor = '#E5E7EB'; // Gray bar for N/A
+                  } else if (isRestDay) {
+                    // If rest day, always show 100%
+                    displayPercentage = 100;
+                    displayText = "100%";
+                    barColor = getBarColor(1); // 100% green
+                  } else if (isFuture) {
+                    displayPercentage = 0;
+                    displayText = "Pending";
+                    barColor = 'transparent';
+                  } else if (isToday && complianceData[i] === 0) {
+                    displayPercentage = 0;
+                    displayText = "Pending";
+                    barColor = 'transparent';
+                  }
                   
                   return (
                     <div key={label} className="flex items-center gap-4">
