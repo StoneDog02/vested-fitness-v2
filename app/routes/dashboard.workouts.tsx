@@ -390,7 +390,9 @@ export default function Workouts() {
   const fetchWorkoutWeek = (weekStart: Date) => {
     setIsLoadingWorkout(true);
     const params = new URLSearchParams();
-    params.set("weekStart", weekStart.toISOString());
+    // Convert the Date to a dayjs object in user timezone, then format as YYYY-MM-DD
+    const weekStartInUserTz = dayjs(weekStart).tz(USER_TIMEZONE).startOf("day").format("YYYY-MM-DD");
+    params.set("weekStart", weekStartInUserTz);
     weekFetcher.load(`/api/get-workout-week?${params.toString()}`);
   };
 

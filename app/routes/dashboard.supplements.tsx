@@ -207,7 +207,7 @@ export default function Supplements() {
     });
 
     try {
-      const url = `/api/get-supplement-compliance-week?weekStart=${startOfWeek.toISOString()}&clientId=${encodeURIComponent(userId)}`;
+      const url = `/api/get-supplement-compliance-week?weekStart=${startOfWeek.format("YYYY-MM-DD")}&clientId=${encodeURIComponent(userId)}`;
       console.log('🌐 Fetching from:', url);
       
       const response = await fetch(url);
