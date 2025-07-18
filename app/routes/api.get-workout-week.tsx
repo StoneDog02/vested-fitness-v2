@@ -12,6 +12,7 @@ import timezone from "dayjs/plugin/timezone";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+// Force deployment cache clear - workout week API with activation day logic
 export const loader: LoaderFunction = async ({ request }) => {
   const url = new URL(request.url);
   const weekStartParam = url.searchParams.get("weekStart");
