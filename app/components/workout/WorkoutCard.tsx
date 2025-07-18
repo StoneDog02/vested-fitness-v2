@@ -6,8 +6,6 @@ interface WorkoutCardProps {
   exercises: Exercise[];
   type: "Single" | "Super" | "Giant";
   isSubmitted?: boolean;
-  completionStates?: boolean[];
-  onCompletionChange?: (exerciseIds: string[], completed: boolean) => void;
   dayOffset: number;
 }
 
@@ -15,11 +13,8 @@ export default function WorkoutCard({
   exercises,
   type,
   isSubmitted = false,
-  completionStates,
-  onCompletionChange,
   dayOffset,
 }: WorkoutCardProps) {
-  const { id: userId } = useUser();
   const [weights, setWeights] = useState<Record<string, string>>({});
   const [personalBests, setPersonalBests] = useState<Record<string, number>>({});
   // Fetch PBs for each exercise on mount
@@ -106,94 +101,84 @@ export default function WorkoutCard({
 
   return (
     <div className="space-y-6">
-      {/* Exercise Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <div className="flex flex-col xs:flex-row xs:items-center gap-1 xs:gap-2 mb-2">
-            {type !== "Single" && (
-              <span className="px-2 py-0.5 xs:py-1 bg-green-100 text-green-800 rounded-md text-xs xs:text-sm font-medium w-max xs:w-auto mb-1 xs:mb-0">
-                {type === "Super" ? "Super Set" : "Giant Set"}
-              </span>
-            )}
-            <h3 className="text-lg xs:text-xl font-semibold text-secondary dark:text-alabaster leading-tight">
-              {exercises.map((ex) => ex.name).join(" + ")}
-            </h3>
-          </div>
-          <p className="text-xs xs:text-sm text-secondary dark:text-alabaster/90">
-            {exercises[0].description}
-          </p>
-        </div>
-
-      </div>
-
-      {/* Video and Table Container */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Sets Table */}
-        <div className="overflow-x-auto pr-4">
-          <table className="w-[95%]">
-            <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="text-left py-2 px-4 font-medium text-secondary dark:text-alabaster">
-                  SET
-                </th>
-                {exercises.map((exercise) => (
-                  <th
-                    key={exercise.id}
-                    className="text-left py-2 px-4 font-medium text-secondary dark:text-alabaster"
-                  >
-                    {exercise.name} (LBS)
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {exercises[0].sets.map((set) => (
-                <tr
-                  key={set.setNumber}
-                  className="border-b border-gray-100 dark:border-gray-700/50"
+      {/* Sets and Video Container */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Exercise Cards with Sets */}
+        <div className="relative">
+          <div className="max-h-[600px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-transparent">
+            <div className="space-y-4">
+              {exercises.map((exercise) => (
+                <div
+                  key={exercise.id}
+                  className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-6 border border-gray-200 dark:border-gray-700"
                 >
-                  <td className="py-2 px-4 text-secondary dark:text-alabaster/90">
-                    {getSetLabel(type, set.setNumber)}
-                  </td>
-                  {exercises.map((exercise) => (
-                    <td
-                      key={`${exercise.id}-${set.setNumber}`}
-                      className="py-2 px-4"
-                    >
-                      {set.setNumber === 1 ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={weights[`${exercise.id}-${set.setNumber}`] || ""}
-                            onChange={(e) =>
-                              handleWeightChange(
-                                exercise.id,
-                                set.setNumber,
-                                e.target.value
-                              )
-                            }
-                            disabled={isSubmitted}
-                            className={`w-20 px-2 py-1 border rounded bg-white dark:bg-gray-700 dark:border-gray-600 text-secondary dark:text-alabaster focus:ring-1 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light ${
-                              isSubmitted ? "cursor-not-allowed opacity-50" : ""
-                            }`}
-                            placeholder="0"
-                          />
-                          {/* Personal Best display */}
-                          <span className="ml-2 text-xs text-green-600 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded">
-                            PB: {personalBests[exercise.id] ? `${personalBests[exercise.id]} lbs` : "-"}
-                          </span>
+                  <div className="flex items-center justify-end mb-4">
+                    <div className="text-xs text-green-600 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/30 px-3 py-1.5 rounded-md">
+                      PB: {personalBests[exercise.id] ? `${personalBests[exercise.id]} lbs` : "-"}
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {exercise.sets.map((set) => (
+                      <div key={set.setNumber} className="bg-white dark:bg-gray-700 rounded-md p-4 border border-gray-200 dark:border-gray-600">
+                        <div className="flex items-center justify-between mb-3">
+                          <h5 className="font-medium text-secondary dark:text-alabaster">
+                            {getSetLabel(type, set.setNumber)}
+                          </h5>
                         </div>
-                      ) : (
-                        <span className="text-gray-400 dark:text-gray-600">
-                          -
-                        </span>
-                      )}
-                    </td>
-                  ))}
-                </tr>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          {/* Weight Input */}
+                          <div className="space-y-2">
+                            <label htmlFor={`weight-${exercise.id}-${set.setNumber}`} className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                              Weight (lbs)
+                            </label>
+                            {set.setNumber === 1 ? (
+                              <input
+                                id={`weight-${exercise.id}-${set.setNumber}`}
+                                type="number"
+                                value={weights[`${exercise.id}-${set.setNumber}`] || ""}
+                                onChange={(e) =>
+                                  handleWeightChange(
+                                    exercise.id,
+                                    set.setNumber,
+                                    e.target.value
+                                  )
+                                }
+                                disabled={isSubmitted}
+                                className={`w-full px-3 py-2 border rounded-md bg-white dark:bg-gray-600 dark:border-gray-500 text-secondary dark:text-alabaster focus:ring-2 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light text-sm ${
+                                  isSubmitted ? "cursor-not-allowed opacity-50" : ""
+                                }`}
+                                placeholder="0"
+                              />
+                            ) : (
+                              <div className="px-3 py-2 text-gray-400 dark:text-gray-500 text-sm bg-gray-100 dark:bg-gray-600 rounded-md">
+                                -
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Reps Display */}
+                          <div className="space-y-2">
+                            <label htmlFor={`reps-${exercise.id}-${set.setNumber}`} className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                              Reps
+                            </label>
+                                                                                <div id={`reps-${exercise.id}-${set.setNumber}`} className="px-3 py-2 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-lg font-bold rounded-md text-center">
+                              {set.reps}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          </div>
+          
+          {/* Scroll indicators */}
+          <div className="absolute top-0 left-0 right-2 h-4 bg-gradient-to-b from-white dark:from-gray-900 to-transparent pointer-events-none rounded-t-lg"></div>
+          <div className="absolute bottom-0 left-0 right-2 h-4 bg-gradient-to-t from-white dark:from-gray-900 to-transparent pointer-events-none rounded-b-lg"></div>
         </div>
 
         {/* Video Grid */}

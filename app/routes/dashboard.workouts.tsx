@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { MetaFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
+import NABadge from "~/components/ui/NABadge";
 import WorkoutCard from "~/components/workout/WorkoutCard";
 import { DailyWorkout, Exercise } from "~/types/workout";
 import { json } from "@remix-run/node";
@@ -76,7 +77,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Get user data
   const { data: user, error } = await supabase
     .from("users")
-    .select("id, name, email, avatar_url")
+    .select("id, name, email, avatar_url, created_at")
     .eq("auth_id", authId)
     .single();
 
@@ -96,21 +97,30 @@ export const loader: LoaderFunction = async ({ request }) => {
   // 1. Show active plans activated before today (normal case)
   // 2. Show plans deactivated today (they were active until today, should show until end of day)
   let activeWorkoutPlan = null;
+  
   if (allPlans && allPlans.length > 0) {
-    // First try to find an active plan activated before today
+    // First try to find an active plan activated before today (not on activation day)
     let planToShow = allPlans.find(plan => {
-      if (!plan.is_active) return false;
-      if (!plan.activated_at) return true; // Legacy plans without activation date
+      if (!plan.is_active) {
+        return false;
+      }
+      if (!plan.activated_at) {
+        return true; // Legacy plans without activation date
+      }
       const activatedDate = plan.activated_at.slice(0, 10);
-      return activatedDate < currentDateStr;
+      const shouldShow = activatedDate < currentDateStr;
+      return shouldShow; // Only show plans activated before today (not on activation day)
     });
     
     // If no active plan found, look for plan deactivated today (was active until today)
     if (!planToShow) {
       planToShow = allPlans.find(plan => {
-        if (!plan.deactivated_at) return false;
+        if (!plan.deactivated_at) {
+          return false;
+        }
         const deactivatedDate = plan.deactivated_at.slice(0, 10);
-        return deactivatedDate === currentDateStr; // Deactivated today, so show until end of day
+        const shouldShow = deactivatedDate === currentDateStr;
+        return shouldShow; // Deactivated today, so show until end of day
       });
     }
     
@@ -165,19 +175,80 @@ export const loader: LoaderFunction = async ({ request }) => {
     }
   }
 
+  // Calculate compliance data for the current week
+  const today = dayjs().tz(userTz).startOf("day");
+  const startOfWeek = today.startOf("week");
+  const endOfWeek = startOfWeek.endOf("week");
+
+  // Fetch workout completions for this week
+  const { data: completions } = await supabase
+    .from("workout_completions")
+    .select("completed_at")
+    .eq("user_id", user.id)
+    .gte("completed_at", startOfWeek.format("YYYY-MM-DD"))
+    .lt("completed_at", endOfWeek.add(1, "day").format("YYYY-MM-DD"));
+
+  // Build compliance data for the week
+  const complianceData: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const day = startOfWeek.add(i, "day");
+    const dayStr = day.format("YYYY-MM-DD");
+    
+    // Check if this day is before the user signed up
+    if (user.created_at) {
+      const signupDate = dayjs(user.created_at).tz(userTz).startOf("day");
+      if (day.isBefore(signupDate)) {
+        // Return -1 to indicate N/A for days before signup
+        complianceData.push(-1);
+        continue;
+      }
+    }
+    
+    // Check if this is the activation day for any workout plan
+    const activePlan = allPlans?.find(plan => {
+      if (!plan.activated_at) return false;
+      const activatedStr = plan.activated_at.slice(0, 10);
+      return activatedStr === dayStr;
+    });
+    
+    // Check if this is the first plan for this user (to handle immediate activation)
+    const isFirstPlan = allPlans && activePlan && (
+      allPlans.length === 1 || 
+      allPlans.every(p => p.id === activePlan.id || p.activated_at === null) ||
+      allPlans.every(p => p.id === activePlan.id || new Date(p.created_at) > new Date(activePlan.created_at))
+    );
+    
+    // Check if plan was created today (for immediate activation)
+    const isCreatedToday = activePlan && new Date(activePlan.created_at).toISOString().slice(0, 10) === dayStr;
+    
+    if (activePlan && (isFirstPlan || activePlan.activated_at?.slice(0, 10) === dayStr || isCreatedToday)) {
+      // Return -1 to indicate N/A for activation/creation day
+      complianceData.push(-1);
+      continue;
+    }
+    
+    const hasCompletion = (completions || []).some((c: any) => c.completed_at === dayStr);
+    complianceData.push(hasCompletion ? 1 : 0);
+  }
+
   return json({
     user: {
       id: user.id,
       name: user.name,
       email: user.email,
       avatar_url: user.avatar_url,
+      created_at: user.created_at,
     },
     workoutPlan: activeWorkoutPlan,
+    complianceData,
+    todaysWorkout: null, // This will be calculated in the component
+    todaysCompletedGroups: [], // This will be calculated in the component
   });
 };
 
 export default function Workouts() {
-  const { todaysWorkout, complianceData: initialComplianceData, todaysCompletedGroups } = useLoaderData<{ 
+  const { user, todaysWorkout, complianceData: initialComplianceData, todaysCompletedGroups } = useLoaderData<{ 
+    user: any;
     todaysWorkout: null | {
       id: string;
       name: string;
@@ -197,10 +268,12 @@ export default function Workouts() {
   const [completedGroups, setCompletedGroups] = useState<Record<string, boolean>>({});
   const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
   const [isWorkoutSubmitted, setIsWorkoutSubmitted] = useState(false);
+  const [isActivationDay, setIsActivationDay] = useState(false);
   const [currentDayWorkout, setCurrentDayWorkout] = useState(todaysWorkout);
   const [isLoadingWorkout, setIsLoadingWorkout] = useState(false);
   const weekFetcher = useFetcher<{ workouts: Record<string, any>, completions: Record<string, string[]> }>();
   const submitFetcher = useFetcher();
+  const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   
   // Track current week and cached workout data
   const [currentWeekStart, setCurrentWeekStart] = useState(() => {
@@ -214,6 +287,8 @@ export default function Workouts() {
   const [weekWorkouts, setWeekWorkouts] = useState<Record<string, any>>({});
   const [weekCompletions, setWeekCompletions] = useState<Record<string, string[]>>({});
 
+  // Remove the API call since compliance data now comes from loader
+
   // Update compliance data when initial data changes
   useEffect(() => {
     setComplianceData(initialComplianceData);
@@ -225,6 +300,9 @@ export default function Workouts() {
   const currentDate = new Date(today);
   currentDate.setDate(today.getDate() + dayOffset);
   const currentDateApi = currentDate.toISOString().slice(0, 10);
+
+  // Check if today is activation day by looking at compliance data
+  const isTodayActivationDay = initialComplianceData && initialComplianceData.length > 0 && initialComplianceData[dayjs().tz("America/Denver").day()] === -1;
 
   // Fetch completed workout groups for today from backend (for real-time updates)
   const fetchCompletedGroupsForToday = async () => {
@@ -255,14 +333,28 @@ export default function Workouts() {
 
   // Update completed groups and submission status when day changes or week data loads
   useEffect(() => {
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + dayOffset);
-    const dateStr = targetDate.toISOString().slice(0, 10);
+    // TODO: In the future, use user-specific timezone from profile if available
+    const userTz = "America/Denver"; // Northern Utah timezone
+    const today = dayjs().tz(userTz).startOf("day");
+    const targetDate = today.add(dayOffset, "day");
+    const dateStr = targetDate.format("YYYY-MM-DD");
     const workoutData = weekWorkouts[dateStr];
     const completionData = weekCompletions[dateStr] || [];
 
     if (workoutData !== undefined) {
+      // Check if this is the activation day (plan was activated today)
+      const isActivationDay = dayOffset === 0 && isTodayActivationDay;
+      
+
+      
       setCurrentDayWorkout(workoutData);
+      // Store activation day status for UI
+      if (isActivationDay) {
+        setIsActivationDay(true);
+        setIsWorkoutSubmitted(true); // This will disable interactions
+      } else {
+        setIsActivationDay(false);
+      }
       if (completionData.length > 0) {
         const dayCompletedGroups: Record<string, boolean> = {};
         const matchingGroupsCount = completionData.filter((groupId: string) => {
@@ -285,10 +377,13 @@ export default function Workouts() {
       setIsLoadingWorkout(false);
     } else {
       // Need to fetch this week's data
-      const weekStart = new Date(targetDate);
+      const weekStart = targetDate.toDate();
       const dayOfWeek = weekStart.getDay();
       weekStart.setDate(weekStart.getDate() - dayOfWeek);
       weekStart.setHours(0, 0, 0, 0);
+      
+
+      
       if (weekStart.getTime() !== currentWeekStart.getTime()) {
         setCurrentWeekStart(weekStart);
         fetchWorkoutWeek(weekStart);
@@ -307,8 +402,10 @@ export default function Workouts() {
   // Initialize week data on mount
   useEffect(() => {
     // Add today's workout to the week cache
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
+    // TODO: In the future, use user-specific timezone from profile if available
+    const userTz = "America/Denver"; // Northern Utah timezone
+    const today = dayjs().tz(userTz).startOf("day");
+    const todayStr = today.format("YYYY-MM-DD");
     if (todaysWorkout) {
       setWeekWorkouts(prev => ({
         ...prev,
@@ -320,13 +417,14 @@ export default function Workouts() {
       [todayStr]: todaysCompletedGroups
     }));
     
-    // Fetch the rest of the week's data
+    // Fetch the current week's data
     fetchWorkoutWeek(currentWeekStart);
-  }, []);
+  }, [todaysWorkout, todaysCompletedGroups]);
 
   // Handle week fetcher data updates
   useEffect(() => {
     if (weekFetcher.data?.workouts && weekFetcher.data?.completions) {
+
       setWeekWorkouts(prev => ({ ...prev, ...weekFetcher.data!.workouts }));
       setWeekCompletions(prev => ({ ...prev, ...weekFetcher.data!.completions }));
       setIsLoadingWorkout(false);
@@ -335,13 +433,15 @@ export default function Workouts() {
 
   // Get the formatted date display (UI only - no data fetching)
   const getDateDisplay = (offset: number) => {
-    const today = new Date();
-    const targetDate = new Date(today);
-    targetDate.setDate(today.getDate() + offset);
-    const weekdayName = targetDate.toLocaleDateString("en-US", {
+    // TODO: In the future, use user-specific timezone from profile if available
+    const userTz = "America/Denver"; // Northern Utah timezone
+    const today = dayjs().tz(userTz).startOf("day");
+    const targetDate = today.add(offset, "day");
+    const targetDateObj = targetDate.toDate();
+    const weekdayName = targetDateObj.toLocaleDateString("en-US", {
       weekday: "long",
     });
-    const formattedDate = targetDate.toLocaleDateString("en-US", {
+    const formattedDate = targetDateObj.toLocaleDateString("en-US", {
       month: "long",
       day: "numeric",
       year: "numeric",
@@ -372,8 +472,8 @@ export default function Workouts() {
 
   // Handle group completion toggle
   const toggleGroupCompletion = (groupId: string) => {
-    // Prevent changes if workout is already submitted or not today's workout
-    if (isWorkoutSubmitted || dayOffset !== 0) return;
+    // Prevent changes if workout is already submitted, not today's workout, or activation day
+    if (isWorkoutSubmitted || dayOffset !== 0 || isActivationDay) return;
     
     setCompletedGroups(prev => ({
       ...prev,
@@ -585,20 +685,16 @@ export default function Workouts() {
 
             <div className="mb-4 sm:mb-6">
               <h2 className="text-xl sm:text-2xl font-semibold text-secondary dark:text-alabaster mb-2">
-                {isLoadingWorkout ? "Loading..." : currentDayWorkout ? currentDayWorkout.name : "Rest Day"}
+                {isLoadingWorkout
+                  ? "Loading..."
+                  : currentDayWorkout
+                    ? currentDayWorkout.isRest
+                      ? "Rest Day"
+                      : currentDayWorkout.name
+                    : isActivationDay
+                      ? "No Workouts"
+                      : "No Workouts"}
               </h2>
-              {currentDayWorkout && !currentDayWorkout.isRest && currentDayWorkout.uniqueTypes && currentDayWorkout.uniqueTypes.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {currentDayWorkout.uniqueTypes.map((type: string) => (
-                    <span
-                      key={type}
-                      className="px-2 py-0.5 xs:py-1 bg-green-100 text-green-800 rounded-md text-xs xs:text-sm font-medium"
-                    >
-                      {type}
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
             <div className="space-y-4 sm:space-y-6">
               {isLoadingWorkout ? (
@@ -627,7 +723,11 @@ export default function Workouts() {
                 </div>
               ) : !currentDayWorkout || currentDayWorkout.isRest || !currentDayWorkout.groups ? (
                 <p className="text-secondary dark:text-alabaster">
-                  {currentDayWorkout?.isRest ? "Rest day - take time to recover!" : "No workout scheduled for this day."}
+                  {currentDayWorkout?.isRest
+                    ? "Rest day - take time to recover!"
+                    : isActivationDay
+                    ? "Workout plan activated today - workouts will take effect tomorrow."
+                    : "No workout scheduled for this day."}
                 </p>
               ) : (
                 (Array.isArray(currentDayWorkout?.groups) ? currentDayWorkout.groups : []).map((group: any, idx: number) => (
@@ -637,13 +737,13 @@ export default function Workouts() {
                   >
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
-                        Group {idx + 1} - {group.type}
+                        {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
                       </h3>
                       <div className="flex items-center gap-2">
                         <label
                           htmlFor={`group-${group.id}`}
                           className={`text-sm select-none ${
-                            isWorkoutSubmitted || dayOffset !== 0
+                            isWorkoutSubmitted || dayOffset !== 0 || isActivationDay
                               ? "text-gray-500 dark:text-gray-400 cursor-not-allowed" 
                               : "text-gray-dark dark:text-gray-light cursor-pointer"
                           }`}
@@ -652,6 +752,8 @@ export default function Workouts() {
                             ? completedGroups[group.id] 
                               ? "Completed" 
                               : "Not completed"
+                            : isActivationDay
+                            ? "Activation Day"
                             : isWorkoutSubmitted && completedGroups[group.id] 
                             ? "Completed & Submitted" 
                             : completedGroups[group.id] 
@@ -663,9 +765,9 @@ export default function Workouts() {
                           id={`group-${group.id}`}
                           checked={completedGroups[group.id] || false}
                           onChange={() => toggleGroupCompletion(group.id)}
-                          disabled={isWorkoutSubmitted || dayOffset !== 0}
+                          disabled={isWorkoutSubmitted || dayOffset !== 0 || isActivationDay}
                           className={`w-5 h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
-                            isWorkoutSubmitted || dayOffset !== 0
+                            isWorkoutSubmitted || dayOffset !== 0 || isActivationDay
                               ? "cursor-not-allowed opacity-50" 
                               : "cursor-pointer"
                           }`}
@@ -687,7 +789,7 @@ export default function Workouts() {
               <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
                 <Button
                   variant="primary"
-                  disabled={isSubmitting || isWorkoutSubmitted}
+                  disabled={isSubmitting || isWorkoutSubmitted || isActivationDay}
                   onClick={handleSubmitWorkout}
                 >
                   <span className="flex items-center gap-2">
@@ -722,6 +824,21 @@ export default function Workouts() {
                     )}
                   </span>
                 </Button>
+              </div>
+            )}
+
+            {/* Activation Day Message */}
+            {isActivationDay && dayOffset === 0 && (
+              <div className="mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                <div className="text-center text-gray-600 dark:text-gray-400 text-sm">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium text-blue-600 dark:text-blue-400">Workout Plan Activated Today</span>
+                  </div>
+                  <p>Your workout plan is now active! You can view today's workout, but tracking will take effect tomorrow.</p>
+                </div>
               </div>
             )}
 
@@ -796,9 +913,26 @@ export default function Workouts() {
                 // Determine status and display
                 let status: string;
                 let displayText: string;
+                let showNABadge = false;
+                let naReason = "";
                 const percentage = Math.round((safeComplianceData[i] || 0) * 100);
                 
-                if (isFuture) {
+                // Check if this day is before the user signed up
+                const signupDate = user?.created_at ? new Date(user.created_at) : null;
+                if (signupDate) signupDate.setHours(0, 0, 0, 0);
+                const isBeforeSignup = signupDate && thisDate < signupDate;
+                
+                if (isBeforeSignup) {
+                  showNABadge = true;
+                  naReason = "You weren't signed up yet!";
+                  status = "na";
+                  displayText = "";
+                } else if (safeComplianceData[i] === -1) {
+                  showNABadge = true;
+                  naReason = "Workout plan added today - compliance starts tomorrow";
+                  status = "na";
+                  displayText = "";
+                } else if (isFuture) {
                   status = "pending";
                   displayText = "Pending";
                 } else if (isToday) {
@@ -844,7 +978,9 @@ export default function Workouts() {
                     <div className="flex items-center gap-2">
                       <span
                         className={`inline-block w-3 h-3 rounded-full ${
-                          status === "pending"
+                          isBeforeSignup || status === "na"
+                            ? "bg-gray-light dark:bg-davyGray"
+                            : status === "pending"
                             ? isToday
                               ? "bg-green-500"
                               : "bg-gray-light dark:bg-davyGray"
@@ -857,13 +993,17 @@ export default function Workouts() {
                             : "bg-red-500"
                         }`}
                       ></span>
-                      <span className={`text-sm ${
-                        isToday && status === "pending"
-                          ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
-                          : 'text-gray-dark dark:text-gray-light'
-                      }`}>
-                        {displayText}
-                      </span>
+                      {showNABadge ? (
+                        <NABadge reason={naReason} />
+                      ) : (
+                        <span className={`text-sm ${
+                          isToday && status === "pending"
+                            ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
+                            : 'text-gray-dark dark:text-gray-light'
+                        }`}>
+                          {displayText}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );

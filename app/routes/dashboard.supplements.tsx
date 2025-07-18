@@ -4,11 +4,15 @@ import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
+import NABadge from "~/components/ui/NABadge";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "~/lib/supabase";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { parse } from "cookie";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
@@ -32,33 +36,50 @@ interface Supplement {
 
 interface LoaderData {
   supplements: Supplement[];
+  userId: string;
+  userCreatedAt?: string;
 }
 
 export const loader: LoaderFunction = async ({ request }) => {
   try {
     // Extract user key from auth cookie for per-user cache
-    const cookies = request.headers.get('cookie') || '';
-    let authId: string | undefined = undefined;
-    const supabaseAuthCookieKey = cookies
-      .split(';')
-      .map(c => c.trim())
-      .find(key => key.startsWith('sb-') && key.endsWith('-auth-token'));
+    const cookies = parse(request.headers.get("cookie") || "");
+    const supabaseAuthCookieKey = Object.keys(cookies).find(
+      (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+    );
+    
+    console.log('🔍 [LOADER] Found auth cookie key:', supabaseAuthCookieKey ? 'Yes' : 'No');
+    console.log('🔍 [LOADER] Auth cookie key:', supabaseAuthCookieKey);
+    
     let accessToken;
     if (supabaseAuthCookieKey) {
       try {
-        const cookieVal = supabaseAuthCookieKey.split('=')[1];
-        const decoded = Buffer.from(cookieVal, "base64").toString("utf-8");
+        const decoded = Buffer.from(
+          cookies[supabaseAuthCookieKey],
+          "base64"
+        ).toString("utf-8");
         const [access] = JSON.parse(JSON.parse(decoded));
         accessToken = access;
+        console.log('🎫 [LOADER] Access token extracted:', accessToken ? 'Yes' : 'No');
       } catch (e) {
+        console.error('❌ [LOADER] Error extracting access token:', e);
         accessToken = undefined;
       }
     }
+    
+    let authId: string | undefined = undefined;
     if (accessToken) {
       try {
         const decoded = jwt.decode(accessToken);
+        console.log('🔓 [LOADER] JWT decoded:', decoded ? 'Yes' : 'No');
+        
         authId = decoded && typeof decoded === "object" && "sub" in decoded ? decoded.sub as string : undefined;
-      } catch (e) {}
+        console.log('🔑 [LOADER] Auth token decoded:', { authId, hasAccessToken: !!accessToken });
+      } catch (e) {
+        console.error('❌ [LOADER] Error decoding auth token:', e);
+      }
+    } else {
+      console.log('⚠️ [LOADER] No access token found');
     }
     // If we have a user, check cache
     if (authId && supplementsLoaderCache[authId] && supplementsLoaderCache[authId].expires > Date.now()) {
@@ -67,29 +88,68 @@ export const loader: LoaderFunction = async ({ request }) => {
     // Fetch supplements from API
     const supplementsResponse = await fetch(`${new URL(request.url).origin}/api/get-supplements`, {
       headers: {
-        'Cookie': cookies,
+        'Cookie': request.headers.get("cookie") || "",
       },
     });
 
     if (!supplementsResponse.ok) {
       console.error('Failed to fetch supplements');
-      const result = { supplements: [] } as LoaderData;
+      const result = { supplements: [], userId: '', userCreatedAt: undefined } as LoaderData;
       if (authId) supplementsLoaderCache[authId] = { data: result, expires: Date.now() + 30_000 };
       return json(result);
     }
 
     const supplementsData = await supplementsResponse.json();
-    const result = { supplements: supplementsData.supplements || [] } as LoaderData;
+    
+    // Get user ID from the auth token
+    const supabase = createClient<Database>(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+    
+    console.log('🔍 [LOADER] Looking up user with authId:', authId);
+    console.log('🌐 [LOADER] Supabase URL:', process.env.SUPABASE_URL ? 'Set' : 'Not set');
+    console.log('🔑 [LOADER] Service key available:', process.env.SUPABASE_SERVICE_KEY ? 'Yes' : 'No');
+    
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .select("id, created_at")
+      .eq("auth_id", authId)
+      .single();
+    
+    if (userError) {
+      console.error('❌ [LOADER] Error fetching user:', userError);
+      console.error('❌ [LOADER] Error details:', {
+        code: userError.code,
+        message: userError.message,
+        details: userError.details,
+        hint: userError.hint
+      });
+    }
+    
+    console.log('👤 [LOADER] User lookup result:', { 
+      user: user ? { id: user.id } : null, 
+      userError: userError ? { code: userError.code, message: userError.message } : null 
+    });
+    
+    const result = { 
+      supplements: supplementsData.supplements || [],
+      userId: user?.id || '',
+      userCreatedAt: user?.created_at || undefined
+    } as LoaderData;
+    
+    console.log('📦 [LOADER] Final result:', { userId: result.userId, supplementsCount: result.supplements.length });
+    
     if (authId) supplementsLoaderCache[authId] = { data: result, expires: Date.now() + 30_000 };
     return json(result);
   } catch (error) {
     console.error('Error loading supplements:', error);
-    return json({ supplements: [] } as LoaderData);
+    return json({ supplements: [], userId: '', userCreatedAt: undefined } as LoaderData);
   }
 };
 
 export default function Supplements() {
-  const { supplements } = useLoaderData<LoaderData>();
+  const { supplements, userId, userCreatedAt } = useLoaderData<LoaderData>();
   const fetcher = useFetcher();
   const submitFetcher = useFetcher();
   const [checkedSupplements, setCheckedSupplements] = useState<{
@@ -143,48 +203,62 @@ export default function Supplements() {
 
   // Load compliance data for the current week
   const loadComplianceData = async () => {
+    console.log('🔍 Loading compliance data...', { userId, supplementsCount: supplements.length });
+    
     const today = dayjs().tz(userTz).startOf("day");
     const startOfWeek = today.startOf("week");
-    const endOfWeek = startOfWeek.endOf("week");
+    
+    console.log('📅 Week range:', { 
+      startOfWeek: startOfWeek.format('YYYY-MM-DD'),
+      endOfWeek: startOfWeek.add(6, 'day').format('YYYY-MM-DD')
+    });
 
     try {
-      const response = await fetch(`/api/get-supplement-completions?startDate=${startOfWeek.format("YYYY-MM-DD")}&endDate=${endOfWeek.format("YYYY-MM-DD")}`);
+      const url = `/api/get-supplement-compliance-week?weekStart=${startOfWeek.toISOString()}&clientId=${encodeURIComponent(userId)}`;
+      console.log('🌐 Fetching from:', url);
+      
+      const response = await fetch(url);
+      console.log('📡 Response status:', response.status);
+      
       if (response.ok) {
         const data = await response.json();
+        console.log('📊 Compliance data received:', data);
         
         // Process compliance data for the week
         const weekComplianceData = [];
         for (let i = 0; i < 7; i++) {
           const date = startOfWeek.add(i, "day");
-          const dateStr = date.format("YYYY-MM-DD");
-          
-          const dayCompletions = data.completions.filter((c: any) => 
-            c.completed_at.startsWith(dateStr)
-          );
-          
-          const totalSupplements = supplements.length;
-          const completedCount = dayCompletions.length;
-          const percentage = totalSupplements > 0 ? Math.round((completedCount / totalSupplements) * 100) : 0;
+          const complianceValue = data.complianceData[i] || 0;
+          const percentage = complianceValue === -1 ? 0 : Math.round(complianceValue * 100);
           
           weekComplianceData.push({
             date: date,
             percentage: percentage,
-            status: percentage > 0 ? "completed" : "pending"
+            complianceValue: complianceValue,
+            status: complianceValue === -1 ? "na" : (percentage > 0 ? "completed" : "pending")
           });
         }
         
+        console.log('📈 Processed week compliance data:', weekComplianceData);
         setComplianceData(weekComplianceData);
+      } else {
+        console.error('❌ Failed to fetch compliance data:', response.status, response.statusText);
+        const errorText = await response.text();
+        console.error('❌ Error response:', errorText);
       }
     } catch (error) {
-      console.error('Error loading compliance data:', error);
+      console.error('💥 Error loading compliance data:', error);
     }
   };
 
   useEffect(() => {
-    if (supplements.length > 0) {
+    console.log('🔄 useEffect triggered:', { userId, supplementsCount: supplements.length });
+    if (userId) {
       loadComplianceData();
+    } else {
+      console.log('⚠️ No userId available, skipping compliance data load');
     }
-  }, [supplements]);
+  }, [userId]); // Remove supplements dependency - always load compliance data
 
   const handleSupplementCheck = (id: string) => {
     // Prevent changes if day is already submitted or not today
@@ -343,52 +417,65 @@ export default function Supplements() {
             </div>
 
             <div className="space-y-4">
-              {supplements.map((supplement: Supplement) => (
-                <div
-                  key={supplement.id}
-                  className="flex items-start p-4 rounded-lg border border-gray-light dark:border-davyGray hover:shadow-md transition-shadow duration-200"
-                >
-                  <div className="flex-shrink-0 pt-1">
-                    <input
-                      type="checkbox"
-                      id={`supplement-${supplement.id}`}
-                      checked={!!checkedSupplements[supplement.id]}
-                      onChange={() => handleSupplementCheck(supplement.id)}
-                      disabled={isDaySubmitted || dayOffset !== 0}
-                      className={`h-4 w-4 rounded border-gray-light text-primary focus:ring-primary ${
-                        isDaySubmitted || dayOffset !== 0
-                          ? "cursor-not-allowed opacity-50"
-                          : "cursor-pointer"
-                      }`}
-                    />
-                  </div>
-                  <div className="ml-3 flex-grow">
-                    <label
-                      htmlFor={`supplement-${supplement.id}`}
-                      className={`font-medium text-secondary dark:text-alabaster text-lg ${
-                        isDaySubmitted || dayOffset !== 0 ? "cursor-not-allowed" : "cursor-pointer"
-                      }`}
-                    >
-                      {supplement.name}
-                    </label>
-                    <div className="mt-1 text-sm text-gray-dark dark:text-gray-light">
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                        <div>
-                          <span className="font-medium">Dosage:</span>{" "}
-                          {supplement.dosage}
-                        </div>
-                        <div>
-                          <span className="font-medium">Frequency:</span>{" "}
-                          {supplement.frequency}
-                        </div>
-                      </div>
-                      {supplement.instructions && (
-                        <div className="mt-2 italic">{supplement.instructions}</div>
-                      )}
-                    </div>
+              {supplements.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="flex flex-col items-center">
+                    <h3 className="text-lg font-semibold text-secondary dark:text-alabaster mb-2">
+                      No Supplements Assigned
+                    </h3>
+                    <p className="text-gray-600 dark:text-gray-400 text-sm max-w-md text-center">
+                      Your coach hasn't assigned any supplements to your plan yet. Once supplements are added, you'll be able to track your daily intake here.
+                    </p>
                   </div>
                 </div>
-              ))}
+              ) : (
+                supplements.map((supplement: Supplement) => (
+                  <div
+                    key={supplement.id}
+                    className="flex items-start p-4 rounded-lg border border-gray-light dark:border-davyGray hover:shadow-md transition-shadow duration-200"
+                  >
+                    <div className="flex-shrink-0 pt-1">
+                      <input
+                        type="checkbox"
+                        id={`supplement-${supplement.id}`}
+                        checked={!!checkedSupplements[supplement.id]}
+                        onChange={() => handleSupplementCheck(supplement.id)}
+                        disabled={isDaySubmitted || dayOffset !== 0}
+                        className={`h-4 w-4 rounded border-gray-light text-primary focus:ring-primary ${
+                          isDaySubmitted || dayOffset !== 0
+                            ? "cursor-not-allowed opacity-50"
+                            : "cursor-pointer"
+                        }`}
+                      />
+                    </div>
+                    <div className="ml-3 flex-grow">
+                      <label
+                        htmlFor={`supplement-${supplement.id}`}
+                        className={`font-medium text-secondary dark:text-alabaster text-lg ${
+                          isDaySubmitted || dayOffset !== 0 ? "cursor-not-allowed" : "cursor-pointer"
+                        }`}
+                      >
+                        {supplement.name}
+                      </label>
+                      <div className="mt-1 text-sm text-gray-dark dark:text-gray-light">
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                          <div>
+                            <span className="font-medium">Dosage:</span>{" "}
+                            {supplement.dosage}
+                          </div>
+                          <div>
+                            <span className="font-medium">Frequency:</span>{" "}
+                            {supplement.frequency}
+                          </div>
+                        </div>
+                        {supplement.instructions && (
+                          <div className="mt-2 italic">{supplement.instructions}</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
             {/* Submit Button - Only show for today's supplements */}
@@ -497,66 +584,99 @@ export default function Supplements() {
               </div>
             </div>
             <div className="space-y-3">
-              {complianceData.map((day: any, index: number) => {
-                // Determine if this is today or future/past
-                const today = dayjs().tz(userTz).startOf("day");
-                const isToday = day.date.isSame(today, "day");
-                const isFuture = day.date.isAfter(today, "day");
-                
-                // Determine status and display
-                let status: string;
-                let displayText: string;
-                
-                if (isFuture) {
-                  status = "pending";
-                  displayText = "Pending";
-                } else if (isToday) {
-                  if (day.percentage > 0) {
-                    status = "completed";
-                    displayText = `${day.percentage}%`;
-                  } else {
+              {(() => {
+                console.log('🎯 Rendering compliance data:', { 
+                  complianceDataLength: complianceData.length, 
+                  complianceData: complianceData 
+                });
+                return complianceData.map((day: any, index: number) => {
+                  // Determine if this is today or future/past
+                  const today = dayjs().tz(userTz).startOf("day");
+                  const isToday = day.date.isSame(today, "day");
+                  const isFuture = day.date.isAfter(today, "day");
+                  
+                  // Determine status and display
+                  let status: string;
+                  let displayText: string;
+                  let showNABadge = false;
+                  let naReason = "";
+                  
+                  // Check if this day is before the user signed up
+                  const signupDate = userCreatedAt ? dayjs(userCreatedAt).tz(userTz).startOf("day") : null;
+                  const isBeforeSignup = signupDate && day.date.isBefore(signupDate, "day");
+                  
+                  if (isBeforeSignup) {
+                    showNABadge = true;
+                    naReason = "You weren't signed up yet!";
+                    status = "na";
+                    displayText = "";
+                  } else if (day.complianceValue === -2) {
+                    showNABadge = true;
+                    naReason = "No supplements assigned by your coach";
+                    status = "na";
+                    displayText = "";
+                  } else if (day.complianceValue === -1) {
+                    showNABadge = true;
+                    naReason = "Supplements added today - compliance starts tomorrow";
+                    status = "na";
+                    displayText = "";
+                  } else if (isFuture) {
                     status = "pending";
                     displayText = "Pending";
+                  } else if (isToday) {
+                    if (day.percentage > 0) {
+                      status = "completed";
+                      displayText = `${day.percentage}%`;
+                    } else {
+                      status = "pending";
+                      displayText = "Pending";
+                    }
+                  } else {
+                    // Past day
+                    status = "completed";
+                    displayText = `${day.percentage}%`;
                   }
-                } else {
-                  // Past day
-                  status = "completed";
-                  displayText = `${day.percentage}%`;
-                }
 
-                return (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between py-2 border-b dark:border-davyGray last:border-0"
-                  >
-                    <div className="text-sm font-medium text-secondary dark:text-alabaster">
-                      {day.date.format("ddd, MMM D")}
+                  return (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between py-2 border-b dark:border-davyGray last:border-0"
+                    >
+                      <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                        {day.date.format("ddd, MMM D")}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-block w-3 h-3 rounded-full ${
+                            isBeforeSignup || status === "na"
+                              ? "bg-gray-light dark:bg-davyGray"
+                              : status === "pending"
+                              ? isToday
+                                ? "bg-green-500"
+                                : "bg-gray-light dark:bg-davyGray"
+                              : day.percentage >= 80
+                              ? "bg-primary"
+                              : day.percentage > 0
+                              ? "bg-yellow-500"
+                              : "bg-red-500"
+                          }`}
+                        ></span>
+                        {showNABadge ? (
+                          <NABadge reason={naReason} />
+                        ) : (
+                          <span className={`text-sm ${
+                            isToday && status === "pending"
+                              ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
+                              : 'text-gray-dark dark:text-gray-light'
+                          }`}>
+                            {displayText}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`inline-block w-3 h-3 rounded-full ${
-                          status === "pending"
-                            ? isToday
-                              ? "bg-green-500"
-                              : "bg-gray-light dark:bg-davyGray"
-                            : day.percentage >= 80
-                            ? "bg-primary"
-                            : day.percentage > 0
-                            ? "bg-yellow-500"
-                            : "bg-red-500"
-                        }`}
-                      ></span>
-                      <span className={`text-sm ${
-                        isToday && status === "pending"
-                          ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
-                          : 'text-gray-dark dark:text-gray-light'
-                      }`}>
-                        {displayText}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           </Card>
         </div>

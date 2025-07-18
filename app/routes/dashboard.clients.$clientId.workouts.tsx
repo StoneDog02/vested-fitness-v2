@@ -33,12 +33,10 @@ const getActivationStatus = (plan: { isActive: boolean; activatedAt: string | nu
   const todayStr = today.toISOString().slice(0, 10);
   const activatedDateStr = plan.activatedAt.slice(0, 10);
   
-  if (activatedDateStr < todayStr) {
-    return "Active"; // Activated before today
-  } else if (activatedDateStr === todayStr) {
-    return "Will Activate Tomorrow"; // Activated today
+  if (activatedDateStr <= todayStr) {
+    return "Active"; // Activated before today or today (immediate activation)
   } else {
-    return "Scheduled"; // Activated in the future (edge case)
+    return "Will Activate Tomorrow"; // Activated in the future
   }
 };
 
@@ -447,17 +445,49 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "setActive") {
     const planId = formData.get("workoutPlanId") as string;
+    const now = new Date().toISOString();
+    
+    // Check if this is the first workout plan for this client
+    const { data: existingPlans } = await supabase
+      .from("workout_plans")
+      .select("id, activated_at")
+      .eq("user_id", client.id)
+      .eq("is_template", false);
+    
+    const hasActivePlan = existingPlans?.some(plan => plan.activated_at !== null);
+    const isFirstPlan = !hasActivePlan;
+    
     // Set all other plans inactive
     await supabase
       .from("workout_plans")
       .update({ is_active: false })
       .eq("user_id", client.id)
       .neq("id", planId);
+    
     // Set selected plan active
-    await supabase
-      .from("workout_plans")
-      .update({ is_active: true, activated_at: new Date().toISOString() })
-      .eq("id", planId);
+    if (isFirstPlan) {
+      // For first plan, set it active immediately
+      await supabase
+        .from("workout_plans")
+        .update({ is_active: true, activated_at: now })
+        .eq("id", planId);
+    } else {
+      // For subsequent plans, set activated_at to tomorrow
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0);
+      
+      await supabase
+        .from("workout_plans")
+        .update({ is_active: true, activated_at: tomorrow.toISOString() })
+        .eq("id", planId);
+    }
+    
+    // Clear cache to force refresh of compliance data
+    if (params.clientId && clientWorkoutsCache[params.clientId]) {
+      delete clientWorkoutsCache[params.clientId];
+    }
+    
     return redirect(request.url);
   }
 
@@ -851,6 +881,16 @@ export default function ClientWorkouts() {
   const [hasMoreWorkoutPlans, setHasMoreWorkoutPlans] = useState(loaderWorkoutPlansHasMore ?? true);
   const historyModalRef = useRef<HTMLDivElement>(null);
   const historyFetcher = useFetcher();
+
+  // Initial API call to get real-time compliance data
+  useEffect(() => {
+    if (client?.id) {
+      const params = new URLSearchParams();
+      params.set("weekStart", currentWeekStart);
+      params.set("clientId", client.id);
+      complianceFetcher.load(`/api/get-compliance-week?${params.toString()}`);
+    }
+  }, [client?.id, currentWeekStart]);
 
   // Update compliance data when fetcher returns
   useEffect(() => {
@@ -1349,8 +1389,13 @@ export default function ClientWorkouts() {
                   let displayText = `${percentage}%`;
                   let barColor = getBarColor(complianceData[i] || 0);
                   
-                  // --- NEW: If rest day, always show 100% ---
-                  if (isRestDay) {
+                  // Handle N/A case (complianceData[i] === -1)
+                  if (complianceData[i] === -1) {
+                    displayPercentage = 0;
+                    displayText = "N/A";
+                    barColor = 'transparent';
+                  } else if (isRestDay) {
+                    // --- NEW: If rest day, always show 100% ---
                     displayPercentage = 100;
                     displayText = "100%";
                     barColor = getBarColor(1); // 100% green
@@ -1389,7 +1434,7 @@ export default function ClientWorkouts() {
                             className="absolute left-0 top-0 h-2 rounded-full"
                             style={{
                               width: `${displayPercentage}%`,
-                              background: displayPercentage > 0 ? getBarColor(complianceData[i] || 0) : 'transparent',
+                              background: barColor,
                               transition: "width 0.3s, background 0.3s",
                             }}
                           />
@@ -1397,9 +1442,9 @@ export default function ClientWorkouts() {
                         <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
                           {isBeforeSignup ? (
                             <NABadge reason="Client was not signed up yet" />
-                          ) : complianceData[i] === -1 ? (
-                            <NABadge reason="Plan was created today. Compliance will be recorded starting tomorrow" />
-                          ) : isToday ? (
+                                                      ) : complianceData[i] === -1 ? (
+                              <NABadge reason="Plan added today - compliance starts tomorrow" />
+                            ) : isToday ? (
                             <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                           ) : isFuture ? (
                             <span className="text-gray-500">Pending</span>

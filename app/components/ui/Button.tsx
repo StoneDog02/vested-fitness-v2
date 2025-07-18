@@ -16,14 +16,22 @@ export default function Button({
   children,
   icon,
   className,
+  disabled,
   ...props
 }: ButtonProps) {
   const variantClasses = {
-    primary: "bg-primary hover:bg-primary text-white hover:text-black",
-    secondary: "bg-secondary hover:bg-secondary-light text-white",
-    outline:
-      "border border-primary text-primary hover:bg-primary hover:!text-black dark:border-primary dark:text-primary",
-    ghost: "text-primary hover:bg-gray-light dark:hover:bg-secondary-light",
+    primary: disabled 
+      ? "bg-gray-400 text-gray-600 cursor-not-allowed" 
+      : "bg-primary hover:bg-primary text-white hover:text-black",
+    secondary: disabled 
+      ? "bg-gray-400 text-gray-600 cursor-not-allowed" 
+      : "bg-secondary hover:bg-secondary-light text-white",
+    outline: disabled 
+      ? "border border-gray-400 text-gray-500 cursor-not-allowed" 
+      : "border border-primary text-primary hover:bg-primary hover:!text-black dark:border-primary dark:text-primary",
+    ghost: disabled 
+      ? "text-gray-500 cursor-not-allowed" 
+      : "text-primary hover:bg-gray-light dark:hover:bg-secondary-light",
   };
 
   const sizeClasses = {
@@ -36,6 +44,7 @@ export default function Button({
     <button
       className={`inline-flex items-center justify-center rounded-lg font-medium transition-colors duration-200
       ${variantClasses[variant]} ${sizeClasses[size]} ${className || ""}`}
+      disabled={disabled}
       {...props}
     >
       {icon && <span className="mr-2">{icon}</span>}

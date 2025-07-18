@@ -1,4 +1,4 @@
-import React, { ReactNode, useState, useRef, useLayoutEffect } from "react";
+import React, { ReactNode, useState, useRef, useEffect } from "react";
 import ReactDOM from "react-dom";
 
 interface TooltipProps {
@@ -12,6 +12,7 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
   const triggerRef = useRef<HTMLSpanElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<number | null>(null);
+  const [isClient, setIsClient] = useState(false);
 
   const show = () => {
     if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
@@ -21,7 +22,13 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
     timeoutRef.current = window.setTimeout(() => setVisible(false), 100);
   };
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isClient) return;
+    
     if (visible && triggerRef.current && tooltipRef.current) {
       const triggerRect = triggerRef.current.getBoundingClientRect();
       const tooltipRect = tooltipRef.current.getBoundingClientRect();
@@ -45,10 +52,10 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
       if (left + tooltipRect.width > window.innerWidth - 8) left = window.innerWidth - tooltipRect.width - 8;
       setPosition({ top, left, placement });
     }
-  }, [visible]);
+  }, [visible, isClient]);
 
   // Tooltip element
-  const tooltipEl = visible ? (
+  const tooltipEl = visible && isClient ? (
     ReactDOM.createPortal(
       <div
         ref={tooltipRef}

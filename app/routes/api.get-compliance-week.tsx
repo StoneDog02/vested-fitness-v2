@@ -24,7 +24,7 @@ export const loader = async ({ request }: { request: Request }) => {
   // Fetch workout plans for the client to check activation dates
   const { data: workoutPlans } = await supabase
     .from("workout_plans")
-    .select("id, activated_at")
+    .select("id, activated_at, created_at")
     .eq("user_id", clientId)
     .eq("is_template", false);
 
@@ -51,10 +51,18 @@ export const loader = async ({ request }: { request: Request }) => {
     });
     
     // Check if this is the first plan for this client (to handle immediate activation)
-    const isFirstPlan = workoutPlans && workoutPlans.length === 1;
+    // A plan is considered the first if it's the only plan or if it's the earliest created plan
+    const isFirstPlan = workoutPlans && activePlan && (
+      workoutPlans.length === 1 || 
+      workoutPlans.every(p => p.id === activePlan.id || p.activated_at === null) ||
+      workoutPlans.every(p => p.id === activePlan.id || new Date(p.created_at) > new Date(activePlan.created_at))
+    );
     
-    if (activePlan && (isFirstPlan || activePlan.activated_at?.slice(0, 10) === dayStr)) {
-      // Return -1 to indicate N/A for activation day
+    // Check if plan was created today (for immediate activation)
+    const isCreatedToday = activePlan && new Date(activePlan.created_at).toISOString().slice(0, 10) === dayStr;
+    
+    if (activePlan && (isFirstPlan || activePlan.activated_at?.slice(0, 10) === dayStr || isCreatedToday)) {
+      // Return -1 to indicate N/A for activation/creation day
       complianceData.push(-1);
       continue;
     }

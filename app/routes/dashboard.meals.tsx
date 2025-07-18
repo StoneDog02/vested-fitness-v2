@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { MetaFunction, LoaderFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
+import NABadge from "~/components/ui/NABadge";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
@@ -77,7 +78,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     // Get user
     const { data: user, error } = await supabase
       .from("users")
-      .select("id, name, email, avatar_url")
+      .select("id, name, email, avatar_url, created_at")
       .eq("auth_id", authId)
       .single();
 
@@ -99,12 +100,12 @@ export const loader: LoaderFunction = async ({ request }) => {
     let activeMealPlan = null;
     let debugPlan = null;
     if (allPlans && allPlans.length > 0) {
-      // First try to find an active plan activated before today
+      // First try to find an active plan (including activation day)
       let planToShow = allPlans.find(plan => {
         if (!plan.is_active) return false;
         if (!plan.activated_at) return true; // Legacy plans without activation date
         const activatedDate = dayjs(plan.activated_at).tz(userTz).format("YYYY-MM-DD");
-        return activatedDate < todayStr;
+        return activatedDate <= todayStr; // Show plans activated today or before (activation day will be handled by UI)
       });
       // If no active plan found, look for plan deactivated today (was active until today)
       if (!planToShow) {
@@ -194,6 +195,7 @@ export const loader: LoaderFunction = async ({ request }) => {
               name: user.name,
               email: user.email,
               avatar_url: user.avatar_url,
+              created_at: user.created_at,
             },
             mealPlan: activeMealPlan,
             mealCompletions,
@@ -211,6 +213,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         name: user.name,
         email: user.email,
         avatar_url: user.avatar_url,
+        created_at: user.created_at,
       },
       mealPlan: null,
       mealCompletions: [],
@@ -306,13 +309,15 @@ const generateCalendarData = () => {
       }),
       status: date > today ? "pending" : "missed",
       percentage: 0,
+      complianceValue: 0,
     };
   });
 };
 
 export default function Meals() {
-  const loaderData = useLoaderData<{ mealPlan: any }>();
+  const loaderData = useLoaderData<{ user: any; mealPlan: any; mealCompletions: any[] }>();
   const todaysMealPlan = loaderData?.mealPlan;
+  const user = loaderData?.user;
   const [dayOffset, setDayOffset] = useState(0);
   const [calendarData, setCalendarData] = useState(generateCalendarData());
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -336,6 +341,7 @@ export default function Meals() {
   const [weekCompletions, setWeekCompletions] = useState<Record<string, string[]>>({});
   const [currentDayMealPlan, setCurrentDayMealPlan] = useState(todaysMealPlan);
   const [isLoadingMeals, setIsLoadingMeals] = useState(false);
+  const [isActivationDay, setIsActivationDay] = useState(false);
 
   // Use refs to prevent unnecessary re-renders
   const isInitializedRef = useRef(false);
@@ -516,82 +522,63 @@ export default function Meals() {
     async function fetchWeekCompletions() {
       if (!isMountedRef.current) return;
       
-      if (!currentDayMealPlan || !currentDayMealPlan.meals || currentDayMealPlan.meals.length === 0) {
-        if (!isCancelled) {
-          setCalendarData(generateCalendarData());
-        }
-        return;
-      }
-      
       // Get start and end of week (Sunday to Saturday)
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const startOfWeek = new Date(today);
       startOfWeek.setDate(today.getDate() - today.getDay());
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 6);
-      const startStr = startOfWeek.toISOString().slice(0, 10);
-      const endStr = endOfWeek.toISOString().slice(0, 10);
       
       try {
-        const res = await fetch(`/api/get-meal-completions?start=${startStr}&end=${endStr}`);
+        // Use the compliance week API to get proper N/A handling
+        const res = await fetch(`/api/get-meal-compliance-week?weekStart=${startOfWeek.toISOString()}&clientId=${encodeURIComponent(loaderData?.user?.id || '')}`);
         if (res.ok && !isCancelled && isMountedRef.current) {
           const data = await res.json();
-          const completionsByDate = data.completionsByDate || {};
+          const complianceData = data.complianceData || [];
+          
+          // Check if today is activation day by looking at compliance data
+          const todayIndex = new Date().getDay();
+          const isTodayActivationDay = complianceData[todayIndex] === -1;
+          setIsActivationDay(isTodayActivationDay);
+          
           setCalendarData(
             Array.from({ length: 7 }).map((_, index) => {
               const date = new Date(startOfWeek);
               date.setDate(startOfWeek.getDate() + index);
               date.setHours(0, 0, 0, 0);
-              const dateStr = date.toISOString().slice(0, 10);
               const prettyDate = date.toLocaleDateString("en-US", {
                 weekday: "short",
                 month: "short",
                 day: "numeric",
               });
-              const completed = completionsByDate[dateStr] || [];
-              // Deduplicate completed meal IDs to prevent inflated percentages
-              const uniqueCompleted = [...new Set(completed)];
               
-
-              const total = currentDayMealPlan.meals.length;
-              const percentage = total > 0 ? Math.round((uniqueCompleted.length / total) * 100) : 0;
+              const complianceValue = complianceData[index] || 0;
+              const percentage = complianceValue === -1 ? 0 : Math.round(complianceValue * 100);
               const todayDate = new Date();
               todayDate.setHours(0, 0, 0, 0);
+              
               let status;
-              if (date.getTime() > todayDate.getTime()) {
+              if (complianceValue === -1) {
+                status = "na";
+              } else if (date.getTime() > todayDate.getTime()) {
                 status = "pending";
-                return {
-                  date: prettyDate,
-                  status,
-                  percentage: 0,
-                };
               } else if (date.getTime() === todayDate.getTime()) {
                 // Today
-                if (uniqueCompleted.length === 0) {
+                if (percentage === 0) {
                   status = "pending";
-                  return {
-                    date: prettyDate,
-                    status,
-                    percentage: 0,
-                  };
                 } else {
                   status = "completed";
-                  return {
-                    date: prettyDate,
-                    status,
-                    percentage,
-                  };
                 }
               } else {
                 // Past
                 status = "completed";
-                return {
-                  date: prettyDate,
-                  status,
-                  percentage,
-                };
               }
+              
+              return {
+                date: prettyDate,
+                status,
+                percentage,
+                complianceValue,
+              };
             })
           );
         }
@@ -665,7 +652,7 @@ export default function Meals() {
 
   // Handle meal submission - OPTIMISTIC UI with fetcher
   const handleSubmitMeals = useCallback(async () => {
-    if (isSubmitting || isDaySubmitted) return; // Prevent double submission
+    if (isSubmitting || isDaySubmitted || isActivationDay) return; // Prevent double submission and activation day submission
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -898,7 +885,7 @@ export default function Meals() {
                         <label
                           htmlFor={`meal-${meal.id}`}
                           className={`text-xs sm:text-sm ${
-                            isDaySubmitted
+                            isDaySubmitted || isActivationDay
                               ? "text-gray-dark dark:text-gray-light"
                               : "text-gray-dark dark:text-gray-light cursor-pointer"
                           } select-none`}
@@ -907,6 +894,9 @@ export default function Meals() {
                             ? "Loading..."
                             : (() => {
                                 const mealKey = createMealKey({ id: meal.id, name: meal.name, time: meal.time });
+                                if (isActivationDay) {
+                                  return "Activation Day";
+                                }
                                 return (isDaySubmitted && checkedMeals.includes(mealKey)) ||
                                        (!isDaySubmitted && checkedMeals.includes(mealKey))
                                   ? "Completed"
@@ -924,12 +914,12 @@ export default function Meals() {
                             const isChecked = isHydrated && checkedMeals.includes(mealKey);
                             return isChecked;
                           })()}
-                                                      onChange={() => {
-                              !isDaySubmitted && toggleMealCheck(meal);
-                            }}
-                          disabled={isDaySubmitted || !isHydrated}
+                          onChange={() => {
+                            !isDaySubmitted && !isActivationDay && toggleMealCheck(meal);
+                          }}
+                          disabled={isDaySubmitted || !isHydrated || isActivationDay}
                           className={`w-4 h-4 sm:w-5 sm:h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
-                            isDaySubmitted || !isHydrated
+                            isDaySubmitted || !isHydrated || isActivationDay
                               ? "cursor-not-allowed opacity-50"
                               : "cursor-pointer"
                           }`}
@@ -972,7 +962,7 @@ export default function Meals() {
               <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
                 <Button
                   variant="primary"
-                  disabled={isSubmitting || isDaySubmitted}
+                  disabled={isSubmitting || isDaySubmitted || isActivationDay}
                   onClick={handleSubmitMeals}
                 >
                   <span className="flex items-center gap-2">
@@ -1008,6 +998,33 @@ export default function Meals() {
                   </span>
                 </Button>
               </div>
+
+              {/* Activation Day Message */}
+              {isActivationDay && dayOffset === 0 && (
+                <div className="mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                  <div className="text-center text-gray-600 dark:text-gray-400 text-sm">
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="font-medium text-blue-600 dark:text-blue-400">Meal Plan Activated Today</span>
+                    </div>
+                    <p>Your meal plan is now active! You can view today's meals, but tracking will take effect tomorrow.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Show message for past/future days */}
+              {dayOffset !== 0 && (
+                <div className="mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                  <div className="text-center text-gray-600 dark:text-gray-400 text-sm">
+                    {dayOffset < 0 
+                      ? "This is a past day. Meal completion status is shown as recorded."
+                      : "This is a future day. You can only submit today's meals."
+                    }
+                  </div>
+                </div>
+              )}
 
               {/* Show error if present */}
               {submitError && (
@@ -1099,6 +1116,26 @@ export default function Meals() {
                   thisDate.setDate(startOfWeek.getDate() + index);
                   thisDate.setHours(0, 0, 0, 0);
                   const isToday = thisDate.getTime() === today.getTime();
+                  
+                  // Determine status and display
+                  let showNABadge = false;
+                  let naReason = "";
+                  
+                  // Check if this day is before the user signed up
+                  const signupDate = user?.created_at ? new Date(user.created_at) : null;
+                  if (signupDate) signupDate.setHours(0, 0, 0, 0);
+                  const isBeforeSignup = signupDate && thisDate < signupDate;
+                  
+                  if (isBeforeSignup) {
+                    showNABadge = true;
+                    naReason = "You weren't signed up yet!";
+                  } else if (day.status === "na") {
+                    showNABadge = true;
+                    naReason = day.complianceValue === -1 
+                      ? "Meal plan added today - compliance starts tomorrow"
+                      : "No meal plan has been created yet";
+                  }
+                  
                   return (
                     <div
                       key={index}
@@ -1110,7 +1147,9 @@ export default function Meals() {
                       <div className="flex items-center gap-2">
                         <span
                           className={`inline-block w-3 h-3 rounded-full ${
-                            day.status === "pending"
+                            isBeforeSignup || day.status === "na"
+                              ? "bg-gray-light dark:bg-davyGray"
+                              : day.status === "pending"
                               ? isToday
                                 ? "bg-green-500"
                                 : "bg-gray-light dark:bg-davyGray"
@@ -1121,15 +1160,17 @@ export default function Meals() {
                               : "bg-red-500"
                           }`}
                         ></span>
-                        <span className={`text-sm ${
-                          isToday && day.status === "pending"
-                            ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
-                            : 'text-gray-dark dark:text-gray-light'
-                        }`}>
-                          {day.status === "pending"
-                            ? "Pending"
-                            : `${day.percentage}%`}
-                        </span>
+                        {showNABadge ? (
+                          <NABadge reason={naReason} />
+                        ) : (
+                          <span className={`text-sm ${
+                            isToday && day.status === "pending"
+                              ? 'bg-primary/10 dark:bg-primary/20 text-primary px-3 py-1 rounded-md border border-primary/20'
+                              : 'text-gray-dark dark:text-gray-light'
+                          }`}>
+                            {day.status === "pending" ? "Pending" : `${day.percentage}%`}
+                          </span>
+                        )}
                       </div>
                     </div>
                   );

@@ -285,6 +285,16 @@ export default function ClientSupplements() {
   const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
   const [currentWeekStart, setCurrentWeekStart] = useState(weekStart);
 
+  // Initial API call to get real-time compliance data
+  useEffect(() => {
+    if (client?.id) {
+      const params = new URLSearchParams();
+      params.set("weekStart", currentWeekStart);
+      params.set("clientId", client.id);
+      complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
+    }
+  }, [client?.id, currentWeekStart]);
+
   // Update compliance data when fetcher returns
   useEffect(() => {
     if (complianceFetcher.data?.complianceData) {
@@ -504,10 +514,17 @@ export default function ClientSupplements() {
                     // Determine percentage for display
                     const percentage = Math.round((complianceData[i] || 0) * 100);
                     let displayPercentage = percentage;
+                    let barColor = 'transparent';
                     
-                    // For pending days, show 0% in the bar but don't show percentage text
-                    if (isFuture || (isToday && complianceData[i] === 0)) {
+                    // Handle N/A case (complianceData[i] === -1)
+                    if (complianceData[i] === -1) {
                       displayPercentage = 0;
+                      barColor = 'transparent';
+                    } else if (isFuture || (isToday && complianceData[i] === 0)) {
+                      displayPercentage = 0;
+                      barColor = 'transparent';
+                    } else if (displayPercentage > 0) {
+                      barColor = getBarColor(complianceData[i] || 0);
                     }
                     
                     return (
@@ -522,7 +539,7 @@ export default function ClientSupplements() {
                               className="absolute left-0 top-0 h-2 rounded-full"
                               style={{
                                 width: `${displayPercentage}%`,
-                                background: displayPercentage > 0 ? getBarColor(complianceData[i] || 0) : 'transparent',
+                                background: barColor,
                                 transition: "width 0.3s, background 0.3s",
                               }}
                             />
@@ -531,7 +548,7 @@ export default function ClientSupplements() {
                             {isBeforeSignup ? (
                               <NABadge reason="Client was not signed up yet" />
                             ) : complianceData[i] === -1 ? (
-                              <NABadge reason="Supplement was added today. Compliance will be recorded starting tomorrow" />
+                              <NABadge reason="Supplements added today - compliance starts tomorrow" />
                             ) : isToday ? (
                               <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                             ) : isFuture ? (

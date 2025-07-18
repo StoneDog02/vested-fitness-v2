@@ -32,12 +32,10 @@ const getActivationStatus = (plan: { isActive: boolean; activatedAt?: string }) 
   const todayStr = today.toISOString().slice(0, 10);
   const activatedDateStr = plan.activatedAt.slice(0, 10);
   
-  if (activatedDateStr < todayStr) {
-    return "Active"; // Activated before today
-  } else if (activatedDateStr === todayStr) {
-    return "Will Activate Tomorrow"; // Activated today
+  if (activatedDateStr <= todayStr) {
+    return "Active"; // Activated before today or today (immediate activation)
   } else {
-    return "Scheduled"; // Activated in the future (edge case)
+    return "Will Activate Tomorrow"; // Activated in the future
   }
 };
 
@@ -351,6 +349,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "setActive") {
     const planId = formData.get("planId") as string;
     const now = new Date().toISOString();
+    
+    // Check if this is the first meal plan for this client
+    const { data: existingPlans } = await supabase
+      .from("meal_plans")
+      .select("id, activated_at")
+      .eq("user_id", client.id)
+      .eq("is_template", false);
+    
+    const hasActivePlan = existingPlans?.some(plan => plan.activated_at !== null);
+    const isFirstPlan = !hasActivePlan;
+    
     // Set deactivated_at for all other active plans
     await supabase
       .from("meal_plans")
@@ -358,18 +367,31 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       .eq("user_id", client.id)
       .eq("is_active", true)
       .neq("id", planId);
-    // Set selected plan active and set activated_at if not already set
-    await supabase
-      .from("meal_plans")
-      .update({ is_active: true, activated_at: now, deactivated_at: null })
-      .eq("id", planId)
-      .is("activated_at", null);
-    // If already had activated_at, just set is_active true and deactivated_at null
-    await supabase
-      .from("meal_plans")
-      .update({ is_active: true, deactivated_at: null })
-      .eq("id", planId)
-      .not("activated_at", "is", null);
+    
+    // Set selected plan active
+    if (isFirstPlan) {
+      // For first plan, set it active immediately
+      await supabase
+        .from("meal_plans")
+        .update({ is_active: true, activated_at: now, deactivated_at: null })
+        .eq("id", planId);
+    } else {
+      // For subsequent plans, set activated_at to tomorrow
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0);
+      
+      await supabase
+        .from("meal_plans")
+        .update({ is_active: true, activated_at: tomorrow.toISOString(), deactivated_at: null })
+        .eq("id", planId);
+    }
+    
+    // Clear cache to force refresh of compliance data
+    if (params.clientId && clientMealsCache[params.clientId]) {
+      delete clientMealsCache[params.clientId];
+    }
+    
     return redirect(request.url);
   }
 
@@ -680,9 +702,20 @@ export default function ClientMeals() {
   // New: Real-time compliance data
   const [compliancePercentages, setCompliancePercentages] = useState<number[]>(initialComplianceData || [0,0,0,0,0,0,0]);
 
+  // Initial API call to get real-time compliance data
+  useEffect(() => {
+    if (client?.id) {
+      const params = new URLSearchParams();
+      params.set("weekStart", calendarStart.toISOString());
+      params.set("clientId", client.id);
+      complianceFetcher.load(`/api/get-meal-compliance-week?${params.toString()}`);
+    }
+  }, [client?.id, calendarStart]);
+
   // Update compliance data when fetcher returns
   useEffect(() => {
     if (complianceFetcher.data?.complianceData) {
+      console.log('[COACH-MEALS] Received compliance data:', complianceFetcher.data.complianceData);
       setCompliancePercentages(complianceFetcher.data.complianceData);
     }
   }, [complianceFetcher.data]);
@@ -1011,10 +1044,17 @@ export default function ClientMeals() {
                     const complianceValue = compliancePercentages[i] || 0;
                     const percentage = Math.round(complianceValue * 100);
                     let displayPercentage = percentage;
+                    let barColor = 'transparent';
                     
-                    // For pending days or N/A days, show 0% in the bar but don't show percentage text
-                    if (isFuture || (isToday && complianceValue === 0) || complianceValue === -1) {
+                    // Handle N/A case (complianceValue === -1)
+                    if (complianceValue === -1) {
                       displayPercentage = 0;
+                      barColor = 'transparent';
+                    } else if (isFuture || (isToday && complianceValue === 0)) {
+                      displayPercentage = 0;
+                      barColor = 'transparent';
+                    } else if (displayPercentage > 0) {
+                      barColor = getBarColor(complianceValue);
                     }
                     
                     const signupDate = client?.created_at ? new Date(client.created_at) : null;
@@ -1044,7 +1084,7 @@ export default function ClientMeals() {
                               className="absolute left-0 top-0 h-2 rounded-full"
                               style={{
                                 width: `${displayPercentage}%`,
-                                background: displayPercentage > 0 ? getBarColor(compliancePercentages[i] || 0) : 'transparent',
+                                background: barColor,
                                 transition: "width 0.3s, background 0.3s",
                               }}
                             />
@@ -1053,7 +1093,7 @@ export default function ClientMeals() {
                             {isBeforeSignup ? (
                               <NABadge reason="Client was not signed up yet" />
                             ) : complianceValue === -1 ? (
-                              <NABadge reason="Plan was created today. Compliance will be recorded starting tomorrow" />
+                              <NABadge reason="Plan added today - compliance starts tomorrow" />
                             ) : isToday ? (
                               <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                             ) : isFuture ? (

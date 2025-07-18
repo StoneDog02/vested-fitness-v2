@@ -38,10 +38,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Build complianceData: for each day, percent of supplements completed
   const complianceData: number[] = [];
+  const hasSupplementsAssigned = (supplementsRaw || []).length > 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
   for (let i = 0; i < 7; i++) {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
     const dayStr = day.toISOString().split('T')[0]; // Get YYYY-MM-DD format
+    day.setHours(0, 0, 0, 0);
+    
+    // If no supplements are assigned, handle past vs future days differently
+    if (!hasSupplementsAssigned) {
+      if (day < today) {
+        // Past days with no supplements: show -2 (no supplements assigned)
+        complianceData.push(-2);
+      } else if (day.getTime() === today.getTime()) {
+        // Today with no supplements: check if it's end of day (after 11:59 PM)
+        const now = new Date();
+        const endOfDay = new Date(today);
+        endOfDay.setHours(23, 59, 59, 999);
+        
+        if (now > endOfDay) {
+          // End of day with no supplements: show -2 (no supplements assigned)
+          complianceData.push(-2);
+        } else {
+          // Today during the day with no supplements: show 0 (pending - supplements might be added)
+          complianceData.push(0);
+        }
+      } else {
+        // Future days with no supplements: show 0 (pending - supplements might be added by coach)
+        complianceData.push(0);
+      }
+      continue;
+    }
     
     // Check if any supplements were created today
     const supplementsCreatedToday = (supplementsRaw || []).some(supplement => {

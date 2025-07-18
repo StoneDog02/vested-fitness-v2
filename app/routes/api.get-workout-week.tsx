@@ -5,6 +5,12 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export const loader: LoaderFunction = async ({ request }) => {
   const url = new URL(request.url);
@@ -66,7 +72,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     return json({ error: "User not found" }, { status: 404 });
   }
   
-  // Get active workout plan
+  // Get the active workout plan (API should show all active plans, let client handle activation logic)
   const { data: workoutPlans } = await supabase
     .from("workout_plans")
     .select("id, title, is_active")
@@ -120,6 +126,13 @@ export const loader: LoaderFunction = async ({ request }) => {
   const workouts: Record<string, any> = {};
   const completions: Record<string, string[]> = {};
   
+  // TODO: In the future, use user-specific timezone from profile if available
+  const userTz = "America/Denver"; // Northern Utah timezone
+  const currentDate = dayjs().tz(userTz).startOf("day");
+  const currentDateStr = currentDate.format("YYYY-MM-DD");
+  
+
+  
   // Process completions into a map by date
   const completionsByDate: Record<string, string[]> = {};
   (completionsRaw || []).forEach(completion => {
@@ -131,6 +144,8 @@ export const loader: LoaderFunction = async ({ request }) => {
     date.setDate(weekStart.getDate() + i);
     const dateStr = date.toISOString().slice(0, 10);
     const dayOfWeek = daysOfWeek[date.getDay()];
+    
+
     
     // Find the workout day for this day of week
     const dayPlan = (planDays || []).find(day => day.day_of_week === dayOfWeek);
@@ -197,6 +212,8 @@ export const loader: LoaderFunction = async ({ request }) => {
     completions[dateStr] = completionsByDate[dateStr] || [];
   }
 
+
+  
   return json({
     workouts,
     completions

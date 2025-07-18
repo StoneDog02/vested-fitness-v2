@@ -182,14 +182,14 @@ export const loader: LoaderFunction = async ({ request }) => {
           .eq("user_id", user.id)
           .eq("is_template", false)
           .order("activated_at", { ascending: false, nullsFirst: false });
-        // Determine which plan to show to the client (EXACTLY as in dashboard.meals.tsx):
+        // Determine which plan to show to the client (respecting activation day logic):
         let planToShow = null;
         if (allPlans && allPlans.length > 0) {
           planToShow = allPlans.find(plan => {
             if (!plan.is_active) return false;
             if (!plan.activated_at) return true; // Legacy plans without activation date
             const activatedDate = dayjs(plan.activated_at).tz(userTz).format("YYYY-MM-DD");
-            return activatedDate < todayStr;
+            return activatedDate < todayStr; // Only show plans activated before today (not on activation day)
           });
           // If no active plan found, look for plan deactivated today (was active until today)
           if (!planToShow) {
@@ -315,7 +315,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .limit(1),
           supabase
             .from("workout_plans")
-            .select("id, title, is_active")
+            .select("id, title, is_active, activated_at")
             .eq("user_id", user.id)
             .eq("is_active", true)
             .limit(1),
@@ -335,48 +335,60 @@ export const loader: LoaderFunction = async ({ request }) => {
         let workouts: DailyWorkout[] = [];
         let planName: string | null = null;
         let isRestDay: boolean | null = null;
-        if (activePlansResult.data && activePlansResult.data.length > 0) {
-          const workoutPlanId = activePlansResult.data[0].id;
-          const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-          const todayName = daysOfWeek[today.day()];
-          // Fetch today's workout day using string day name
-          const { data: daysRaw } = await supabase
-            .from("workout_days")
-            .select("id, workout_plan_id, day_of_week, is_rest, workout_name, workout_type")
-            .eq("workout_plan_id", workoutPlanId)
-            .eq("day_of_week", todayName)
-            .limit(1);
-          if (daysRaw && daysRaw.length > 0) {
-            const day = daysRaw[0];
-            planName = day.workout_name || null;
-            isRestDay = day.is_rest;
-            if (!day.is_rest) {
-              // Fetch all exercises for this day
-              const { data: exercisesRaw } = await supabase
-                .from("workout_exercises")
-                .select("id, workout_day_id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
-                .eq("workout_day_id", day.id)
-                .order("sequence_order", { ascending: true });
-              // Group exercises by group_type
-              const groupsMap: Record<string, any[]> = {};
-              (exercisesRaw || []).forEach((ex) => {
-                if (!groupsMap[ex.group_type]) groupsMap[ex.group_type] = [];
-                groupsMap[ex.group_type].push({
-                  id: ex.id,
-                  name: ex.exercise_name,
-                  description: ex.exercise_description,
-                  type: ex.group_type,
-                  videoUrl: ex.video_url,
-                  sets: ex.sets_data || [],
-                  notes: ex.group_notes,
+        
+        // Check if there's an active workout plan that was activated before today
+        if (workoutPlansResult.data && workoutPlansResult.data.length > 0) {
+          const workoutPlan = workoutPlansResult.data[0];
+          
+          // Only show workout if plan was activated before today (not on activation day)
+          let shouldShowWorkout = true;
+          if (workoutPlan.activated_at) {
+            const activatedDate = dayjs(workoutPlan.activated_at).tz(userTz).format("YYYY-MM-DD");
+            shouldShowWorkout = activatedDate < todayStr; // Only show if activated before today
+          }
+          
+          if (shouldShowWorkout) {
+            const workoutPlanId = workoutPlan.id;
+            const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+            const todayName = daysOfWeek[today.day()];
+            // Fetch today's workout day using string day name
+            const { data: daysRaw } = await supabase
+              .from("workout_days")
+              .select("id, workout_plan_id, day_of_week, is_rest, workout_name, workout_type")
+              .eq("workout_plan_id", workoutPlanId)
+              .eq("day_of_week", todayName)
+              .limit(1);
+            if (daysRaw && daysRaw.length > 0) {
+              const day = daysRaw[0];
+              planName = day.workout_name || null;
+              isRestDay = day.is_rest;
+              if (!day.is_rest) {
+                // Fetch all exercises for this day
+                const { data: exercisesRaw } = await supabase
+                  .from("workout_exercises")
+                  .select("id, workout_day_id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
+                  .eq("workout_day_id", day.id)
+                  .order("sequence_order", { ascending: true });
+                // Group exercises by group_type
+                const groupsMap: Record<string, any[]> = {};
+                (exercisesRaw || []).forEach((ex) => {
+                  if (!groupsMap[ex.group_type]) groupsMap[ex.group_type] = [];
+                  groupsMap[ex.group_type].push({
+                    id: ex.id,
+                    name: ex.exercise_name,
+                    description: ex.exercise_description,
+                    type: ex.group_type,
+                    videoUrl: ex.video_url,
+                    sets: ex.sets_data || [],
+                    notes: ex.group_notes,
+                  });
                 });
-              });
-              const groups = Object.entries(groupsMap).map(([type, exercises]) => ({
-                type: type as WorkoutType,
-                exercises,
-              }));
-              const exercisesFlat = groups.flatMap((g) => g.exercises);
-              workouts = [{
+                const groups = Object.entries(groupsMap).map(([type, exercises]) => ({
+                  type: type as WorkoutType,
+                  exercises,
+                }));
+                const exercisesFlat = groups.flatMap((g) => g.exercises);
+                workouts = [{
                 id: day.id,
                 name: day.workout_name,
                 exercises: exercisesFlat,
@@ -388,6 +400,7 @@ export const loader: LoaderFunction = async ({ request }) => {
               workouts = [];
             }
           }
+        }
         }
 
         // Build supplements
@@ -1137,7 +1150,7 @@ export default function Dashboard() {
             {/* Today's Workouts */}
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Today's Workouts</h3>
-              <div className="rounded-xl bg-white shadow p-6 space-y-6">
+              <div className="rounded-xl bg-white shadow p-6 space-y-6 max-h-96 overflow-y-auto">
                 {clientData?.workouts?.length === 0 && clientData?.planName && clientData?.isRestDay ? (
                   <div className="text-gray-500 text-center">
                     <div className="font-semibold mb-1">Workout - {dayjs().tz('America/Denver').format('dddd')}</div>

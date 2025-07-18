@@ -68,6 +68,13 @@ export const loader = async ({ request }: { request: Request }) => {
 
   const mealPlans = await fetchMealsAndFoods(mealPlansRaw || []);
 
+  // Get user's signup date
+  const { data: user } = await supabase
+    .from("users")
+    .select("created_at")
+    .eq("id", clientId)
+    .single();
+
   // Fetch all meal completions for this user for the week
   const { data: completionsRaw } = await supabase
     .from("meal_completions")
@@ -85,6 +92,17 @@ export const loader = async ({ request }: { request: Request }) => {
     day.setDate(weekStart.getDate() + i);
     day.setHours(0, 0, 0, 0);
     const dayStr = day.toISOString().slice(0, 10); // Get YYYY-MM-DD format
+    
+    // Check if this day is before the user signed up
+    if (user?.created_at) {
+      const signupDate = new Date(user.created_at);
+      signupDate.setHours(0, 0, 0, 0);
+      if (day < signupDate) {
+        // Return -1 to indicate N/A for days before signup
+        complianceData.push(-1);
+        continue;
+      }
+    }
     
     // Find the plan active on this day
     const plan = mealPlans.find((p) => {
@@ -107,10 +125,18 @@ export const loader = async ({ request }: { request: Request }) => {
     const isActivationDay = planActivatedStr === dayStr;
     
     // Check if this is the first plan for this client (to handle immediate activation)
-    const isFirstPlan = mealPlans.length === 1 || mealPlans.every(p => p.id === plan.id || p.activatedAt === null);
+    // A plan is considered the first if it's the only plan or if it's the earliest created plan
+    const isFirstPlan = mealPlans.length === 1 || 
+      mealPlans.every(p => p.id === plan.id || p.activatedAt === null) ||
+      mealPlans.every(p => p.id === plan.id || new Date(p.createdAt) > new Date(plan.createdAt));
     
-    if (isActivationDay || (isFirstPlan && planActivatedStr === dayStr)) {
-      // Return -1 to indicate N/A for activation day
+    // Check if plan was created today (for immediate activation)
+    const planCreated = new Date(plan.createdAt);
+    const planCreatedStr = planCreated.toISOString().slice(0, 10);
+    const isCreatedToday = planCreatedStr === dayStr;
+    
+    if (isActivationDay || (isFirstPlan && planActivatedStr === dayStr) || isCreatedToday) {
+      // Return -1 to indicate N/A for activation/creation day
       complianceData.push(-1);
       continue;
     }

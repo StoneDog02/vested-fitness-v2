@@ -60,7 +60,17 @@ export const loader: LoaderFunction = async ({ request }) => {
   }
 
   let recentActivity: Array<{ id: string; clientName: string; action: string; time: string }> = [];
-  let recentClients: Array<{ id: string; name: string; updated_at: string; created_at: string; role: string; status: string }> = [];
+  let recentClients: Array<{ 
+    id: string; 
+    name: string; 
+    updated_at: string; 
+    created_at: string; 
+    role: string; 
+    status: string;
+    activeMealPlan?: any;
+    activeWorkoutPlan?: any;
+    supplements?: any[];
+  }> = [];
   let weightChange = 0;
   const complianceCalendars = {};
 
@@ -86,12 +96,68 @@ export const loader: LoaderFunction = async ({ request }) => {
       .select("id, name, updated_at, created_at, role, status")
       .eq("coach_id", user.id)
       .eq("role", "client");
+    
     // Recent Clients: last 30 days
     const monthAgo = new Date();
     monthAgo.setDate(monthAgo.getDate() - 30);
-    recentClients = (clients ?? [])
+    const recentClientsBasic = (clients ?? [])
       .filter((c) => new Date(c.created_at) >= monthAgo)
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    
+    // Fetch setup data for ALL clients (to avoid empty array issues)
+    const allClientIds = (clients ?? []).map(c => c.id);
+    
+    if (allClientIds.length > 0) {
+      // Fetch active meal plans, workout plans, and supplements for all clients
+      const [mealPlansResult, workoutPlansResult, supplementsResult] = await Promise.all([
+        supabase
+          .from("meal_plans")
+          .select("id, user_id, title, is_active, activated_at")
+          .in("user_id", allClientIds)
+          .eq("is_active", true)
+          .eq("is_template", false),
+        supabase
+          .from("workout_plans")
+          .select("id, user_id, title, is_active, activated_at")
+          .in("user_id", allClientIds)
+          .eq("is_active", true),
+        supabase
+          .from("supplements")
+          .select("id, user_id, name")
+          .in("user_id", allClientIds)
+      ]);
+      
+      // Group plans and supplements by user
+      const mealPlansByUser: Record<string, any> = {};
+      (mealPlansResult.data ?? []).forEach((plan: any) => {
+        mealPlansByUser[plan.user_id] = plan;
+      });
+      
+      const workoutPlansByUser: Record<string, any> = {};
+      (workoutPlansResult.data ?? []).forEach((plan: any) => {
+        workoutPlansByUser[plan.user_id] = plan;
+      });
+      
+      const supplementsByUser: Record<string, any[]> = {};
+      (supplementsResult.data ?? []).forEach((supp: any) => {
+        if (!supplementsByUser[supp.user_id]) supplementsByUser[supp.user_id] = [];
+        supplementsByUser[supp.user_id].push(supp);
+      });
+      
+      // Build enhanced clients with setup data for ALL clients
+      const allClientsWithSetup = (clients ?? []).map(client => ({
+        ...client,
+        activeMealPlan: mealPlansByUser[client.id] || null,
+        activeWorkoutPlan: workoutPlansByUser[client.id] || null,
+        supplements: supplementsByUser[client.id] || []
+      }));
+      
+      // Filter to only recent clients for the return value
+      recentClients = allClientsWithSetup
+        .filter((c) => new Date(c.created_at) >= monthAgo)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+    
     // Recent Activity: today only (last 24 hours for more relevant activity)
     const now = new Date();
     const todayDateString = now.toISOString().slice(0, 10); // YYYY-MM-DD format
@@ -102,8 +168,8 @@ export const loader: LoaderFunction = async ({ request }) => {
     let workoutsToday = null;
     let mealsLogged = null;
     let suppsLogged = null;
-    if (clients && clients.length > 0) {
-      const clientIds = clients.map((c) => c.id);
+    if (recentClients && recentClients.length > 0) {
+      const clientIds = recentClients.map((c) => c.id);
       const { data: workouts } = await supabase
         .from("workout_completions")
         .select("id, user_id, completed_at, created_at")
@@ -129,7 +195,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     const activityGroups: { [key: string]: { clientName: string; action: string; count: number; latestTime: string; id: string } } = {};
     if (workoutsToday) {
       for (const w of workoutsToday) {
-        const client = clients ? clients.find((c: any) => c.id === w.user_id) : null;
+        const client = recentClients ? recentClients.find((c: any) => c.id === w.user_id) : null;
         const clientName = client ? client.name : "Unknown";
         const key = `${w.user_id}-workout`;
         if (!activityGroups[key]) {
@@ -150,7 +216,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     }
     if (mealsLogged) {
       for (const m of mealsLogged) {
-        const client = clients ? clients.find((c: any) => c.id === m.user_id) : null;
+        const client = recentClients ? recentClients.find((c: any) => c.id === m.user_id) : null;
         const clientName = client ? client.name : "Unknown";
         const key = `${m.user_id}-meal`;
         if (!activityGroups[key]) {
@@ -170,7 +236,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     }
     if (suppsLogged) {
       for (const s of suppsLogged) {
-        const client = clients ? clients.find((c: any) => c.id === s.user_id) : null;
+        const client = recentClients ? recentClients.find((c: any) => c.id === s.user_id) : null;
         const clientName = client ? client.name : "Unknown";
         const key = `${s.user_id}-supplement`;
         if (!activityGroups[key]) {
