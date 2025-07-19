@@ -12,6 +12,7 @@ import { Buffer } from "buffer";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
 import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
+import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
 import LineChart from "~/components/ui/LineChart";
 import { ResponsiveContainer } from "recharts";
 import dayjs from "dayjs";
@@ -63,6 +64,12 @@ interface CheckIn {
   id: string;
   notes: string;
   created_at: string;
+  video_url?: string;
+  audio_url?: string;
+  recording_type?: 'video' | 'audio' | 'text' | 'video_audio';
+  recording_duration?: number;
+  recording_thumbnail_url?: string;
+  transcript?: string;
 }
 
 const CHECKINS_PER_PAGE = 10;
@@ -109,6 +116,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({ updates: [], goal: "Build muscle and increase strength", checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [] });
   }
 
+  // Clear cache for this user to force fresh data
+  delete coachAccessCache[authId];
+
   // Check cache (per user)
   if (coachAccessCache[authId] && coachAccessCache[authId].expires > Date.now()) {
     return json(coachAccessCache[authId].data);
@@ -142,7 +152,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .order("created_at", { ascending: false }),
     supabase
       .from("check_ins")
-      .select("id, notes, created_at")
+      .select("id, notes, created_at, video_url, audio_url, recording_type, recording_duration, recording_thumbnail_url, transcript")
       .eq("client_id", clientUser.id)
       .order("created_at", { ascending: false }),
     supabase
@@ -152,7 +162,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .order("logged_at", { ascending: true }),
     supabase
       .from("check_ins")
-      .select("id, notes, created_at")
+      .select("id, notes, created_at, video_url, audio_url, recording_type, recording_duration, recording_thumbnail_url, transcript")
       .eq("client_id", clientUser.id)
       .order("created_at", { ascending: false })
       .range(checkInOffset, checkInOffset + CHECKINS_PER_PAGE - 1),
@@ -206,16 +216,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let lastWeekNote = null;
 
   if (checkIns && checkIns.length > 0) {
-    // Find the most recent check-in for this week
-    thisWeekNote = checkIns.find((ci: CheckIn) => {
+    // Find check-ins for this week
+    const thisWeekCheckIns = checkIns.filter((ci: CheckIn) => {
       const created = new Date(ci.created_at);
       return created >= thisWeekStart && created < nextWeekStart;
     });
-    // Find the most recent check-in for last week
-    lastWeekNote = checkIns.find((ci: CheckIn) => {
+    
+    // Find check-ins for last week
+    const lastWeekCheckIns = checkIns.filter((ci: CheckIn) => {
       const created = new Date(ci.created_at);
       return created >= lastWeekStart && created < thisWeekStart;
     });
+    
+    // For this week: prioritize check-ins with recordings, then most recent
+    if (thisWeekCheckIns.length > 0) {
+      const withRecording = thisWeekCheckIns.find(ci => ci.video_url || ci.audio_url);
+      thisWeekNote = withRecording || thisWeekCheckIns[0]; // Use recording if available, otherwise most recent
+    }
+    
+    // For last week: prioritize check-ins with recordings, then most recent
+    if (lastWeekCheckIns.length > 0) {
+      const withRecording = lastWeekCheckIns.find(ci => ci.video_url || ci.audio_url);
+      lastWeekNote = withRecording || lastWeekCheckIns[0]; // Use recording if available, otherwise most recent
+    }
   }
 
   // Filter updates to only those from the last 7 days
@@ -247,8 +270,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     paginatedMealLogs,
     hasMorePaginatedMealLogs,
   };
-  // Cache result
-  coachAccessCache[authId] = { data: result, expires: Date.now() + 30_000 };
+  // Cache result (reduced to 5 seconds for more responsive updates)
+  coachAccessCache[authId] = { data: result, expires: Date.now() + 5_000 };
   return json(result);
 };
 
@@ -259,11 +282,28 @@ export default function CoachAccess() {
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [newWeight, setNewWeight] = useState("");
   const [weightLogs, setWeightLogs] = useState(initialWeightLogs);
+  const [showMediaPlayer, setShowMediaPlayer] = useState(false);
+  const [currentMedia, setCurrentMedia] = useState<{
+    videoUrl?: string;
+    audioUrl?: string;
+    recordingType?: 'video' | 'audio' | 'text' | 'video_audio';
+    title: string;
+    transcript?: string;
+  } | null>(null);
 
   // Pagination state for check-ins
   const [checkInPage, setCheckInPage] = useState(1);
   const [checkInHistory, setCheckInHistory] = useState(
-    paginatedCheckIns.map((ci: CheckIn) => ({ id: ci.id, date: ci.created_at, notes: ci.notes }))
+    paginatedCheckIns.map((ci: CheckIn) => ({ 
+      id: ci.id, 
+      date: ci.created_at, 
+      notes: ci.notes,
+      video_url: ci.video_url,
+      audio_url: ci.audio_url,
+      recording_type: ci.recording_type,
+      recording_duration: ci.recording_duration,
+      recording_thumbnail_url: ci.recording_thumbnail_url
+    }))
   );
   const [hasMoreCheckIns, setHasMoreCheckIns] = useState(hasMorePaginatedCheckIns);
   const checkInFetcher = useFetcher();
@@ -280,7 +320,16 @@ export default function CoachAccess() {
   useEffect(() => {
     if (showCheckInHistory) {
       setCheckInPage(1);
-      setCheckInHistory(paginatedCheckIns.map((ci: CheckIn) => ({ id: ci.id, date: ci.created_at, notes: ci.notes })));
+      setCheckInHistory(paginatedCheckIns.map((ci: CheckIn) => ({ 
+        id: ci.id, 
+        date: ci.created_at, 
+        notes: ci.notes,
+        video_url: ci.video_url,
+        audio_url: ci.audio_url,
+        recording_type: ci.recording_type,
+        recording_duration: ci.recording_duration,
+        recording_thumbnail_url: ci.recording_thumbnail_url
+      })));
       setHasMoreCheckIns(hasMorePaginatedCheckIns);
     }
     if (showUpdateHistory) {
@@ -294,9 +343,18 @@ export default function CoachAccess() {
   useEffect(() => {
     if (checkInFetcher.data && checkInFetcher.state === "idle") {
       const { paginatedCheckIns: newCheckIns = [], hasMorePaginatedCheckIns: moreCheckIns = false } = checkInFetcher.data as any;
-      setCheckInHistory((prev: { id: string; date: string; notes: string; formattedDate?: string; weekRange?: string; }[]) => [
+      setCheckInHistory((prev: { id: string; date: string; notes: string; formattedDate?: string; weekRange?: string; video_url?: string; audio_url?: string; recording_type?: string; recording_duration?: number; recording_thumbnail_url?: string; }[]) => [
         ...prev,
-        ...newCheckIns.map((ci: CheckIn) => ({ id: ci.id, date: ci.created_at, notes: ci.notes })),
+        ...newCheckIns.map((ci: CheckIn) => ({ 
+          id: ci.id, 
+          date: ci.created_at, 
+          notes: ci.notes,
+          video_url: ci.video_url,
+          audio_url: ci.audio_url,
+          recording_type: ci.recording_type,
+          recording_duration: ci.recording_duration,
+          recording_thumbnail_url: ci.recording_thumbnail_url
+        })),
       ]);
       setHasMoreCheckIns(moreCheckIns);
     }
@@ -431,9 +489,40 @@ export default function CoachAccess() {
                     <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
                       {new Date(checkInNotes.lastWeek.created_at).toLocaleDateString()}
                     </div>
-                    <p className="text-sm text-gray-dark dark:text-gray-light">
-                      {checkInNotes.lastWeek.notes}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-gray-dark dark:text-gray-light">
+                        {checkInNotes.lastWeek.notes.length > 50 
+                          ? `${checkInNotes.lastWeek.notes.substring(0, 50)}...` 
+                          : checkInNotes.lastWeek.notes}
+                      </p>
+                      {(checkInNotes.lastWeek.video_url || checkInNotes.lastWeek.audio_url) && (
+                        <button
+                          onClick={() => {
+                            const videoUrl = checkInNotes.lastWeek.video_url;
+                            const audioUrl = checkInNotes.lastWeek.audio_url;
+                            const recordingType = checkInNotes.lastWeek.recording_type;
+                            const transcript = checkInNotes.lastWeek.transcript;
+                            if (videoUrl || audioUrl) {
+                              setCurrentMedia({
+                                videoUrl,
+                                audioUrl,
+                                recordingType,
+                                title: "Check In Recording",
+                                transcript
+                              });
+                              setShowMediaPlayer(true);
+                            }
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary/80 transition-colors"
+                          title="Play recording"
+                        >
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                          </svg>
+                          Play
+                        </button>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <p className="text-sm text-gray-dark dark:text-gray-light">No Check In Notes for last week.</p>
@@ -448,9 +537,40 @@ export default function CoachAccess() {
                     <div className="text-xs text-gray-dark dark:text-gray-light mb-1">
                       {new Date(checkInNotes.thisWeek.created_at).toLocaleDateString()}
                     </div>
-                    <p className="text-sm text-gray-dark dark:text-gray-light">
-                      {checkInNotes.thisWeek.notes}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-gray-dark dark:text-gray-light">
+                        {checkInNotes.thisWeek.notes.length > 50 
+                          ? `${checkInNotes.thisWeek.notes.substring(0, 50)}...` 
+                          : checkInNotes.thisWeek.notes}
+                      </p>
+                      {(checkInNotes.thisWeek.video_url || checkInNotes.thisWeek.audio_url) && (
+                          <button
+                            onClick={() => {
+                              const videoUrl = checkInNotes.thisWeek.video_url;
+                              const audioUrl = checkInNotes.thisWeek.audio_url;
+                              const recordingType = checkInNotes.thisWeek.recording_type;
+                              const transcript = checkInNotes.thisWeek.transcript;
+                              if (videoUrl || audioUrl) {
+                                setCurrentMedia({
+                                  videoUrl,
+                                  audioUrl,
+                                  recordingType,
+                                  title: "Check In Recording",
+                                  transcript
+                                });
+                                setShowMediaPlayer(true);
+                              }
+                            }}
+                            className="flex items-center gap-1 px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary/80 transition-colors"
+                            title="Play recording"
+                          >
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                            </svg>
+                            Play
+                          </button>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <p className="text-sm text-gray-dark dark:text-gray-light">No Check In Notes for this week yet</p>
@@ -466,6 +586,22 @@ export default function CoachAccess() {
             hasMore={hasMoreCheckIns}
             emptyMessage="No history yet."
           />
+
+          {/* Media Player Modal */}
+          {currentMedia && (
+            <MediaPlayerModal
+              isOpen={showMediaPlayer}
+              onClose={() => {
+                setShowMediaPlayer(false);
+                setCurrentMedia(null);
+              }}
+              videoUrl={currentMedia.videoUrl}
+              audioUrl={currentMedia.audioUrl}
+              recordingType={currentMedia.recordingType}
+              title={currentMedia.title}
+              transcript={currentMedia.transcript}
+            />
+          )}
         </div>
 
         {/* Weight Chart */}

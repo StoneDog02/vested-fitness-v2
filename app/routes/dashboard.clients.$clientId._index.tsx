@@ -6,6 +6,7 @@ import AddMessageModal from "~/components/coach/AddMessageModal";
 import AddCheckInModal from "~/components/coach/AddCheckInModal";
 import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
 import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
+import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
 import { useState, useEffect } from "react";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
@@ -90,6 +91,12 @@ interface CheckIn {
   id: string;
   notes: string;
   created_at: string;
+  video_url?: string;
+  audio_url?: string;
+  recording_type?: 'video' | 'audio' | 'text' | 'video_audio';
+  recording_duration?: number;
+  recording_thumbnail_url?: string;
+  transcript?: string;
 }
 
 interface WeightLog {
@@ -102,6 +109,12 @@ interface CheckInNote {
   id: string;
   date: string;
   notes: string;
+  video_url?: string;
+  audio_url?: string;
+  recording_type?: 'video' | 'audio' | 'text' | 'video_audio';
+  recording_duration?: number;
+  recording_thumbnail_url?: string;
+  transcript?: string;
 }
 
 interface LoaderData {
@@ -250,7 +263,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     // Paginated check-ins
     supabase
       .from("check_ins")
-      .select("id, notes, created_at", { count: "exact" })
+      .select("id, notes, created_at, video_url, audio_url, recording_type, recording_duration, recording_thumbnail_url, transcript", { count: "exact" })
       .eq("client_id", client.id)
       .order("created_at", { ascending: false })
       .range(checkInsOffset, checkInsOffset + checkInsPageSize - 1),
@@ -568,13 +581,31 @@ export default function ClientDetails() {
   const [showAddCheckIn, setShowAddCheckIn] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showUpdateHistory, setShowUpdateHistory] = useState(false);
+  const [showMediaPlayer, setShowMediaPlayer] = useState(false);
+  const [currentMedia, setCurrentMedia] = useState<{
+    videoUrl?: string;
+    audioUrl?: string;
+    recordingType?: 'video' | 'audio' | 'text' | 'video_audio';
+    title: string;
+    transcript?: string;
+  } | null>(null);
   const fetcher = useFetcher();
 
   // Local state for updates, checkIns, and supplements
   const [updates, setUpdates] = useState<Update[]>(loaderUpdates); // Already filtered on server
   const [allUpdates, setAllUpdates] = useState<Update[]>(loaderAllUpdates); // All updates for history
   const [checkIns, setCheckIns] = useState<CheckInNote[]>(
-    ((loaderCheckIns as CheckIn[]) || []).map((c) => ({ id: c.id, date: c.created_at, notes: c.notes }))
+    ((loaderCheckIns as CheckIn[]) || []).map((c) => ({ 
+      id: c.id, 
+      date: c.created_at, 
+      notes: c.notes,
+      video_url: c.video_url,
+      audio_url: c.audio_url,
+      recording_type: c.recording_type,
+      recording_duration: c.recording_duration,
+      recording_thumbnail_url: c.recording_thumbnail_url,
+      transcript: c.transcript
+    }))
   );
   const [supplementsState, setSupplements] = useState<Supplement[]>(supplements);
 
@@ -609,12 +640,22 @@ export default function ClientDetails() {
   const lastWeekEnd = now.subtract(1, 'week').endOf('week').valueOf();
   
   // Find check-ins that fall exactly within this week's date range
-  const thisWeekCheckIn = sortedCheckIns.find(checkIn => {
+  const thisWeekCheckIns = sortedCheckIns.filter(checkIn => {
     const checkInTime = dayjs(checkIn.date).valueOf();
     return checkInTime >= thisWeekStart && checkInTime <= thisWeekEnd;
-  }) || null;
+  });
   
   // Find check-ins that fall exactly within last week's date range
+  const lastWeekCheckIns = sortedCheckIns.filter(checkIn => {
+    const checkInTime = dayjs(checkIn.date).valueOf();
+    return checkInTime >= lastWeekStart && checkInTime <= lastWeekEnd;
+  });
+  
+  // For this week: prioritize check-ins with recordings, then most recent
+  const thisWeekCheckIn = thisWeekCheckIns.length > 0 ? 
+    (thisWeekCheckIns.find(ci => ci.video_url || ci.audio_url) || thisWeekCheckIns[0]) : null;
+  
+  // For last week: prioritize check-ins with recordings, then most recent
   // But only show them if we're within 1 day of the end of that week
   const lastWeekCheckIn = (() => {
     const oneDayAfterLastWeek = dayjs(lastWeekEnd).add(1, 'day').valueOf();
@@ -624,10 +665,8 @@ export default function ClientDetails() {
       return null;
     }
     
-    return sortedCheckIns.find(checkIn => {
-      const checkInTime = dayjs(checkIn.date).valueOf();
-      return checkInTime >= lastWeekStart && checkInTime <= lastWeekEnd;
-    }) || null;
+    return lastWeekCheckIns.length > 0 ? 
+      (lastWeekCheckIns.find(ci => ci.video_url || ci.audio_url) || lastWeekCheckIns[0]) : null;
   })();
 
   // Debug logging to help identify the issue
@@ -647,11 +686,40 @@ export default function ClientDetails() {
         date: c.date, 
         timestamp: dayjs(c.date).valueOf(),
         notes: c.notes.substring(0, 20),
+        video_url: c.video_url,
+        audio_url: c.audio_url,
+        recording_type: c.recording_type,
         inThisWeek: dayjs(c.date).valueOf() >= thisWeekStart && dayjs(c.date).valueOf() <= thisWeekEnd,
         inLastWeek: dayjs(c.date).valueOf() >= lastWeekStart && dayjs(c.date).valueOf() <= lastWeekEnd
       })),
-      thisWeekCheckIn: thisWeekCheckIn ? { date: thisWeekCheckIn.date, notes: thisWeekCheckIn.notes.substring(0, 20) } : null,
-      lastWeekCheckIn: lastWeekCheckIn ? { date: lastWeekCheckIn.date, notes: lastWeekCheckIn.notes.substring(0, 20) } : null,
+      thisWeekCheckIns: thisWeekCheckIns.map(c => ({ 
+        date: c.date, 
+        notes: c.notes.substring(0, 20),
+        video_url: c.video_url,
+        audio_url: c.audio_url,
+        recording_type: c.recording_type
+      })),
+      lastWeekCheckIns: lastWeekCheckIns.map(c => ({ 
+        date: c.date, 
+        notes: c.notes.substring(0, 20),
+        video_url: c.video_url,
+        audio_url: c.audio_url,
+        recording_type: c.recording_type
+      })),
+      thisWeekCheckIn: thisWeekCheckIn ? { 
+        date: thisWeekCheckIn.date, 
+        notes: thisWeekCheckIn.notes.substring(0, 20),
+        video_url: thisWeekCheckIn.video_url,
+        audio_url: thisWeekCheckIn.audio_url,
+        recording_type: thisWeekCheckIn.recording_type
+      } : null,
+      lastWeekCheckIn: lastWeekCheckIn ? { 
+        date: lastWeekCheckIn.date, 
+        notes: lastWeekCheckIn.notes.substring(0, 20),
+        video_url: lastWeekCheckIn.video_url,
+        audio_url: lastWeekCheckIn.audio_url,
+        recording_type: lastWeekCheckIn.recording_type
+      } : null,
     });
   }
 
@@ -721,11 +789,15 @@ export default function ClientDetails() {
   }, [currentWeekStart]);
 
   // Add check-in handler (submits to API, then updates state)
-  const handleAddCheckIn = (notes: string) => {
+  const handleAddCheckIn = (notes: string, recordingData?: { blob: Blob; duration: number; type: 'video' | 'audio' }) => {
+    // If there's recording data, it will be handled by the modal's upload process
+    // We just need to handle the text notes here
+    if (notes.trim()) {
     fetcher.submit(
       { intent: "addCheckIn", notes },
       { method: "post" }
     );
+    }
     setShowAddCheckIn(false);
   };
 
@@ -934,9 +1006,40 @@ export default function ClientDetails() {
                     <div className="flex justify-between items-center mb-1">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-500">{formatDateMMDDYYYY(lastWeekCheckIn.date)}</span>
-                        <p className="text-sm text-gray-dark dark:text-gray-light mb-0">
-                          {lastWeekCheckIn.notes}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-gray-dark dark:text-gray-light mb-0">
+                            {lastWeekCheckIn.notes.length > 50 
+                              ? `${lastWeekCheckIn.notes.substring(0, 50)}...` 
+                              : lastWeekCheckIn.notes}
+                          </p>
+                          {(lastWeekCheckIn.video_url || lastWeekCheckIn.audio_url) && (
+                            <button
+                              onClick={() => {
+                                const videoUrl = lastWeekCheckIn.video_url;
+                                const audioUrl = lastWeekCheckIn.audio_url;
+                                const recordingType = lastWeekCheckIn.recording_type;
+                                const transcript = lastWeekCheckIn.transcript;
+                                if (videoUrl || audioUrl) {
+                                  setCurrentMedia({
+                                    videoUrl,
+                                    audioUrl,
+                                    recordingType,
+                                    title: "Check In Recording",
+                                    transcript
+                                  });
+                                  setShowMediaPlayer(true);
+                                }
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary/80 transition-colors"
+                              title="Play recording"
+                            >
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                              </svg>
+                              Play
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <button
                         className="text-xs text-red-500 hover:underline ml-4"
@@ -958,9 +1061,40 @@ export default function ClientDetails() {
                     <div className="flex justify-between items-center mb-1">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-500">{formatDateMMDDYYYY(thisWeekCheckIn.date)}</span>
-                        <p className="text-sm text-gray-dark dark:text-gray-light mb-0">
-                          {thisWeekCheckIn.notes}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-gray-dark dark:text-gray-light mb-0">
+                            {thisWeekCheckIn.notes.length > 50 
+                              ? `${thisWeekCheckIn.notes.substring(0, 50)}...` 
+                              : thisWeekCheckIn.notes}
+                          </p>
+                          {(thisWeekCheckIn.video_url || thisWeekCheckIn.audio_url) && (
+                            <button
+                              onClick={() => {
+                                const videoUrl = thisWeekCheckIn.video_url;
+                                const audioUrl = thisWeekCheckIn.audio_url;
+                                const recordingType = thisWeekCheckIn.recording_type;
+                                const transcript = thisWeekCheckIn.transcript;
+                                if (videoUrl || audioUrl) {
+                                  setCurrentMedia({
+                                    videoUrl,
+                                    audioUrl,
+                                    recordingType,
+                                    title: "Check In Recording",
+                                    transcript
+                                  });
+                                  setShowMediaPlayer(true);
+                                }
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary/80 transition-colors"
+                              title="Play recording"
+                            >
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                              </svg>
+                              Play
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <button
                         className="text-xs text-red-500 hover:underline ml-4"
@@ -1006,6 +1140,7 @@ export default function ClientDetails() {
           onClose={() => setShowAddCheckIn(false)}
           onSubmit={handleAddCheckIn}
           lastWeekNotes={thisWeekCheckIn ? thisWeekCheckIn.notes : ""}
+          clientId={client.id}
         />
 
         <CheckInHistoryModal
@@ -1020,6 +1155,22 @@ export default function ClientDetails() {
           hasMore={historyHasMore}
           emptyMessage="No history yet."
         />
+
+        {/* Media Player Modal */}
+        {currentMedia && (
+          <MediaPlayerModal
+            isOpen={showMediaPlayer}
+            onClose={() => {
+              setShowMediaPlayer(false);
+              setCurrentMedia(null);
+            }}
+            videoUrl={currentMedia.videoUrl}
+            audioUrl={currentMedia.audioUrl}
+            recordingType={currentMedia.recordingType}
+            title={currentMedia.title}
+            transcript={currentMedia.transcript}
+          />
+        )}
       </div>
     </ClientDetailLayout>
   );
