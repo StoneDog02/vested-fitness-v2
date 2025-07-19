@@ -6,7 +6,8 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "sm" | "md" | "lg" | "xl" | "full";
+  hideCloseButton?: boolean;
 }
 
 export default function Modal({
@@ -15,6 +16,7 @@ export default function Modal({
   title,
   children,
   size = "md",
+  hideCloseButton = false,
 }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +44,7 @@ export default function Modal({
     md: "max-w-lg",
     lg: "max-w-2xl",
     xl: "max-w-4xl",
+    full: "max-w-none w-full h-full",
   };
 
   if (!isOpen) return null;
@@ -64,37 +67,39 @@ export default function Modal({
       >
         <div
           ref={modalRef}
-          className={`${sizeClasses[size]} w-full bg-white dark:bg-night rounded-xl shadow-lg transform transition-all duration-300 ease-in-out flex flex-col max-h-[90vh]`}
+          className={`${sizeClasses[size]} w-full bg-white dark:bg-night rounded-xl shadow-lg transform transition-all duration-300 ease-in-out flex flex-col ${size === 'full' ? 'h-full' : 'max-h-[90vh]'}`}
         >
-          <div className="flex justify-between items-center p-5 border-b border-gray-light dark:border-davyGray shrink-0">
-            <h3
-              id="modal-title"
-              className="text-lg font-semibold text-secondary dark:text-alabaster"
-            >
-              {title}
-            </h3>
-            <button
-              onClick={onClose}
-              className="text-gray-dark hover:text-secondary dark:text-gray-light dark:hover:text-alabaster transition-colors duration-200"
-              aria-label="Close"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
+          {!hideCloseButton && (
+            <div className="flex justify-between items-center p-5 border-b border-gray-light dark:border-davyGray shrink-0">
+              <h3
+                id="modal-title"
+                className="text-lg font-semibold text-secondary dark:text-alabaster"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                ></path>
-              </svg>
-            </button>
-          </div>
-          <div className="p-5 overflow-y-auto">{children}</div>
+                {title}
+              </h3>
+              <button
+                onClick={onClose}
+                className="text-gray-dark hover:text-secondary dark:text-gray-light dark:hover:text-alabaster transition-colors duration-200"
+                aria-label="Close"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  ></path>
+                </svg>
+              </button>
+            </div>
+          )}
+          <div className={`${size === 'full' ? 'flex-1' : 'p-5'} overflow-y-auto`}>{children}</div>
         </div>
       </div>
     </>,

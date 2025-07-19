@@ -264,7 +264,7 @@ export default function ClientsIndex() {
           <div className="text-gray-500 dark:text-gray-light">No clients found.</div>
         )}
         {filteredClients.map((client) => {
-          console.log("Client in list:", client);
+  
           return (
             <Link
               key={client.id}

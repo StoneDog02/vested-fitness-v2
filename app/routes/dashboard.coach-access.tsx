@@ -13,6 +13,8 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
 import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
 import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
+import TakeProgressPhotoModal from "~/components/coach/TakeProgressPhotoModal";
+import ProgressPhotosModal from "~/components/coach/ProgressPhotosModal";
 import LineChart from "~/components/ui/LineChart";
 import { ResponsiveContainer } from "recharts";
 import dayjs from "dayjs";
@@ -113,7 +115,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
   if (!authId) {
-    return json({ updates: [], goal: "Build muscle and increase strength", checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [] });
+    return json({ updates: [], goal: "Build muscle and increase strength", checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [], progressPhotos: [] });
   }
 
   // Clear cache for this user to force fresh data
@@ -131,7 +133,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     .eq("auth_id", authId)
     .single();
   if (!clientUser) {
-    return json({ updates: [], goal: "Build muscle and increase strength", checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [] });
+    return json({ updates: [], goal: "Build muscle and increase strength", checkInNotes: { thisWeek: null, lastWeek: null }, allCheckIns: [], allUpdates: [], weightLogs: [], mealLogs: [], paginatedMealLogs: [], progressPhotos: [] });
   }
 
   // Parse page params for check-in, update, and meal log pagination
@@ -143,7 +145,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const mealLogPage = parseInt(url.searchParams.get("mealLogPage") || "1", 10);
   const mealLogOffset = (mealLogPage - 1) * MEAL_LOGS_PER_PAGE;
 
-  // Fetch coach_updates, check_ins, weight_logs, and meal logs in parallel
+  // Fetch coach_updates, check_ins, weight_logs, meal logs, and progress photos in parallel
   const [updatesRes, checkInsRes, weightLogsRes, paginatedCheckInsRes, paginatedUpdatesRes, mealLogsRes, paginatedMealLogsRes] = await Promise.all([
     supabase
       .from("coach_updates")
@@ -183,6 +185,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .eq("user_id", clientUser.id)
       .order("completed_at", { ascending: false })
       .range(mealLogOffset, mealLogOffset + MEAL_LOGS_PER_PAGE - 1),
+
   ]);
 
   const updates = updatesRes.data || [];
@@ -269,6 +272,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     mealLogs,
     paginatedMealLogs,
     hasMorePaginatedMealLogs,
+    clientId: clientUser.id,
   };
   // Cache result (reduced to 5 seconds for more responsive updates)
   coachAccessCache[authId] = { data: result, expires: Date.now() + 5_000 };
@@ -276,7 +280,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function CoachAccess() {
-  const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [], paginatedCheckIns = [], hasMorePaginatedCheckIns = false, paginatedUpdates = [], hasMorePaginatedUpdates = false, mealLogs = [], paginatedMealLogs = [], hasMorePaginatedMealLogs = false } = useLoaderData<typeof loader>();
+  const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [], paginatedCheckIns = [], hasMorePaginatedCheckIns = false, paginatedUpdates = [], hasMorePaginatedUpdates = false, mealLogs = [], paginatedMealLogs = [], hasMorePaginatedMealLogs = false, clientId } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher();
   const [showUpdateHistory, setShowUpdateHistory] = useState(false);
   const [showCheckInHistory, setShowCheckInHistory] = useState(false);
   const [showAddWeight, setShowAddWeight] = useState(false);
@@ -290,6 +295,8 @@ export default function CoachAccess() {
     title: string;
     transcript?: string;
   } | null>(null);
+  const [showTakePhoto, setShowTakePhoto] = useState(false);
+  const [showProgressPhotos, setShowProgressPhotos] = useState(false);
 
   // Pagination state for check-ins
   const [checkInPage, setCheckInPage] = useState(1);
@@ -587,6 +594,8 @@ export default function CoachAccess() {
             emptyMessage="No history yet."
           />
 
+
+
           {/* Media Player Modal */}
           {currentMedia && (
             <MediaPlayerModal
@@ -609,6 +618,20 @@ export default function CoachAccess() {
           <Card title={
             <div className="flex items-center justify-between w-full">
               <span>Weight Progress</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowProgressPhotos(true)}
+                  className="text-sm text-primary hover:underline"
+                >
+                  View Progress Photos
+                </button>
+                <button
+                  onClick={() => setShowTakePhoto(true)}
+                  className="text-sm text-primary hover:underline"
+                >
+                  Take Photo
+                </button>
+              </div>
             </div>
           }>
             <div className="w-full" style={{ height: 350 }}>
@@ -701,6 +724,27 @@ export default function CoachAccess() {
           </Card>
         </div>
       </div>
+
+      {/* Progress Photo Modals */}
+      <TakeProgressPhotoModal
+        isOpen={showTakePhoto}
+        onClose={() => setShowTakePhoto(false)}
+        onPhotoUploaded={() => {
+          // Refresh the page to get updated photos
+          window.location.reload();
+        }}
+        clientId={clientId || ''}
+        allowMultiple={true}
+      />
+
+      <ProgressPhotosModal
+        isOpen={showProgressPhotos}
+        onClose={() => setShowProgressPhotos(false)}
+        clientId={clientId || ''}
+        onPhotoDeleted={(photoId: string) => {
+          // Photo deletion is handled within the modal
+        }}
+      />
     </div>
   );
 }

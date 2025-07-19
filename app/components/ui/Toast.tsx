@@ -91,32 +91,69 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
   };
 
   const style = typeStyles[toast.type];
-
+  
+  // Override styling based on toast type
+  const getToastStyles = () => {
+    if (toast.type === 'success') {
+      return {
+        iconColor: 'text-green-500',
+        titleColor: 'text-gray-900 dark:text-gray-100',
+        messageColor: 'text-gray-600 dark:text-gray-400'
+      };
+    }
+    if (toast.type === 'error') {
+      return {
+        iconColor: 'text-red-500',
+        titleColor: 'text-gray-900 dark:text-gray-100',
+        messageColor: 'text-gray-600 dark:text-gray-400'
+      };
+    }
+    return {
+      iconColor: style.iconColor,
+      titleColor: style.titleColor,
+      messageColor: style.messageColor
+    };
+  };
+  
+  const toastStyles = getToastStyles();
+  
   return (
     <div
       className={`
-        max-w-sm w-full ${style.bgColor} ${style.borderColor} border rounded-lg shadow-lg pointer-events-auto transform transition-all duration-300 ease-in-out
+        w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl pointer-events-auto transform transition-all duration-300 ease-in-out
         ${isVisible && !isLeaving ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}
       `}
+      style={{ 
+        zIndex: 9999,
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+      }}
     >
-      <div className="p-4">
-        <div className="flex items-start">
-          <div className={`flex-shrink-0 ${style.iconColor}`}>
-            {style.icon}
-          </div>
-          <div className="ml-3 w-0 flex-1 pt-0.5">
-            <p className={`text-sm font-medium ${style.titleColor}`}>
-              {toast.title}
-            </p>
-            {toast.message && (
-              <p className={`mt-1 text-sm ${style.messageColor}`}>
-                {toast.message}
+              <div className="p-4">
+          <div className="flex items-start">
+            <div className={`flex-shrink-0 ${toastStyles.iconColor}`}>
+              {toast.type === 'success' ? (
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              )}
+            </div>
+            <div className="ml-3 flex-1 min-w-0">
+              <p className={`text-sm font-semibold ${toastStyles.titleColor}`}>
+                {toast.title}
               </p>
-            )}
-          </div>
+              {toast.message && (
+                <p className={`mt-1 text-sm ${toastStyles.messageColor}`}>
+                  {toast.message}
+                </p>
+              )}
+            </div>
           <div className="ml-4 flex-shrink-0 flex">
             <button
-              className={`inline-flex ${style.titleColor} hover:opacity-75 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary rounded-md`}
+              className="inline-flex text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 rounded-md transition-colors"
               onClick={handleRemove}
             >
               <span className="sr-only">Close</span>
@@ -146,7 +183,7 @@ export function ToastContainer({ toasts, onRemove }: ToastContainerProps) {
   if (!isMounted) return null;
 
   return createPortal(
-    <div className="fixed top-0 right-0 z-50 p-6 space-y-4 pointer-events-none">
+    <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[9999] space-y-3 pointer-events-none">
       {toasts.map((toast) => (
         <ToastItem
           key={toast.id}

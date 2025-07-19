@@ -7,6 +7,7 @@ import AddCheckInModal from "~/components/coach/AddCheckInModal";
 import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
 import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
 import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
+import ProgressPhotosModal from "~/components/coach/ProgressPhotosModal";
 import { useState, useEffect } from "react";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
@@ -291,7 +292,8 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
       .from("weight_logs")
       .select("id, weight, logged_at")
       .eq("user_id", client.id)
-      .order("logged_at", { ascending: true })
+      .order("logged_at", { ascending: true }),
+
   ]);
 
   // Batch fetch all meals for all meal plans
@@ -589,6 +591,7 @@ export default function ClientDetails() {
     title: string;
     transcript?: string;
   } | null>(null);
+  const [showProgressPhotos, setShowProgressPhotos] = useState(false);
   const fetcher = useFetcher();
 
   // Local state for updates, checkIns, and supplements
@@ -1109,11 +1112,23 @@ export default function ClientDetails() {
                 </div>
               </div>
             </Card>
+
+
           </div>
 
           {/* Weight Chart */}
           <div className="lg:col-span-2">
-            <Card title="Weight Progress">
+            <Card title={
+              <div className="flex items-center justify-between w-full">
+                <span>Weight Progress</span>
+                <button
+                  onClick={() => setShowProgressPhotos(true)}
+                  className="text-sm text-primary hover:underline"
+                >
+                  View Progress Photos
+                </button>
+              </div>
+            }>
               <div className="w-full" style={{ height: 350 }}>
                 {hasWeightLogs ? (
                   <ResponsiveContainer width="100%" height="100%">
@@ -1171,6 +1186,19 @@ export default function ClientDetails() {
             transcript={currentMedia.transcript}
           />
         )}
+
+        {/* Progress Photos Modal */}
+        <ProgressPhotosModal
+          isOpen={showProgressPhotos}
+          onClose={() => setShowProgressPhotos(false)}
+          clientId={client.id}
+          clientName={client.name}
+          onPhotoDeleted={(photoId: string) => {
+            // Photo deletion is handled within the modal
+          }}
+        />
+
+
       </div>
     </ClientDetailLayout>
   );
