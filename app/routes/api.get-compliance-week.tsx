@@ -22,15 +22,7 @@ export const loader = async ({ request }: { request: Request }) => {
   const weekStart = dayjs.tz(weekStartParam, USER_TIMEZONE).startOf("day");
   const weekEnd = weekStart.add(7, "day");
   
-  // Debug logging for server timezone
-  console.log('🔍 [API-COMPLIANCE] Server timezone debug:', {
-    weekStartParam,
-    weekStart: weekStart.format('YYYY-MM-DD HH:mm:ss'),
-    weekStartTz: weekStart.format('Z'),
-    USER_TIMEZONE,
-    serverTime: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-    serverTimeTz: dayjs().format('Z')
-  });
+
 
   // Fetch workout plans for the client to check activation dates
   const { data: workoutPlans } = await supabase

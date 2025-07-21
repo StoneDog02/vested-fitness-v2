@@ -1377,19 +1377,7 @@ export default function ClientWorkouts() {
                   const isToday = thisDate.isSame(today, "day");
                   const isFuture = thisDate.isAfter(today, "day");
                   
-                  // Debug logging for timezone issues
-                  if (i === 0) {
-                    console.log('🔍 [COACH-WORKOUTS] Debug timezone info:', {
-                      today: today.format('YYYY-MM-DD HH:mm:ss'),
-                      todayTz: today.format('Z'),
-                      calendarStart: calendarStart,
-                      thisDate: thisDate.format('YYYY-MM-DD HH:mm:ss'),
-                      thisDateTz: thisDate.format('Z'),
-                      isToday,
-                      dayIndex: i,
-                      label
-                    });
-                  }
+
                   
                   // --- NEW: Check if this is a rest day in the active plan ---
                   const activePlan = sortedPlans.find((p) => p.isActive);
@@ -1427,10 +1415,10 @@ export default function ClientWorkouts() {
                     displayText = "N/A";
                     barColor = '#E5E7EB'; // Gray bar for N/A
                   } else if (isRestDay) {
-                    // If rest day, always show 100%
-                    displayPercentage = 100;
-                    displayText = "100%";
-                    barColor = getBarColor(1); // 100% green
+                    // If rest day, show no bar and "Rest" text
+                    displayPercentage = 0;
+                    displayText = "Rest";
+                    barColor = 'transparent';
                   } else if (isFuture) {
                     displayPercentage = 0;
                     displayText = "Pending";
@@ -1448,22 +1436,28 @@ export default function ClientWorkouts() {
                       </span>
                       <div className="flex-1" />
                       <div className="flex items-center min-w-[120px] max-w-[200px] w-2/5">
-                        <div className="relative flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className="absolute left-0 top-0 h-2 rounded-full"
-                            style={{
-                              width: `${displayPercentage}%`,
-                              background: barColor,
-                              transition: "width 0.3s, background 0.3s",
-                            }}
-                          />
-                        </div>
+                        {!isRestDay ? (
+                          <div className="relative flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="absolute left-0 top-0 h-2 rounded-full"
+                              style={{
+                                width: `${displayPercentage}%`,
+                                background: barColor,
+                                transition: "width 0.3s, background 0.3s",
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex-1" />
+                        )}
                         <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
                           {isBeforeSignup ? (
                             <NABadge reason="Client was not signed up yet" />
                                                       ) : complianceData[i] === -1 ? (
                               <NABadge reason="Plan added today - compliance starts tomorrow" />
-                            ) : isToday ? (
+                          ) : isRestDay ? (
+                            <span className="text-gray-600 dark:text-gray-400 font-medium">Rest</span>
+                          ) : isToday ? (
                             <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                           ) : isFuture ? (
                             <span className="text-gray-500">Pending</span>
