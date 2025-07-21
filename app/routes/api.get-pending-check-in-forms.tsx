@@ -105,8 +105,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         expires_at: instance.expires_at,
         status: instance.status,
         form: {
-          title: instance.check_in_forms?.[0]?.title || 'Untitled Form',
-          description: instance.check_in_forms?.[0]?.description,
+          title: instance.check_in_forms?.title || 'Untitled Form',
+          description: instance.check_in_forms?.description,
         },
       };
     });
