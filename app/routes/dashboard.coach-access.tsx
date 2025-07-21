@@ -15,10 +15,12 @@ import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
 import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
 import TakeProgressPhotoModal from "~/components/coach/TakeProgressPhotoModal";
 import ProgressPhotosModal from "~/components/coach/ProgressPhotosModal";
+import CheckInFormResponse from "~/components/client/CheckInFormResponse";
 import LineChart from "~/components/ui/LineChart";
 import { ResponsiveContainer } from "recharts";
 import dayjs from "dayjs";
 import { getCurrentDate } from "~/lib/timezone";
+import { useToast } from "~/context/ToastContext";
 
 export const meta: MetaFunction = () => {
   return [
@@ -280,6 +282,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function CoachAccess() {
+  const toast = useToast();
   const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [], paginatedCheckIns = [], hasMorePaginatedCheckIns = false, paginatedUpdates = [], hasMorePaginatedUpdates = false, mealLogs = [], paginatedMealLogs = [], hasMorePaginatedMealLogs = false, clientId } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
   const [showUpdateHistory, setShowUpdateHistory] = useState(false);
@@ -297,6 +300,11 @@ export default function CoachAccess() {
   } | null>(null);
   const [showTakePhoto, setShowTakePhoto] = useState(false);
   const [showProgressPhotos, setShowProgressPhotos] = useState(false);
+  
+  // Check-in form state
+  const [pendingForms, setPendingForms] = useState<any[]>([]);
+  const [showCheckInForm, setShowCheckInForm] = useState(false);
+  const [currentFormInstance, setCurrentFormInstance] = useState<any>(null);
 
   // Pagination state for check-ins
   const [checkInPage, setCheckInPage] = useState(1);
@@ -322,6 +330,31 @@ export default function CoachAccess() {
   );
   const [hasMoreUpdates, setHasMoreUpdates] = useState(hasMorePaginatedUpdates);
   const updateFetcher = useFetcher();
+
+  // Fetch pending check-in forms
+  useEffect(() => {
+    const fetchPendingForms = async () => {
+      try {
+    
+                  const response = await fetch('/api/get-pending-check-in-forms');
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Forms data:', data);
+          setPendingForms(data.forms || []);
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('Error response:', errorData);
+        }
+      } catch (error) {
+        console.error('Error fetching pending forms:', error);
+      }
+    };
+
+    fetchPendingForms();
+    // Refresh forms every 30 seconds
+    const interval = setInterval(fetchPendingForms, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // When modal opens, reset to first page
   useEffect(() => {
@@ -385,6 +418,50 @@ export default function CoachAccess() {
     const nextPage = updatePage + 1;
     setUpdatePage(nextPage);
     updateFetcher.load(`/dashboard/coach-access?updatePage=${nextPage}`);
+  };
+
+  // Check-in form handlers
+  const handleOpenCheckInForm = (formInstance: any) => {
+    setCurrentFormInstance(formInstance);
+    setShowCheckInForm(true);
+  };
+
+  const handleSubmitCheckInForm = async (responses: Record<string, any>) => {
+    try {
+      const formData = new FormData();
+      formData.append("instanceId", currentFormInstance.id);
+      formData.append("responses", JSON.stringify(responses));
+
+      const response = await fetch('/api/submit-check-in-form', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to submit form');
+      }
+
+      // Show success toast
+      toast.success(
+        "Form Submitted Successfully", 
+        `Your responses to "${currentFormInstance.form.title}" have been submitted.`
+      );
+
+      // Remove the form from pending forms
+      setPendingForms(prev => prev.filter(form => form.id !== currentFormInstance.id));
+      
+      // Close the modal
+      setShowCheckInForm(false);
+      setCurrentFormInstance(null);
+      
+    } catch (error) {
+      console.error('Error submitting form:', error);
+      toast.error(
+        "Failed to Submit Form", 
+        error instanceof Error ? error.message : 'An unexpected error occurred'
+      );
+    }
   };
 
   // Filter updates to only those from the last 7 days
@@ -473,6 +550,51 @@ export default function CoachAccess() {
             hasMore={hasMoreUpdates}
             emptyMessage="No updates yet."
           />
+
+          {/* Check-In Forms */}
+          <Card title="Check-In Forms">
+            <div className="space-y-3">
+              {pendingForms.length > 0 ? (
+                pendingForms.map((form) => (
+                  <div
+                    key={form.id}
+                    className="border border-gray-light dark:border-davyGray rounded-lg p-3 bg-blue-50 dark:bg-blue-900/20"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium text-secondary dark:text-alabaster">
+                          {form.form.title}
+                        </h4>
+                        {form.form.description && (
+                          <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                            {form.form.description}
+                          </p>
+                        )}
+                        <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
+                          Sent: {new Date(form.sent_at).toLocaleDateString()}
+                          {form.expires_at && (
+                            <span className="ml-2">
+                              • Expires: {new Date(form.expires_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleOpenCheckInForm(form)}
+                        className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors text-sm font-medium"
+                      >
+                        Fill Out Form
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+                  <p className="text-sm">No pending check-in forms</p>
+                </div>
+              )}
+            </div>
+          </Card>
 
           {/* Check In Notes */}
           <Card title={
@@ -745,6 +867,19 @@ export default function CoachAccess() {
           // Photo deletion is handled within the modal
         }}
       />
+
+      {/* Check-In Form Response Modal */}
+      {currentFormInstance && (
+        <CheckInFormResponse
+          isOpen={showCheckInForm}
+          onClose={() => {
+            setShowCheckInForm(false);
+            setCurrentFormInstance(null);
+          }}
+          formInstance={currentFormInstance}
+          onSubmit={handleSubmitCheckInForm}
+        />
+      )}
     </div>
   );
 }

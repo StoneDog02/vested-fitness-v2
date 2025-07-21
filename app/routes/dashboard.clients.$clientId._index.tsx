@@ -8,12 +8,17 @@ import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
 import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
 import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
 import ProgressPhotosModal from "~/components/coach/ProgressPhotosModal";
+import CreateCheckInFormModal from "~/components/coach/CreateCheckInFormModal";
+import SendCheckInFormModal from "~/components/coach/SendCheckInFormModal";
+import CheckInFormResponseViewer from "~/components/coach/CheckInFormResponseViewer";
+import CheckInFormHistoryModal from "~/components/coach/CheckInFormHistoryModal";
 import { useState, useEffect } from "react";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { Resend } from "resend";
+import { useToast } from "~/context/ToastContext";
 
 // Create a Resend instance
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -565,6 +570,7 @@ function filterUpdatesWithinSevenDays(updates: Update[]): Update[] {
 }
 
 export default function ClientDetails() {
+  const toast = useToast();
   const {
     client,
     updates: loaderUpdates,
@@ -592,6 +598,12 @@ export default function ClientDetails() {
     transcript?: string;
   } | null>(null);
   const [showProgressPhotos, setShowProgressPhotos] = useState(false);
+  const [showCreateCheckInForm, setShowCreateCheckInForm] = useState(false);
+  const [showSendCheckInForm, setShowSendCheckInForm] = useState(false);
+  const [showFormResponseViewer, setShowFormResponseViewer] = useState(false);
+  const [currentFormResponse, setCurrentFormResponse] = useState<any>(null);
+  const [showFormHistory, setShowFormHistory] = useState(false);
+  const [completedForms, setCompletedForms] = useState<any[]>([]);
   const fetcher = useFetcher();
 
   // Local state for updates, checkIns, and supplements
@@ -742,6 +754,26 @@ export default function ClientDetails() {
     setHistoryHasMore(checkInsHasMore);
   }, [loaderCheckIns, checkInsPage, checkInsHasMore]);
 
+  // Fetch completed check-in forms
+  useEffect(() => {
+    const fetchCompletedForms = async () => {
+      try {
+            const response = await fetch(`/api/get-completed-check-in-forms?clientId=${client.id}`);
+    if (response.ok) {
+      const data = await response.json();
+          setCompletedForms(data.forms || []);
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('Completed forms error response:', errorData);
+        }
+      } catch (error) {
+        console.error('Error fetching completed forms:', error);
+      }
+    };
+
+    fetchCompletedForms();
+  }, [client.id]);
+
   // When historyFetcher loads more, append to historyCheckIns
   useEffect(() => {
     if (historyFetcher.data && historyFetcher.state === "idle") {
@@ -890,6 +922,102 @@ export default function ClientDetails() {
     );
   };
 
+  // Check-in form handlers
+  const handleCreateCheckInForm = async (formData: { title: string; description: string; questions: any[] }) => {
+    try {
+      const formDataToSend = new FormData();
+      formDataToSend.append("title", formData.title);
+      formDataToSend.append("description", formData.description);
+      formDataToSend.append("questions", JSON.stringify(formData.questions));
+
+      const response = await fetch('/api/create-check-in-form', {
+        method: 'POST',
+        body: formDataToSend,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to create form');
+      }
+
+      const result = await response.json();
+      
+      // Show success toast
+      toast.success(
+        "Form Created Successfully", 
+        `"${formData.title}" has been saved and is ready to send to clients.`
+      );
+      
+      // Close the modal
+      setShowCreateCheckInForm(false);
+      
+    } catch (error) {
+      console.error('Error creating form:', error);
+      toast.error(
+        "Failed to Create Form", 
+        error instanceof Error ? error.message : 'An unexpected error occurred'
+      );
+    }
+  };
+
+  const handleSendCheckInForm = async (formId: string, expiresInDays: number) => {
+    try {
+      const formDataToSend = new FormData();
+      formDataToSend.append("formId", formId);
+      formDataToSend.append("clientId", client.id);
+      formDataToSend.append("expiresInDays", expiresInDays.toString());
+
+      const response = await fetch('/api/send-check-in-form', {
+        method: 'POST',
+        body: formDataToSend,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to send form');
+      }
+
+      const result = await response.json();
+      
+      // Show success toast
+      toast.success(
+        "Form Sent Successfully", 
+        `Check-in form has been sent to ${client.name || 'client'} and will expire in ${expiresInDays} days.`
+      );
+      
+      // Add the automatic update to the local state
+      if (result.instance) {
+        const newUpdate: Update = {
+          id: `temp-${Date.now()}`,
+          coach_id: client.coach_id || '',
+          client_id: client.id,
+          message: `${result.instance.form?.title || 'Form'} sent!`,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        
+        setUpdates((prev) => filterUpdatesWithinSevenDays([newUpdate, ...prev]));
+        setAllUpdates((prev) => [newUpdate, ...prev]);
+      }
+      
+      // Close the modal
+      setShowSendCheckInForm(false);
+      
+    } catch (error) {
+      console.error('Error sending form:', error);
+      toast.error(
+        "Failed to Send Form", 
+        error instanceof Error ? error.message : 'An unexpected error occurred'
+      );
+    }
+  };
+
+  // Handler to view form response
+  const handleViewFormResponse = (formInstance: any) => {
+    setCurrentFormResponse(formInstance);
+    setShowFormResponseViewer(true);
+  };
+
   return (
     <ClientDetailLayout>
       <div className="h-full p-4 sm:p-6 overflow-y-auto">
@@ -927,6 +1055,18 @@ export default function ClientDetails() {
                       className="text-xs text-primary hover:underline"
                     >
                       History
+                    </button>
+                    <button
+                      onClick={() => setShowCreateCheckInForm(true)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Create Form
+                    </button>
+                    <button
+                      onClick={() => setShowSendCheckInForm(true)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Send Form
                     </button>
                     <button
                       onClick={() => setShowAddMessage(true)}
@@ -1113,6 +1253,77 @@ export default function ClientDetails() {
               </div>
             </Card>
 
+            {/* Completed Check-In Forms */}
+            {(() => {
+              // Filter to show only recent forms (last 30 days)
+              const thirtyDaysAgo = new Date();
+              thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+              
+              const recentForms = completedForms.filter(form => 
+                new Date(form.completed_at) >= thirtyDaysAgo
+              );
+              
+              if (completedForms.length > 0) {
+                return (
+                  <Card title={
+                    <div className="flex items-center justify-between w-full">
+                      <span>Completed Check-In Forms</span>
+                      <button
+                        onClick={() => setShowFormHistory(true)}
+                        className="text-sm text-primary hover:underline"
+                      >
+                        View History
+                      </button>
+                    </div>
+                  }>
+                    <div className="space-y-3">
+                      {recentForms.length > 0 ? (
+                        recentForms.map((form) => (
+                          <div
+                            key={form.id}
+                            className="border border-gray-light dark:border-davyGray rounded-lg p-3 bg-green-50 dark:bg-green-900/20"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="font-medium text-secondary dark:text-alabaster">
+                                  {form.form.title}
+                                </h4>
+                                {form.form.description && (
+                                  <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                                    {form.form.description}
+                                  </p>
+                                )}
+                                <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
+                                  Completed: {new Date(form.completed_at).toLocaleDateString()}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleViewFormResponse(form)}
+                                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors text-sm font-medium"
+                              >
+                                View Responses
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+                          <p>No recent completed forms</p>
+                          <button
+                            onClick={() => setShowFormHistory(true)}
+                            className="text-sm text-primary hover:underline mt-2"
+                          >
+                            View all forms
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              }
+              return null;
+            })()}
+
 
           </div>
 
@@ -1156,6 +1367,7 @@ export default function ClientDetails() {
           onSubmit={handleAddCheckIn}
           lastWeekNotes={thisWeekCheckIn ? thisWeekCheckIn.notes : ""}
           clientId={client.id}
+          completedForms={completedForms}
         />
 
         <CheckInHistoryModal
@@ -1198,6 +1410,40 @@ export default function ClientDetails() {
           }}
         />
 
+        {/* Check-In Form Modals */}
+        <CreateCheckInFormModal
+          isOpen={showCreateCheckInForm}
+          onClose={() => setShowCreateCheckInForm(false)}
+          onSubmit={handleCreateCheckInForm}
+        />
+
+        <SendCheckInFormModal
+          isOpen={showSendCheckInForm}
+          onClose={() => setShowSendCheckInForm(false)}
+          clientId={client.id}
+          clientName={client.name}
+          onSubmit={handleSendCheckInForm}
+        />
+
+        {/* Form Response Viewer Modal */}
+        {currentFormResponse && (
+          <CheckInFormResponseViewer
+            isOpen={showFormResponseViewer}
+            onClose={() => {
+              setShowFormResponseViewer(false);
+              setCurrentFormResponse(null);
+            }}
+            formInstance={currentFormResponse}
+          />
+        )}
+
+        {/* Check-In Form History Modal */}
+        <CheckInFormHistoryModal
+          isOpen={showFormHistory}
+          onClose={() => setShowFormHistory(false)}
+          clientId={client.id}
+          clientName={client.name}
+        />
 
       </div>
     </ClientDetailLayout>

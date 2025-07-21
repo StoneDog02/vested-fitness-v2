@@ -58,13 +58,15 @@ interface VideoRecorderProps {
   onCancel: () => void;
   recordingType?: 'video' | 'audio';
   enableDictation?: boolean;
+  completedForms?: any[];
 }
 
 export default function VideoRecorder({ 
   onRecordingComplete, 
   onCancel, 
   recordingType = 'video',
-  enableDictation = false
+  enableDictation = false,
+  completedForms = []
 }: VideoRecorderProps) {
   console.log('VideoRecorder initialized with:', {
     recordingType,
@@ -279,6 +281,62 @@ export default function VideoRecorder({
           }
         </p>
       </div>
+
+      {/* Form Responses Reference */}
+      {completedForms.length > 0 && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-center space-x-2 mb-3">
+            <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <h4 className="font-medium text-blue-800 dark:text-blue-200">
+              Client Form Responses - Reference During Recording
+            </h4>
+          </div>
+          <div className="space-y-3 max-h-48 overflow-y-auto">
+            {/* Filter to show only recent forms (last 30 days) */}
+            {completedForms
+              .filter(form => {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                return new Date(form.completed_at) >= thirtyDaysAgo;
+              })
+              .slice(0, 2)
+              .map((form) => (
+              <div
+                key={form.id}
+                className="bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-lg p-3"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h5 className="font-medium text-blue-900 dark:text-blue-100 text-sm">
+                    {form.form.title}
+                  </h5>
+                  <span className="text-xs text-blue-600 dark:text-blue-400">
+                    {new Date(form.completed_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {form.responses?.map((response: any, index: number) => (
+                    <div key={response.id} className="text-xs">
+                      <div className="font-medium text-blue-800 dark:text-blue-200 mb-1">
+                        Q{index + 1}: {response.question?.question_text}
+                      </div>
+                      <div className="text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded">
+                        A: {response.response_text || response.response_number || response.response_options?.join(', ') || 'No response'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {completedForms.length > 2 && (
+              <div className="text-center text-blue-600 dark:text-blue-400 text-xs italic">
+                +{completedForms.length - 2} more forms available
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Video Preview */}
       {recordingType === 'video' && (

@@ -126,6 +126,128 @@ export interface Database {
           updated_at?: string;
         };
       };
+      check_in_forms: {
+        Row: {
+          id: string;
+          coach_id: string;
+          title: string;
+          description?: string;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id: string;
+          title: string;
+          description?: string;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string;
+          title?: string;
+          description?: string;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      check_in_form_questions: {
+        Row: {
+          id: string;
+          form_id: string;
+          question_text: string;
+          question_type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+          is_required: boolean;
+          options?: any;
+          order_index: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          form_id: string;
+          question_text: string;
+          question_type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+          is_required?: boolean;
+          options?: any;
+          order_index: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          form_id?: string;
+          question_text?: string;
+          question_type?: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+          is_required?: boolean;
+          options?: any;
+          order_index?: number;
+          created_at?: string;
+        };
+      };
+      check_in_form_instances: {
+        Row: {
+          id: string;
+          form_id: string;
+          client_id: string;
+          coach_id: string;
+          sent_at: string;
+          completed_at?: string;
+          status: 'sent' | 'completed' | 'expired';
+          expires_at?: string;
+        };
+        Insert: {
+          id?: string;
+          form_id: string;
+          client_id: string;
+          coach_id: string;
+          sent_at?: string;
+          completed_at?: string;
+          status?: 'sent' | 'completed' | 'expired';
+          expires_at?: string;
+        };
+        Update: {
+          id?: string;
+          form_id?: string;
+          client_id?: string;
+          coach_id?: string;
+          sent_at?: string;
+          completed_at?: string;
+          status?: 'sent' | 'completed' | 'expired';
+          expires_at?: string;
+        };
+      };
+      check_in_form_responses: {
+        Row: {
+          id: string;
+          instance_id: string;
+          question_id: string;
+          response_text?: string;
+          response_number?: number;
+          response_options?: any;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          instance_id: string;
+          question_id: string;
+          response_text?: string;
+          response_number?: number;
+          response_options?: any;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          instance_id?: string;
+          question_id?: string;
+          response_text?: string;
+          response_number?: number;
+          response_options?: any;
+          created_at?: string;
+        };
+      };
     };
   };
 }
