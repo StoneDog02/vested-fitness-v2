@@ -986,7 +986,7 @@ export default function Dashboard() {
                             {activity.action}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {dayjs(activity.time).local().format('h:mm A')}
+                            {dayjs(activity.time).format('h:mm A')}
                           </p>
                         </div>
                       </div>

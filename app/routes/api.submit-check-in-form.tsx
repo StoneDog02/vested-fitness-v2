@@ -81,7 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
         client_id,
         status,
         expires_at,
-        check_in_forms (
+        check_in_forms!inner (
           title
         )
       `)
@@ -181,6 +181,8 @@ export async function action({ request }: ActionFunctionArgs) {
       console.error("Error updating instance:", updateError);
       return json({ error: "Failed to complete form" }, { status: 500 });
     }
+
+
 
     return json({ 
       success: true,

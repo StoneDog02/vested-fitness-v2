@@ -247,6 +247,53 @@ export const action: ActionFunction = async ({ request }) => {
       .update({ accepted: true })
       .eq("token", inviteCode)
       .eq("email", email);
+    
+    // Send email notification to coach if email notifications are enabled
+    try {
+      // Get coach's email notification preference
+      const { data: coach } = await supabase
+        .from("users")
+        .select("email, email_notifications")
+        .eq("id", coach_id)
+        .single();
+      
+      if (coach && coach.email_notifications) {
+        // Import Resend here to avoid issues with server-side rendering
+        const { Resend } = await import("resend");
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        
+        await resend.emails.send({
+          from: "Kava Training <noreply@kavatraining.com>",
+          to: coach.email,
+          subject: `New Client Registration: ${name}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #22c55e;">New Client Registration!</h2>
+              <p>Hello Coach,</p>
+              <p>Great news! <strong>${name}</strong> has successfully registered and joined your client roster.</p>
+              <p><strong>Client Details:</strong></p>
+              <ul>
+                <li><strong>Name:</strong> ${name}</li>
+                <li><strong>Email:</strong> ${email}</li>
+                <li><strong>Goal:</strong> ${goal || 'Not specified'}</li>
+              </ul>
+              <p>Your new client is now ready to start their fitness journey with you!</p>
+              <p>You can view their profile and begin setting up their meal and workout plans from your dashboard.</p>
+              <p>Best regards,<br />The Kava Training Team</p>
+              <div style="margin-top: 32px; text-align: center;">
+                <img src="https://kavatraining.com/KAVA-TRAINING.svg" alt="KAVA TRAINING Logo" style="height: 48px; margin: 0 auto;" />
+              </div>
+            </div>
+          `,
+        });
+        console.log(`[REGISTRATION] Coach notification email sent to ${coach.email} for new client ${name}`);
+      } else {
+        console.log(`[REGISTRATION] Coach notification skipped - email notifications disabled or coach not found`);
+      }
+    } catch (error) {
+      // Don't fail registration if email notification fails
+      console.error("Failed to send coach notification email:", error);
+    }
   }
 
   // Success: prompt to check email for verification

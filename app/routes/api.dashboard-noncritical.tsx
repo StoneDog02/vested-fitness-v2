@@ -168,6 +168,8 @@ export const loader: LoaderFunction = async ({ request }) => {
     let workoutsToday = null;
     let mealsLogged = null;
     let suppsLogged = null;
+    let formsCompleted = null;
+    let newClientRegistrations = null;
     if (recentClients && recentClients.length > 0) {
       const clientIds = recentClients.map((c) => c.id);
       const { data: workouts } = await supabase
@@ -187,9 +189,35 @@ export const loader: LoaderFunction = async ({ request }) => {
         .in("user_id", clientIds)
         .gte("completed_at", `${todayDateString}T00:00:00.000Z`)
         .lt("completed_at", `${tomorrowDateString}T00:00:00.000Z`);
+      const { data: forms } = await supabase
+        .from("check_in_form_instances")
+        .select(`
+          id,
+          client_id,
+          completed_at,
+          check_in_forms!inner (
+            title
+          )
+        `)
+        .in("client_id", clientIds)
+        .eq("status", "completed")
+        .gte("completed_at", `${todayDateString}T00:00:00.000Z`)
+        .lt("completed_at", `${tomorrowDateString}T00:00:00.000Z`);
+      
+      // Get new client registrations from today
+      const { data: newClients } = await supabase
+        .from("users")
+        .select("id, name, created_at")
+        .in("id", clientIds)
+        .eq("role", "client")
+        .gte("created_at", `${todayDateString}T00:00:00.000Z`)
+        .lt("created_at", `${tomorrowDateString}T00:00:00.000Z`);
+      
       workoutsToday = workouts;
       mealsLogged = meals;
       suppsLogged = supplements;
+      formsCompleted = forms;
+      newClientRegistrations = newClients;
     }
     // Group activities by client and type
     const activityGroups: { [key: string]: { clientName: string; action: string; count: number; latestTime: string; id: string } } = {};
@@ -252,6 +280,33 @@ export const loader: LoaderFunction = async ({ request }) => {
         if (new Date(s.completed_at) > new Date(activityGroups[key].latestTime)) {
           activityGroups[key].latestTime = s.completed_at;
         }
+      }
+    }
+    if (formsCompleted) {
+      for (const f of formsCompleted) {
+        const client = recentClients ? recentClients.find((c: any) => c.id === f.client_id) : null;
+        const clientName = client ? client.name : "Unknown";
+        const formTitle = (f.check_in_forms as any)?.title || 'Check-in Form';
+        const key = `${f.client_id}-form-${f.id}`;
+        activityGroups[key] = {
+          clientName,
+          action: `Completed form "${formTitle}"`,
+          count: 1,
+          latestTime: f.completed_at,
+          id: f.id,
+        };
+      }
+    }
+    if (newClientRegistrations) {
+      for (const client of newClientRegistrations) {
+        const key = `${client.id}-registration`;
+        activityGroups[key] = {
+          clientName: client.name,
+          action: "Registered as new client",
+          count: 1,
+          latestTime: client.created_at,
+          id: client.id,
+        };
       }
     }
     recentActivity = Object.values(activityGroups).map((group) => {
