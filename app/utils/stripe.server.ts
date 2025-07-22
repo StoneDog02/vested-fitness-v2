@@ -41,22 +41,62 @@ export async function getOrCreateStripeCustomer({ userId, email }: { userId: str
   return customer.id;
 }
 
-// Create a subscription for a user
+// Create a subscription for a user with immediate billing
 export async function createStripeSubscription({ customerId, priceId, paymentMethodId }: { customerId: string; priceId: string; paymentMethodId?: string }) {
-  // Calculate the last day of the current month (UTC)
+  // Get the price details to calculate prorated amount
+  const price = await stripe.prices.retrieve(priceId);
+  
+  // Calculate the last day of the current month (UTC) for billing cycle anchor
   const now = new Date();
   const lastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
   const lastDayTimestamp = Math.floor(lastDay.getTime() / 1000);
+  
+  // Calculate prorated amount for remaining days of current month
+  // Note: In a real implementation, you'd pass the actual signup date from the registration flow
+  const signupDate = now; // For new registrations, use current time as signup time
+  const daysRemaining = Math.ceil((lastDay.getTime() - signupDate.getTime()) / (1000 * 60 * 60 * 24));
+  const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getDate();
+  const monthlyAmount = price.unit_amount || 0;
+  const proratedAmount = Math.round((monthlyAmount * daysRemaining) / daysInMonth);
+  
+  console.log(`[SUBSCRIPTION] Creating subscription with immediate billing:`);
+  console.log(`  Monthly amount: $${(monthlyAmount / 100).toFixed(2)}`);
+  console.log(`  Days remaining: ${daysRemaining}`);
+  console.log(`  Days in month: ${daysInMonth}`);
+  console.log(`  Prorated amount: $${(proratedAmount / 100).toFixed(2)}`);
+  console.log(`  Billing cycle anchor: ${new Date(lastDayTimestamp * 1000).toISOString()}`);
+  
+  // Create subscription with immediate payment
   const subscription = await stripe.subscriptions.create({
     customer: customerId,
     items: [{ price: priceId }],
-    payment_behavior: 'default_incomplete',
+    payment_behavior: 'allow_incomplete', // Allow immediate payment
     payment_settings: { save_default_payment_method: 'on_subscription' },
     expand: ['latest_invoice', 'latest_invoice.payment_intent'],
     billing_cycle_anchor: lastDayTimestamp,
     proration_behavior: 'create_prorations',
     ...(paymentMethodId ? { default_payment_method: paymentMethodId } : {}),
   });
+  
+  // Immediately pay the invoice if it exists and has an amount
+  if (subscription.latest_invoice && typeof subscription.latest_invoice === 'object') {
+    const invoice = subscription.latest_invoice as any;
+    if (invoice.amount_due > 0) {
+      try {
+        console.log(`[SUBSCRIPTION] Paying invoice immediately: ${invoice.id}`);
+        await stripe.invoices.pay(invoice.id);
+        console.log(`[SUBSCRIPTION] Invoice paid successfully`);
+        
+        // Refresh the subscription to get updated status
+        const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
+        return updatedSubscription;
+      } catch (error) {
+        console.error(`[SUBSCRIPTION] Failed to pay invoice immediately:`, error);
+        // Return the subscription anyway - it will be handled by Stripe's retry logic
+      }
+    }
+  }
+  
   return subscription;
 }
 

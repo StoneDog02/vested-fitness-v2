@@ -483,6 +483,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const meals = JSON.parse(mealsJson);
   const planId = formData.get("planId") as string | null;
 
+  // Filter out meals and foods with empty required fields for data quality
+  const validMeals = meals.filter((meal: any) => 
+    meal.name && meal.name.trim() !== "" && 
+    meal.time && meal.time.trim() !== "" &&
+    meal.foods && meal.foods.length > 0 &&
+    meal.foods.some((food: any) => 
+      food.name && food.name.trim() !== "" && 
+      food.portion && food.portion.trim() !== ""
+    )
+  ).map((meal: any) => ({
+    ...meal,
+    foods: meal.foods.filter((food: any) => 
+      food.name && food.name.trim() !== "" && 
+      food.portion && food.portion.trim() !== ""
+    )
+  }));
+
   // First, create or update the template version
   let templatePlan;
   if (!planId) {
@@ -523,9 +540,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     // Insert meals and foods for both plans
-    for (const [i, meal] of meals.entries()) {
+    for (const [i, meal] of validMeals.entries()) {
       // Create meal for template
-      const { data: templateMeal } = await supabase
+      const { data: templateMeal, error: templateMealError } = await supabase
         .from("meals")
         .insert({
           meal_plan_id: templatePlan.id,
@@ -536,8 +553,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         .select()
         .single();
 
+      if (templateMealError) {
+        console.error('[MEAL PLAN] Failed to create template meal:', templateMealError);
+        return json({ error: "Failed to create template meal" }, { status: 500 });
+      }
+
       // Create meal for client plan
-      const { data: clientMeal } = await supabase
+      const { data: clientMeal, error: clientMealError } = await supabase
         .from("meals")
         .insert({
           meal_plan_id: newPlan.id,
@@ -548,10 +570,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         .select()
         .single();
 
+      if (clientMealError) {
+        console.error('[MEAL PLAN] Failed to create client meal:', clientMealError);
+        return json({ error: "Failed to create client meal" }, { status: 500 });
+      }
+
       if (templateMeal && clientMeal) {
         for (const food of meal.foods) {
           // Add food to template meal
-          await supabase.from("foods").insert({
+            const { error: templateFoodError } = await supabase.from("foods").insert({
             meal_id: templateMeal.id,
             name: food.name,
             portion: food.portion,
@@ -561,8 +588,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             fat: food.fat,
           });
 
+            if (templateFoodError) {
+              console.error('[MEAL PLAN] Failed to create template food:', templateFoodError);
+              return json({ error: "Failed to create template food" }, { status: 500 });
+            }
+
           // Add food to client meal
-          await supabase.from("foods").insert({
+            const { error: clientFoodError } = await supabase.from("foods").insert({
             meal_id: clientMeal.id,
             name: food.name,
             portion: food.portion,
@@ -571,6 +603,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             carbs: food.carbs,
             fat: food.fat,
           });
+
+            if (clientFoodError) {
+              console.error('[MEAL PLAN] Failed to create client food:', clientFoodError);
+              return json({ error: "Failed to create client food" }, { status: 500 });
+            }
         }
       }
     }
@@ -597,8 +634,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
 
       // Insert new meals and foods
-      for (const [i, meal] of meals.entries()) {
-        const { data: mealRow } = await supabase
+      for (const [i, meal] of validMeals.entries()) {
+        const { data: mealRow, error: mealError } = await supabase
           .from("meals")
           .insert({
             meal_plan_id: planId,
@@ -609,9 +646,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           .select()
           .single();
 
+        if (mealError) {
+          console.error('[MEAL PLAN] Failed to update meal:', mealError);
+          return json({ error: "Failed to update meal" }, { status: 500 });
+        }
+
         if (mealRow) {
           for (const food of meal.foods) {
-            await supabase.from("foods").insert({
+            const { error: foodError } = await supabase.from("foods").insert({
               meal_id: mealRow.id,
               name: food.name,
               portion: food.portion,
@@ -620,6 +662,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               carbs: food.carbs,
               fat: food.fat,
             });
+
+            if (foodError) {
+              console.error('[MEAL PLAN] Failed to update food:', foodError);
+              return json({ error: "Failed to update food" }, { status: 500 });
+            }
           }
         }
       }

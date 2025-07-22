@@ -627,6 +627,8 @@ export default function PaymentSettings() {
                 let pill = null;
                 if (status === "active") {
                   pill = <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded">Active</span>;
+                } else if (status === "incomplete") {
+                  pill = <span className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2 py-0.5 rounded">Processing</span>;
                 } else if (status === "inactive" || status === "past_due" || status === "unpaid") {
                   pill = <span className="bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded">{status === "inactive" ? "Inactive" : status === "past_due" ? "Past Due" : "Unpaid"}</span>;
                 } else if (status === "trialing") {
@@ -641,11 +643,21 @@ export default function PaymentSettings() {
                 Next Billing Date
               </h3>
               <p className="text-sm text-gray-dark dark:text-gray-300">
-                {currentInvoice && currentInvoice.period_end
-                  ? formatDate(currentInvoice.period_end)
-                  : (subscription && (subscription as any).current_period_end)
-                  ? formatDate((subscription as any).current_period_end)
-                  : "N/A"}
+                {(() => {
+                  // For active subscriptions, show the current_period_end (next billing date)
+                  if (subscription && subscription.status === 'active' && (subscription as any).current_period_end) {
+                    return formatDate((subscription as any).current_period_end);
+                  }
+                  // For incomplete subscriptions, show the billing_cycle_anchor
+                  if (subscription && subscription.status === 'incomplete' && (subscription as any).billing_cycle_anchor) {
+                    return formatDate((subscription as any).billing_cycle_anchor);
+                  }
+                  // Fallback to invoice period_end if available
+                  if (currentInvoice && currentInvoice.period_end) {
+                    return formatDate(currentInvoice.period_end);
+                  }
+                  return "N/A";
+                })()}
               </p>
             </div>
 

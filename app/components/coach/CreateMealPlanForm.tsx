@@ -416,7 +416,7 @@ export default function CreateMealPlanForm({
                 htmlFor={`meal-time-${activeMealIndex}`}
                 className="block text-sm font-medium text-secondary dark:text-alabaster mb-1"
               >
-                Time
+                Time/When
               </label>
               <input
                 type="text"
@@ -426,7 +426,7 @@ export default function CreateMealPlanForm({
                   updateMeal(activeMealIndex, "time", e.target.value)
                 }
                 className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-night text-secondary dark:text-alabaster"
-                placeholder="e.g., 7:00 AM"
+                placeholder="e.g., Morning, 7:00 AM, Before bed"
               />
             </div>
           </div>
