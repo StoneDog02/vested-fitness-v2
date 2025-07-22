@@ -3,6 +3,7 @@ import type { MetaFunction, LoaderFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import NABadge from "~/components/ui/NABadge";
+import MealOptionsCard from "~/components/client/MealOptionsCard";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
@@ -123,7 +124,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         // Get the full plan details
         const { data: mealsRaw } = await supabase
           .from("meals")
-          .select("id, name, time, sequence_order")
+          .select("id, name, time, sequence_order, meal_option")
           .eq("meal_plan_id", planToShow.id)
           .order("sequence_order", { ascending: true });
         if (mealsRaw && mealsRaw.length > 0) {
@@ -171,6 +172,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             name: String(meal.name || ''),
             time: String(meal.time || ''),
             sequence_order: Number(meal.sequence_order) || 0,
+            mealOption: meal.meal_option || 'A',
             foods: foodsByMeal[String(meal.id)] || []
           }));
           activeMealPlan = {
@@ -586,10 +588,11 @@ export default function Meals() {
   const formattedDate = getFormattedDate(currentDate, today);
 
   // Helper function to convert between meal keys and IDs - MOVED UP
-  const createMealKey = (meal: { id: number | string; name: string; time: string }) => `${meal.id}-${meal.name}-${meal.time.slice(0,5)}`;
+  const createMealKey = (meal: { id: number | string; name: string; time: string; mealOption?: 'A' | 'B' }) => 
+    `${meal.id}-${meal.name}-${meal.time.slice(0,5)}-${meal.mealOption || 'A'}`;
   
   const getMealIdFromKey = useCallback((mealKey: string) => {
-    // Extract meal ID from the key - UUID is first 5 segments when split by dash (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx-name-time)
+    // Extract meal ID from the key - UUID is first 5 segments when split by dash (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx-name-time-mealOption)
     const parts = mealKey.split('-');
     if (parts.length < 5) return null;
     
@@ -601,11 +604,11 @@ export default function Meals() {
 
   const getMealKeyFromId = useCallback((mealId: string) => {
     const meal = currentDayMealPlan?.meals?.find((m: any) => String(m.id) === mealId);
-    return meal ? createMealKey({ id: meal.id, name: meal.name, time: meal.time }) : null;
+    return meal ? createMealKey({ id: meal.id, name: meal.name, time: meal.time, mealOption: meal.mealOption }) : null;
   }, [currentDayMealPlan]);
 
   // Function to handle "checked" state for meals
-  const toggleMealCheck = useCallback((meal: { id: string | number; name: string; time: string }) => {
+  const toggleMealCheck = useCallback((meal: { id: string | number; name: string; time: string; mealOption?: 'A' | 'B' }) => {
     const mealKey = createMealKey(meal);
     
     if (checkedMeals.includes(mealKey)) {
@@ -811,108 +814,20 @@ export default function Meals() {
               ) : !mealPlan || !mealPlan.meals || mealPlan.meals.length === 0 ? (
                 <div className="text-gray-500 text-center py-8">No meal plan available.</div>
               ) : (
-                mealPlan.meals.map((meal: { id: number | string; name: string; time: string; foods: any[] }) => (
-                  <div
-                    key={meal.id}
-                    className="relative border border-gray-light dark:border-davyGray rounded-xl p-4 sm:p-6 transition-all duration-200 hover:shadow-md"
-                  >
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h3 className="text-base sm:text-lg font-semibold text-secondary dark:text-alabaster mb-1">
-                          {meal.name}
-                        </h3>
-                        <div className="text-xs sm:text-sm text-gray-dark dark:text-gray-light flex items-center gap-2">
-                          <svg
-                            className="w-3 h-3 sm:w-4 sm:h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                          </svg>
-                          {meal.time}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 sm:gap-3">
-                        <label
-                          htmlFor={`meal-${meal.id}`}
-                          className={`text-xs sm:text-sm ${
-                            isDaySubmitted || isActivationDay
-                              ? "text-gray-dark dark:text-gray-light"
-                              : "text-gray-dark dark:text-gray-light cursor-pointer"
-                          } select-none`}
-                        >
-                          {!isHydrated
-                            ? "Loading..."
-                            : (() => {
-                                const mealKey = createMealKey({ id: meal.id, name: meal.name, time: meal.time });
-                                if (isActivationDay) {
-                                  return "Activation Day";
-                                }
-                                return (isDaySubmitted && checkedMeals.includes(mealKey)) ||
-                                       (!isDaySubmitted && checkedMeals.includes(mealKey))
-                                  ? "Completed"
-                                  : isDaySubmitted
-                                  ? "Not Completed"
-                                  : "Mark as complete";
-                              })()}
-                        </label>
-                        <input
-                          type="checkbox"
-                          id={`meal-${meal.id}`}
-                          value={meal.id}
-                          checked={(() => {
-                            const mealKey = createMealKey({ id: meal.id, name: meal.name, time: meal.time });
-                            const isChecked = isHydrated && checkedMeals.includes(mealKey);
-                            return isChecked;
-                          })()}
-                          onChange={() => {
-                            !isDaySubmitted && !isActivationDay && toggleMealCheck(meal);
-                          }}
-                          disabled={isDaySubmitted || !isHydrated || isActivationDay}
-                          className={`w-4 h-4 sm:w-5 sm:h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
-                            isDaySubmitted || !isHydrated || isActivationDay
-                              ? "cursor-not-allowed opacity-50"
-                              : "cursor-pointer"
-                          }`}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="overflow-x-auto -mx-4 sm:mx-0">
-                      <div className="min-w-full px-4 sm:px-0">
-                        <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-2 text-xs sm:text-sm font-medium text-gray-dark dark:text-gray-light uppercase tracking-wider">
-                          <div>Food</div>
-                          <div>Portion</div>
-                          <div>Calories</div>
-                        </div>
-                        <div className="space-y-2">
-                          {meal.foods.map((food: { name: string; portion: string; calories: number }) => (
-                            <div
-                              key={food.name + food.portion}
-                              className="grid grid-cols-3 gap-2 sm:gap-4 py-2 text-xs sm:text-sm hover:bg-gray-lightest dark:hover:bg-secondary-light/10 rounded-lg transition-colors duration-200"
-                            >
-                              <div className="font-medium text-secondary dark:text-alabaster">
-                                {food.name}
-                              </div>
-                              <div className="text-gray-dark dark:text-gray-light">
-                                {food.portion}
-                              </div>
-                              <div className="text-gray-dark dark:text-gray-light">
-                                {food.calories}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )))}
+                <MealOptionsCard
+                  meals={mealPlan.meals}
+                  onMealSelect={(meal) => {
+                    // When a meal option is selected, we don't need to do anything special
+                    // The toggleMealCheck function will handle the completion tracking
+                  }}
+                  isDaySubmitted={isDaySubmitted}
+                  isActivationDay={isActivationDay}
+                  isHydrated={isHydrated}
+                  createMealKey={createMealKey}
+                  checkedMeals={checkedMeals}
+                  toggleMealCheck={toggleMealCheck}
+                />
+              )}
               </div>
 
               {/* Submit Completed Meals Button */}

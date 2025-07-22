@@ -15,6 +15,7 @@ interface Meal {
   name: string;
   time: string;
   foods: Food[];
+  mealOption?: 'A' | 'B'; // Add meal option field
 }
 
 export interface MealPlanFormData {
@@ -55,6 +56,7 @@ export default function CreateMealPlanForm({
               fat: 0,
             },
           ],
+          mealOption: 'A',
         },
       ],
     }
@@ -87,6 +89,33 @@ export default function CreateMealPlanForm({
           fat: 0,
         },
       ],
+      mealOption: 'A',
+    };
+
+    setFormData((prev) => ({
+      ...prev,
+      meals: [...prev.meals, newMeal],
+    }));
+    setActiveMealIndex(formData.meals.length);
+  };
+
+  const addMealOption = (mealIndex: number) => {
+    const existingMeal = formData.meals[mealIndex];
+    const newMeal: Meal = {
+      id: formData.meals.length + 1,
+      name: existingMeal.name,
+      time: existingMeal.time,
+      foods: [
+        {
+          name: "",
+          portion: "",
+          calories: 0,
+          protein: 0,
+          carbs: 0,
+          fat: 0,
+        },
+      ],
+      mealOption: 'B',
     };
 
     setFormData((prev) => ({
@@ -98,12 +127,14 @@ export default function CreateMealPlanForm({
 
   const updateMeal = (
     index: number,
-    field: "name" | "time" | "foods",
-    value: string | Food[]
+    field: "name" | "time" | "foods" | "mealOption",
+    value: string | Food[] | 'A' | 'B'
   ) => {
     const updatedMeals = [...formData.meals];
     if (field === "foods") {
       updatedMeals[index][field] = value as Food[];
+    } else if (field === "mealOption") {
+      updatedMeals[index][field] = value as 'A' | 'B';
     } else {
       updatedMeals[index][field] = value as string;
     }
@@ -248,6 +279,16 @@ export default function CreateMealPlanForm({
 
   const macros = calculateTotalMacros();
 
+  // Group meals by name and time to show Meal A/B options together
+  const groupedMeals = formData.meals.reduce((groups, meal) => {
+    const key = `${meal.name}-${meal.time}`;
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(meal);
+    return groups;
+  }, {} as Record<string, Meal[]>);
+
   useEffect(() => {
     if (!formData) return;
     let changed = false;
@@ -354,23 +395,35 @@ export default function CreateMealPlanForm({
       {/* Meals Tabs */}
       <div>
         <div className="flex space-x-2 overflow-x-auto pb-2 mb-4">
-          {formData.meals.map((meal, index) => (
-            <button
-              key={meal.id}
-              type="button"
-              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${
-                activeMealIndex === index
-                  ? "bg-primary text-white"
-                  : "bg-gray-light dark:bg-davyGray text-secondary dark:text-alabaster"
-              }`}
-              onClick={() => setActiveMealIndex(index)}
-            >
-              {meal.name || `Meal ${index + 1}`}
-            </button>
-          ))}
+          {Object.entries(groupedMeals).map(([key, meals], groupIndex) => {
+            const firstMeal = meals[0];
+            const hasMealB = meals.some(meal => meal.mealOption === 'B');
+            const isActive = activeMealIndex === formData.meals.findIndex(m => m.id === firstMeal.id) ||
+                           (hasMealB && activeMealIndex === formData.meals.findIndex(m => m.id === meals.find(m => m.mealOption === 'B')?.id));
+            
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap flex items-center space-x-2 ${
+                  isActive
+                    ? "bg-primary text-white"
+                    : "bg-gray-light dark:bg-davyGray text-secondary dark:text-alabaster hover:bg-gray-200 dark:hover:bg-gray-600"
+                }`}
+                onClick={() => setActiveMealIndex(formData.meals.findIndex(m => m.id === firstMeal.id))}
+              >
+                <span>{firstMeal.name || `Meal ${groupIndex + 1}`}</span>
+                {hasMealB && (
+                  <span className="text-xs bg-white/20 dark:bg-black/20 px-1.5 py-0.5 rounded">
+                    A/B
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <button
             type="button"
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-primary/10 dark:bg-primary/20 text-primary"
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-primary/10 dark:bg-primary/20 text-primary hover:bg-primary/20 dark:hover:bg-primary/30"
             onClick={addMeal}
           >
             + Add Meal
@@ -380,18 +433,86 @@ export default function CreateMealPlanForm({
         {/* Active Meal Form */}
         <div className="border border-gray-light dark:border-davyGray rounded-lg p-4">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="font-medium text-secondary dark:text-alabaster">
-              {formData.meals[activeMealIndex]?.name ||
-                `Meal ${activeMealIndex + 1}`}
-            </h3>
-            <button
-              type="button"
-              onClick={() => removeMeal(activeMealIndex)}
-              className="text-red-500 hover:text-red-700 text-sm"
-              disabled={formData.meals.length <= 1}
-            >
-              Remove Meal
-            </button>
+            <div className="flex items-center space-x-3">
+              <h3 className="font-medium text-secondary dark:text-alabaster">
+                {formData.meals[activeMealIndex]?.name ||
+                  `Meal ${activeMealIndex + 1}`}
+              </h3>
+              
+              {/* Meal Option Selector */}
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-dark dark:text-gray-light">Option:</span>
+                <div className="flex bg-gray-light dark:bg-davyGray rounded-lg p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentMeal = formData.meals[activeMealIndex];
+                      const mealA = formData.meals.find(m => 
+                        m.name === currentMeal?.name && 
+                        m.time === currentMeal?.time && 
+                        m.mealOption === 'A'
+                      );
+                      if (mealA) {
+                        setActiveMealIndex(formData.meals.findIndex(m => m.id === mealA.id));
+                      }
+                    }}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      formData.meals[activeMealIndex]?.mealOption === 'A'
+                        ? "bg-white dark:bg-night text-secondary dark:text-alabaster shadow-sm"
+                        : "text-gray-dark dark:text-gray-light hover:text-secondary dark:hover:text-alabaster"
+                    }`}
+                  >
+                    A
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentMeal = formData.meals[activeMealIndex];
+                      const mealB = formData.meals.find(m => 
+                        m.name === currentMeal?.name && 
+                        m.time === currentMeal?.time && 
+                        m.mealOption === 'B'
+                      );
+                      if (mealB) {
+                        setActiveMealIndex(formData.meals.findIndex(m => m.id === mealB.id));
+                      }
+                    }}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      formData.meals[activeMealIndex]?.mealOption === 'B'
+                        ? "bg-white dark:bg-night text-secondary dark:text-alabaster shadow-sm"
+                        : "text-gray-dark dark:text-gray-light hover:text-secondary dark:hover:text-alabaster"
+                    }`}
+                  >
+                    B
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex space-x-2">
+              {/* Add Meal B button - only show if this is Meal A and no Meal B exists yet */}
+              {formData.meals[activeMealIndex]?.mealOption === 'A' && 
+               !formData.meals.some(m => 
+                 m.mealOption === 'B' &&
+                 ((m.name === formData.meals[activeMealIndex]?.name && m.time === formData.meals[activeMealIndex]?.time) ||
+                  (formData.meals[activeMealIndex]?.name === "" && formData.meals[activeMealIndex]?.time === "" && m.name === "" && m.time === ""))
+               ) && (
+                <button
+                  type="button"
+                  onClick={() => addMealOption(activeMealIndex)}
+                  className="text-primary hover:text-primary/80 text-sm"
+                >
+                  + Add Meal B
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => removeMeal(activeMealIndex)}
+                className="text-red-500 hover:text-red-700 text-sm"
+                disabled={formData.meals.length <= 1}
+              >
+                Remove Meal
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4 mb-4">

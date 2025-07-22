@@ -83,6 +83,48 @@ export const loader = async ({
       client: null,
     });
 
+  // Get coachId from auth cookie
+  const cookies = parse(request.headers.get("cookie") || "");
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  let accessToken;
+  if (supabaseAuthCookieKey) {
+    try {
+      const decoded = Buffer.from(
+        cookies[supabaseAuthCookieKey],
+        "base64"
+      ).toString("utf-8");
+      const [access] = JSON.parse(JSON.parse(decoded));
+      accessToken = access;
+    } catch (e) {
+      accessToken = undefined;
+    }
+  }
+  let coachId = null;
+  let authId: string | undefined;
+  if (accessToken) {
+    try {
+      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+      authId =
+        decoded && typeof decoded === "object" && "sub" in decoded
+          ? (decoded.sub as string)
+          : undefined;
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  if (authId) {
+    const { data: user } = await supabase
+      .from("users")
+      .select("id, role, coach_id")
+      .eq("auth_id", authId)
+      .single();
+    if (user) {
+      coachId = user.role === "coach" ? user.id : user.coach_id;
+    }
+  }
+
   // Get week start from query param, default to current week
   const url = new URL(request.url);
   const weekStartParam = url.searchParams.get("weekStart");
@@ -120,6 +162,7 @@ export const loader = async ({
       .from("meal_plans")
       .select("id, title, description, is_active, created_at, activated_at, deactivated_at", { count: "exact" })
       .eq("is_template", true)
+      .eq("user_id", coachId)
       .order("created_at", { ascending: false })
       .range(libraryPlansOffset, libraryPlansOffset + libraryPlansPageSize - 1),
     supabase
@@ -130,7 +173,8 @@ export const loader = async ({
     supabase
       .from("meal_plans")
       .select("id", { count: "exact", head: true })
-      .eq("is_template", true),
+      .eq("is_template", true)
+      .eq("user_id", coachId),
   ]);
 
   // Collect all plan ids for this page
@@ -140,7 +184,7 @@ export const loader = async ({
   // Batch fetch all meals for just these plans
   const { data: allMealsRaw } = await supabase
     .from("meals")
-    .select("id, name, time, sequence_order, meal_plan_id")
+    .select("id, name, time, sequence_order, meal_plan_id, meal_option")
     .in("meal_plan_id", [...mealPlanIds, ...libraryPlanIds].length > 0 ? [...mealPlanIds, ...libraryPlanIds] : [""])
     .order("sequence_order", { ascending: true });
 
@@ -162,7 +206,11 @@ export const loader = async ({
   const mealsByPlan: Record<string, any[]> = {};
   (allMealsRaw || []).forEach((meal: any) => {
     if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
-    mealsByPlan[meal.meal_plan_id].push({ ...meal, foods: foodsByMeal[meal.id] || [] });
+    mealsByPlan[meal.meal_plan_id].push({ 
+      ...meal, 
+      foods: foodsByMeal[meal.id] || [],
+      mealOption: meal.meal_option || 'A'
+    });
   });
 
   // Attach meals to plans
@@ -549,6 +597,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           name: meal.name,
           time: meal.time,
           sequence_order: i,
+          meal_option: meal.mealOption || 'A',
         })
         .select()
         .single();
@@ -566,6 +615,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           name: meal.name,
           time: meal.time,
           sequence_order: i,
+          meal_option: meal.mealOption || 'A',
         })
         .select()
         .single();
@@ -642,6 +692,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             name: meal.name,
             time: meal.time,
             sequence_order: i,
+            meal_option: meal.mealOption || 'A',
           })
           .select()
           .single();
@@ -690,6 +741,7 @@ export type Meal = {
   name: string;
   time: string;
   foods: Food[];
+  mealOption?: 'A' | 'B';
 };
 
 export type MealPlan = {
@@ -1184,6 +1236,7 @@ export default function ClientMeals() {
                       id: typeof meal.id === "number" ? meal.id : idx + 1,
                       name: meal.name ?? "",
                       time: meal.time ?? "",
+                      mealOption: meal.mealOption || 'A',
                       foods: (meal.foods ?? []).map((food: Food) => ({
                         name: food.name ?? "",
                         portion: food.portion ?? "",
