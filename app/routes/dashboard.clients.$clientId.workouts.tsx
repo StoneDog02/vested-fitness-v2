@@ -9,7 +9,7 @@ import { TrashIcon, PencilIcon } from "@heroicons/react/24/outline";
 import { json, redirect } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
-import { useLoaderData, useFetcher, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useFetcher, useSearchParams, useRevalidator } from "@remix-run/react";
 import { ActionFunctionArgs } from "@remix-run/node";
 import type {
   DayPlan,
@@ -865,6 +865,18 @@ export default function ClientWorkouts() {
   const { workoutPlans, libraryPlans, client, complianceData: initialComplianceData, weekStart, workoutPlansHasMore: loaderWorkoutPlansHasMore } = loaderData;
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
+  const revalidator = useRevalidator();
+
+  // Refresh page data when workout plan form submission completes successfully
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      // Form submission completed successfully, revalidate the page data and close modals
+      revalidator.revalidate();
+      setIsCreateModalOpen(false);
+      setIsEditModalOpen(false);
+      setSelectedWorkout(null);
+    }
+  }, [fetcher.state, fetcher.data, revalidator]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutPlan | null>(
@@ -973,8 +985,7 @@ export default function ClientWorkouts() {
     form.append("planName", updated.planName);
     form.append("week", JSON.stringify(updated.week));
     fetcher.submit(form, { method: "post" });
-    setIsEditModalOpen(false);
-    setSelectedWorkout(null);
+    // Don't close modal immediately - let the useEffect handle it after successful submission
   };
 
   const handleCreateWorkout = (workoutData: {
@@ -986,7 +997,7 @@ export default function ClientWorkouts() {
     form.append("planName", workoutData.planName);
     form.append("week", JSON.stringify(workoutData.week));
     fetcher.submit(form, { method: "post" });
-    setIsCreateModalOpen(false);
+    // Don't close modal immediately - let the useEffect handle it after successful submission
   };
 
   // Add day labels and color logic (copied from meals page)
@@ -1507,6 +1518,7 @@ export default function ClientWorkouts() {
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           onSubmit={handleCreateWorkout}
+          isLoading={fetcher.state !== "idle"}
           initialValues={{
             planName: "",
             week: [
@@ -1535,6 +1547,7 @@ export default function ClientWorkouts() {
               setSelectedWorkout(null);
             }}
             onSubmit={handleUpdateWorkout}
+            isLoading={fetcher.state !== "idle"}
             initialValues={{
               planName: selectedWorkout.title,
               week: buildWeekFromPlan(selectedWorkout),

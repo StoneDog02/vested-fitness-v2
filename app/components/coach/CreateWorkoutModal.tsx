@@ -31,6 +31,7 @@ interface CreateWorkoutModalProps {
   };
   title?: string;
   submitLabel?: string;
+  isLoading?: boolean;
 }
 
 const daysOfWeek = [
@@ -56,6 +57,7 @@ export default function CreateWorkoutModal({
   initialValues,
   title = "Create New Workout",
   submitLabel = "Create Workout",
+  isLoading = false,
 }: CreateWorkoutModalProps) {
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [planName, setPlanName] = useState("");
@@ -297,8 +299,9 @@ export default function CreateWorkoutModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={title} size="lg">
-      <form onSubmit={handleSubmit} className="space-y-6">
+    <Modal isOpen={isOpen} onClose={isLoading ? () => {} : onClose} title={title} size="lg">
+      <div className="relative">
+        <form onSubmit={handleSubmit} className="space-y-6">
         {/* Workout Plan Name (overhead) */}
         <div>
           <label
@@ -595,11 +598,20 @@ export default function CreateWorkoutModal({
           </>
         )}
         <div className="flex justify-end">
-          <Button type="submit" variant="primary">
-            {submitLabel}
+          <Button type="submit" variant="primary" disabled={isLoading}>
+            {isLoading ? "Saving..." : submitLabel}
           </Button>
         </div>
+        {isLoading && (
+          <div className="absolute inset-0 bg-white/80 dark:bg-night/80 flex items-center justify-center rounded-b-xl">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+              <p className="text-sm text-secondary dark:text-alabaster">Saving workout plan...</p>
+            </div>
+          </div>
+        )}
       </form>
+      </div>
     </Modal>
   );
 }

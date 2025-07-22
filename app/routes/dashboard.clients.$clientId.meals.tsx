@@ -1,4 +1,4 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useRevalidator } from "@remix-run/react";
 import type { MetaFunction } from "@remix-run/node";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import { json } from "@remix-run/node";
@@ -714,6 +714,17 @@ export default function ClientMeals() {
   const { mealPlans, libraryPlans, client, complianceData: initialComplianceData, mealPlansHasMore: loaderMealPlansHasMore } = loaderData;
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
+  const revalidator = useRevalidator();
+
+  // Refresh page data when meal plan form submission completes successfully
+  React.useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      // Form submission completed successfully, revalidate the page data and close modal
+      revalidator.revalidate();
+      setIsCreateModalOpen(false);
+      setSelectedPlan(null);
+    }
+  }, [fetcher.state, fetcher.data, revalidator]);
 
   // Sort meal plans by createdAt descending
   const activeMealPlan = mealPlans.find((plan) => plan.isActive);
@@ -1209,9 +1220,9 @@ export default function ClientMeals() {
               form.append("intent", "create");
             }
             fetcher.submit(form, { method: "post" });
-            setIsCreateModalOpen(false);
-            setSelectedPlan(null);
+            // Don't close modal immediately - let the useEffect handle it after successful submission
           }}
+          isLoading={fetcher.state !== "idle"}
         />
         {isHistoryModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">

@@ -6,7 +6,7 @@ import AddSupplementModal from "~/components/coach/AddSupplementModal";
 import { json, redirect } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
-import { useLoaderData, useFetcher, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useFetcher, useSearchParams, useRevalidator } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import {
   ChevronLeftIcon,
@@ -279,6 +279,17 @@ export default function ClientSupplements() {
   }>();
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
+  const revalidator = useRevalidator();
+
+  // Refresh page data when supplement form submission completes successfully
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      // Form submission completed successfully, revalidate the page data and close modal
+      revalidator.revalidate();
+      setIsAddModalOpen(false);
+      setEditingSupplement(null);
+    }
+  }, [fetcher.state, fetcher.data, revalidator]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingSupplement, setEditingSupplement] = useState<Supplement | null>(
     null
@@ -600,10 +611,10 @@ export default function ClientSupplements() {
             form.append("frequency", fields.frequency);
             form.append("instructions", fields.instructions);
             fetcher.submit(form, { method: "post" });
-            setIsAddModalOpen(false);
-            setEditingSupplement(null);
+            // Don't close modal immediately - let the useEffect handle it after successful submission
           }}
           editingSupplement={editingSupplement}
+          isLoading={fetcher.state !== "idle"}
         />
       </div>
     </ClientDetailLayout>

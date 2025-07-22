@@ -27,12 +27,14 @@ interface CreateMealPlanFormProps {
   onSubmit: (data: MealPlanFormData) => void;
   onCancel: () => void;
   initialData?: MealPlanFormData;
+  isLoading?: boolean;
 }
 
 export default function CreateMealPlanForm({
   onSubmit,
   onCancel,
   initialData,
+  isLoading = false,
 }: CreateMealPlanFormProps) {
   const [formData, setFormData] = useState<MealPlanFormData>(
     initialData || {
@@ -635,11 +637,11 @@ export default function CreateMealPlanForm({
       </div>
 
       <div className="flex justify-end space-x-3">
-        <Button variant="outline" onClick={onCancel} type="button">
+        <Button variant="outline" onClick={onCancel} type="button" disabled={isLoading}>
           Cancel
         </Button>
-        <Button variant="primary" type="submit">
-          Save Meal Plan
+        <Button variant="primary" type="submit" disabled={isLoading}>
+          {isLoading ? "Saving..." : "Save Meal Plan"}
         </Button>
       </div>
     </form>
