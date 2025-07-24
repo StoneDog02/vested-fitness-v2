@@ -35,7 +35,7 @@ interface Supplement {
   name: string;
   dosage: string;
   frequency: string;
-  instructions: string;
+  instructions?: string;
 }
 
 interface LoaderData {

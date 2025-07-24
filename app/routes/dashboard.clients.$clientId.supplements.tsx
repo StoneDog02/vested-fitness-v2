@@ -21,7 +21,7 @@ interface Supplement {
   name: string;
   dosage: string;
   frequency: string;
-  instructions: string;
+  instructions?: string;
   compliance: number;
 }
 
@@ -227,7 +227,7 @@ export const action = async ({
         name,
         dosage,
         frequency,
-        instructions,
+        instructions: instructions || null,
       })
       .select()
       .single();
@@ -244,7 +244,7 @@ export const action = async ({
     const instructions = formData.get("instructions") as string;
     const { data, error } = await supabase
       .from("supplements")
-      .update({ name, dosage, frequency, instructions })
+      .update({ name, dosage, frequency, instructions: instructions || null })
       .eq("id", id)
       .select()
       .single();
@@ -420,10 +420,12 @@ export default function ClientSupplements() {
                             <span className="font-medium">Frequency:</span>{" "}
                             {supplement.frequency}
                           </p>
-                          <p className="text-sm text-gray-dark dark:text-gray-light">
-                            <span className="font-medium">Instructions:</span>{" "}
-                            {supplement.instructions}
-                          </p>
+                          {supplement.instructions && (
+                            <p className="text-sm text-gray-dark dark:text-gray-light">
+                              <span className="font-medium">Instructions:</span>{" "}
+                              {supplement.instructions}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex gap-2">
@@ -609,7 +611,7 @@ export default function ClientSupplements() {
             form.append("name", fields.name);
             form.append("dosage", fields.dosage);
             form.append("frequency", fields.frequency);
-            form.append("instructions", fields.instructions);
+            form.append("instructions", fields.instructions || "");
             fetcher.submit(form, { method: "post" });
             // Don't close modal immediately - let the useEffect handle it after successful submission
           }}

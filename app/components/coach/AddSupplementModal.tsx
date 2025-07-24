@@ -9,13 +9,13 @@ interface AddSupplementModalProps {
     name: string;
     dosage: string;
     frequency: string;
-    instructions: string;
+    instructions?: string;
   }) => void;
   editingSupplement?: {
     name: string;
     dosage: string;
     frequency: string;
-    instructions: string;
+    instructions?: string;
   } | null;
   isLoading?: boolean;
 }
@@ -41,7 +41,7 @@ export default function AddSupplementModal({
         name: editingSupplement.name,
         dosage: editingSupplement.dosage,
         frequency: editingSupplement.frequency,
-        instructions: editingSupplement.instructions,
+        instructions: editingSupplement.instructions || "",
       });
     } else {
       setFormData({
@@ -148,7 +148,7 @@ export default function AddSupplementModal({
                 htmlFor="instructions"
                 className="block text-sm font-medium text-secondary dark:text-alabaster mb-1"
               >
-                Instructions
+                Instructions (optional)
               </label>
               <textarea
                 id="instructions"
@@ -162,7 +162,6 @@ export default function AddSupplementModal({
                 className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-night text-secondary dark:text-alabaster"
                 placeholder="e.g., Mix 1 scoop with water or juice in the morning"
                 rows={3}
-                required
               />
             </div>
 
