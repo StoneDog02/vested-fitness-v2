@@ -133,6 +133,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return supplementCreatedDate.isSame(today, "day");
     });
     
+    // Debug logging for timezone issues
+    if (isToday) {
+      console.log("API Debug - Today check:", {
+        day: day.format('YYYY-MM-DD'),
+        today: today.format('YYYY-MM-DD'),
+        isToday,
+        supplementsCreatedToday,
+        supplementDates: (supplementsRaw || []).map(s => ({
+          original: s.created_at,
+          converted: dayjs(s.created_at).tz(USER_TIMEZONE).format('YYYY-MM-DD')
+        }))
+      });
+    }
+    
     if (isToday && supplementsCreatedToday) {
       // Return -1 to indicate N/A for today if supplements were created today
       complianceData.push(-1);
