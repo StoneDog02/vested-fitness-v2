@@ -323,16 +323,11 @@ export default function ClientSupplements() {
     setCurrentWeekStart(weekStart);
   }, [initialComplianceData, weekStart]);
 
-  // Week navigation state
+  // Week navigation state - use consistent week start calculation
   const calendarStart = currentWeekStart
-    ? dayjs(currentWeekStart).tz(USER_TIMEZONE).toDate()
-    : (() => {
-        const now = getCurrentDate();
-        const day = now.day();
-        const sunday = now.subtract(day, "day").startOf("day");
-        return sunday.toDate();
-      })();
-  const calendarEnd = dayjs(calendarStart).tz(USER_TIMEZONE).add(6, "day").toDate();
+    ? dayjs.tz(currentWeekStart, USER_TIMEZONE).startOf("day").toDate()
+    : getStartOfWeek().toDate();
+  const calendarEnd = dayjs.tz(currentWeekStart || getStartOfWeek().format('YYYY-MM-DD'), USER_TIMEZONE).add(6, "day").toDate();
   function formatDateShort(date: Date) {
     return `${date.getMonth() + 1}/${date.getDate()}`;
   }
@@ -475,7 +470,7 @@ export default function ClientSupplements() {
                         
                         // Use fetcher for fast data loading
                         const params = new URLSearchParams();
-                        params.set("weekStart", dayjs(prev).tz(USER_TIMEZONE).format('YYYY-MM-DD'));
+                        params.set("weekStart", dayjs.tz(prev, USER_TIMEZONE).format('YYYY-MM-DD'));
                         params.set("clientId", client?.id || "");
                         complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
                       }}
@@ -497,7 +492,7 @@ export default function ClientSupplements() {
                         
                         // Use fetcher for fast data loading
                         const params = new URLSearchParams();
-                        params.set("weekStart", dayjs(next).tz(USER_TIMEZONE).format('YYYY-MM-DD'));
+                        params.set("weekStart", dayjs.tz(next, USER_TIMEZONE).format('YYYY-MM-DD'));
                         params.set("clientId", client?.id || "");
                         complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
                       }}
@@ -510,7 +505,8 @@ export default function ClientSupplements() {
                 </div>
                 <div className="flex flex-col gap-2">
                   {dayLabels.map((label, i) => {
-                    const thisDate = dayjs(calendarStart).tz(USER_TIMEZONE).add(i, "day").startOf("day");
+                    // Use the same day calculation as the API
+                    const thisDate = dayjs.tz(currentWeekStart || getStartOfWeek().format('YYYY-MM-DD'), USER_TIMEZONE).add(i, "day").startOf("day");
                     // Find if a plan exists for this day
                     const planForDay = supplements && supplements.length > 0 ? true : false;
                     const isNoPlan = !planForDay;
