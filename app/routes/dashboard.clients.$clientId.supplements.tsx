@@ -212,7 +212,6 @@ export const action = async ({
     client = clientById;
   }
   if (!client) {
-    console.log("[SUPPLEMENTS][ACTION] No client found, redirecting.");
     return redirect(request.url);
   }
 
@@ -306,6 +305,7 @@ export default function ClientSupplements() {
       const weekStartDate = currentWeekStart ? currentWeekStart.split('T')[0] : '';
       params.set("weekStart", weekStartDate);
       params.set("clientId", client.id);
+
       complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
     }
   }, [client?.id, currentWeekStart]);
@@ -522,19 +522,7 @@ export default function ClientSupplements() {
                     const isToday = thisDate.isSame(today, "day");
                     const isFuture = thisDate.isAfter(today, "day");
                     
-                    // Debug logging for timezone issues
-                    if (i === 0) {
-                      console.log('🔍 [COACH-SUPPLEMENTS] Debug timezone info:', {
-                        today: today.format('YYYY-MM-DD HH:mm:ss'),
-                        todayTz: today.format('Z'),
-                        calendarStart: calendarStart,
-                        thisDate: thisDate.format('YYYY-MM-DD HH:mm:ss'),
-                        thisDateTz: thisDate.format('Z'),
-                        isToday,
-                        dayIndex: i,
-                        label
-                      });
-                    }
+
                     
                     // Determine percentage for display
                     const complianceValue = complianceData[i] || 0;

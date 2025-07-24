@@ -13,11 +13,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const url = new URL(request.url);
   const weekStartParam = url.searchParams.get("weekStart");
-  const clientId = url.searchParams.get("clientId");
+  const clientIdParam = url.searchParams.get("clientId");
 
-  if (!weekStartParam || !clientId) {
+  if (!weekStartParam || !clientIdParam) {
     return json({ error: "Missing weekStart or clientId parameter" }, { status: 400 });
   }
+
+  // Find client by slug or id (parallel)
+  const [initialClientResult, clientByIdResult] = await Promise.all([
+    supabase
+      .from("users")
+      .select("id")
+      .eq("slug", clientIdParam)
+      .single(),
+    supabase
+      .from("users")
+      .select("id")
+      .eq("id", clientIdParam)
+      .single(),
+  ]);
+  
+  const client = initialClientResult.data || clientByIdResult.data;
+  if (!client) {
+    return json({ error: "Client not found" }, { status: 404 });
+  }
+  
+  const clientId = client.id;
 
   const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE).startOf("day");
   const weekEnd = weekStart.add(7, "day");
