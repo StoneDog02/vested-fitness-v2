@@ -69,15 +69,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       continue;
     }
     
-    // Check if any supplements were created today
+    // Check if this is today and if any supplements were created today
+    const isToday = day.isSame(today, "day");
     const supplementsCreatedToday = (supplementsRaw || []).some(supplement => {
       if (!supplement.created_at) return false;
       const createdStr = supplement.created_at.slice(0, 10);
-      return createdStr === dayStr;
+      return createdStr === today.format("YYYY-MM-DD");
     });
     
-    if (supplementsCreatedToday) {
-      // Return -1 to indicate N/A for creation day
+    if (isToday && supplementsCreatedToday) {
+      // Return -1 to indicate N/A for today if supplements were created today
       complianceData.push(-1);
       continue;
     }
