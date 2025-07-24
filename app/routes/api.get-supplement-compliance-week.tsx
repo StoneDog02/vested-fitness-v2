@@ -77,6 +77,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const hasSupplementsAssigned = (supplementsRaw || []).length > 0;
   const today = getCurrentDate();
   
+  // Debug: Log what the server thinks is today
+  console.log("API Debug - Server timezone info:", {
+    serverNow: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+    serverNowUTC: dayjs().utc().format('YYYY-MM-DD HH:mm:ss'),
+    userTimezoneToday: today.format('YYYY-MM-DD'),
+    userTimezone: USER_TIMEZONE,
+    weekStart: weekStart.format('YYYY-MM-DD'),
+    weekEnd: weekEnd.format('YYYY-MM-DD')
+  });
+  
   for (let i = 0; i < 7; i++) {
     const day = weekStart.add(i, "day");
     const dayStr = day.format("YYYY-MM-DD"); // Get YYYY-MM-DD format
@@ -133,25 +143,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return supplementCreatedDate.isSame(today, "day");
     });
     
-    // Debug logging for timezone issues
-    if (isToday) {
-      console.log("API Debug - Today check:", {
-        day: day.format('YYYY-MM-DD'),
-        today: today.format('YYYY-MM-DD'),
-        isToday,
-        supplementsCreatedToday,
-        supplementDates: (supplementsRaw || []).map(s => ({
-          original: s.created_at,
-          converted: dayjs(s.created_at).tz(USER_TIMEZONE).format('YYYY-MM-DD')
-        }))
-      });
-    }
+
     
-    if (isToday && supplementsCreatedToday) {
-      // Return -1 to indicate N/A for today if supplements were created today
-      complianceData.push(-1);
-      continue;
-    }
+    // Don't show N/A for today even if supplements were created today
+    // Show actual compliance for today
     
     // For each supplement, check if a completion exists for this day
     const supplementIds = (supplementsRaw || []).map((s) => s.id);

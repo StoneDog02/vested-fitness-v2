@@ -533,10 +533,6 @@ export default function ClientSupplements() {
                       // Client was not signed up yet - N/A
                       displayPercentage = 0;
                       barColor = 'transparent';
-                    } else if (complianceValue === -1) {
-                      // Supplements added today - N/A
-                      displayPercentage = 0;
-                      barColor = 'transparent';
                     } else if (complianceValue === -2) {
                       // No supplements assigned - N/A
                       displayPercentage = 0;
@@ -574,8 +570,6 @@ export default function ClientSupplements() {
                           <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
                             {complianceValue === -3 ? (
                               <NABadge reason="Client was not signed up yet" />
-                            ) : complianceValue === -1 ? (
-                              <NABadge reason="Supplements added today - compliance starts tomorrow" />
                             ) : complianceValue === -2 ? (
                               <NABadge reason="No supplements assigned by coach" />
                             ) : isToday ? (
