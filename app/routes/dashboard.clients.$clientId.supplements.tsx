@@ -520,6 +520,17 @@ export default function ClientSupplements() {
                     const isToday = thisDate.isSame(today, "day");
                     const isFuture = thisDate.isAfter(today, "day");
                     
+                    // Debug logging for timezone issues
+                    if (label === "Fri") {
+                      console.log("Frontend Debug - Friday check:", {
+                        thisDate: thisDate.format('YYYY-MM-DD'),
+                        today: today.format('YYYY-MM-DD'),
+                        isToday,
+                        isFuture,
+                        label
+                      });
+                    }
+                    
 
                     
                     // Determine percentage for display
