@@ -77,15 +77,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const hasSupplementsAssigned = (supplementsRaw || []).length > 0;
   const today = getCurrentDate();
   
-  // Debug: Log what the server thinks is today
-  console.log("API Debug - Server timezone info:", {
-    serverNow: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-    serverNowUTC: dayjs().utc().format('YYYY-MM-DD HH:mm:ss'),
-    userTimezoneToday: today.format('YYYY-MM-DD'),
-    userTimezone: USER_TIMEZONE,
-    weekStart: weekStart.format('YYYY-MM-DD'),
-    weekEnd: weekEnd.format('YYYY-MM-DD')
-  });
+
   
   for (let i = 0; i < 7; i++) {
     const day = weekStart.add(i, "day");
