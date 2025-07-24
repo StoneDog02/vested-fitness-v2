@@ -531,6 +531,11 @@ export default function ClientSupplements() {
                       });
                     }
                     
+                    // Debug: log all compliance values to see the mapping
+                    if (i === 0) {
+                      console.log('🔍 [FRONTEND] All compliance values:', complianceData);
+                    }
+                    
 
                     
 

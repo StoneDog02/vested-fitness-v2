@@ -43,7 +43,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 
 
-  const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE).startOf("day");
+  const weekStart = dayjs(weekStartParam).tz(USER_TIMEZONE);
   const weekEnd = weekStart.add(7, "day");
 
   // Fetch all supplements for this client
