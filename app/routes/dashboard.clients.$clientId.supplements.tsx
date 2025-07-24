@@ -537,19 +537,31 @@ export default function ClientSupplements() {
                     }
                     
                     // Determine percentage for display
-                    const percentage = Math.round((complianceData[i] || 0) * 100);
-                    let displayPercentage = percentage;
+                    const complianceValue = complianceData[i] || 0;
+                    let percentage = 0;
+                    let displayPercentage = 0;
                     let barColor = 'transparent';
                     
-                    // Handle N/A case (complianceData[i] === -1)
-                    if (complianceData[i] === -1) {
+                    // Handle special cases first
+                    if (complianceValue === -1) {
+                      // Supplements added today - N/A
                       displayPercentage = 0;
                       barColor = 'transparent';
-                    } else if (isFuture || (isToday && complianceData[i] === 0)) {
+                    } else if (complianceValue === -2) {
+                      // No supplements assigned - N/A
                       displayPercentage = 0;
                       barColor = 'transparent';
-                    } else if (displayPercentage > 0) {
-                      barColor = getBarColor(complianceData[i] || 0);
+                    } else if (isFuture || (isToday && complianceValue === 0)) {
+                      // Future days or today with no completions
+                      displayPercentage = 0;
+                      barColor = 'transparent';
+                    } else {
+                      // Normal case - convert decimal to percentage
+                      percentage = Math.round(complianceValue * 100);
+                      displayPercentage = percentage;
+                      if (percentage > 0) {
+                        barColor = getBarColor(complianceValue);
+                      }
                     }
                     
                     return (
@@ -572,8 +584,10 @@ export default function ClientSupplements() {
                           <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
                             {isBeforeSignup ? (
                               <NABadge reason="Client was not signed up yet" />
-                            ) : complianceData[i] === -1 ? (
+                            ) : complianceValue === -1 ? (
                               <NABadge reason="Supplements added today - compliance starts tomorrow" />
+                            ) : complianceValue === -2 ? (
+                              <NABadge reason="No supplements assigned by coach" />
                             ) : isToday ? (
                               <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                             ) : isFuture ? (
