@@ -325,17 +325,14 @@ export default function ClientSupplements() {
 
   // Week navigation state
   const calendarStart = currentWeekStart
-    ? new Date(currentWeekStart)
+    ? dayjs(currentWeekStart).tz(USER_TIMEZONE).toDate()
     : (() => {
-        const now = new Date();
-        const day = now.getDay();
-        const sunday = new Date(now);
-        sunday.setDate(now.getDate() - day);
-        sunday.setHours(0, 0, 0, 0);
-        return sunday;
+        const now = getCurrentDate();
+        const day = now.day();
+        const sunday = now.subtract(day, "day").startOf("day");
+        return sunday.toDate();
       })();
-  const calendarEnd = new Date(calendarStart);
-  calendarEnd.setDate(calendarStart.getDate() + 6);
+  const calendarEnd = dayjs(calendarStart).tz(USER_TIMEZONE).add(6, "day").toDate();
   function formatDateShort(date: Date) {
     return `${date.getMonth() + 1}/${date.getDate()}`;
   }
@@ -521,6 +518,18 @@ export default function ClientSupplements() {
                     const today = getCurrentDate().startOf("day");
                     const isToday = thisDate.isSame(today, "day");
                     const isFuture = thisDate.isAfter(today, "day");
+                    
+                    // Debug logging for frontend dates
+                    if (i === 0) {
+                      console.log('🔍 [FRONTEND] Debug calendar dates:', {
+                        calendarStart: dayjs(calendarStart).tz(USER_TIMEZONE).format('YYYY-MM-DD HH:mm:ss'),
+                        thisDate: thisDate.format('YYYY-MM-DD HH:mm:ss'),
+                        today: today.format('YYYY-MM-DD HH:mm:ss'),
+                        label,
+                        index: i,
+                        complianceValue: complianceData[i]
+                      });
+                    }
                     
 
                     
