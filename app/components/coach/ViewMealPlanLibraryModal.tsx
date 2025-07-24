@@ -3,23 +3,44 @@ import Modal from "~/components/ui/Modal";
 import Button from "~/components/ui/Button";
 import type { MealPlan } from "~/routes/dashboard.clients.$clientId.meals";
 import { useFetcher } from "@remix-run/react";
+import { TrashIcon } from "@heroicons/react/24/outline";
 
 type ViewMealPlanLibraryModalProps = {
   isOpen: boolean;
   onClose: () => void;
   libraryPlans: MealPlan[];
+  onTemplateDeleted?: (templateId: string) => void;
 };
 
 export default function ViewMealPlanLibraryModal({
   isOpen,
   onClose,
   libraryPlans: initialLibraryPlans,
+  onTemplateDeleted,
 }: ViewMealPlanLibraryModalProps) {
   const fetcher = useFetcher();
   const [libraryPlans, setLibraryPlans] = useState(initialLibraryPlans);
   const [libraryPlansPage, setLibraryPlansPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Handle template deletion
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      // Check if this was a template deletion
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("deletedTemplate")) {
+        const deletedTemplateId = url.searchParams.get("deletedTemplate");
+        if (deletedTemplateId) {
+          setLibraryPlans(prev => prev.filter(plan => plan.id !== deletedTemplateId));
+          onTemplateDeleted?.(deletedTemplateId);
+          // Clean up the URL
+          url.searchParams.delete("deletedTemplate");
+          window.history.replaceState({}, "", url.toString());
+        }
+      }
+    }
+  }, [fetcher.state, fetcher.data, onTemplateDeleted]);
 
   // Load more plans when scrolled to bottom
   useEffect(() => {
@@ -91,17 +112,35 @@ export default function ViewMealPlanLibraryModal({
                     <h3 className="font-medium text-secondary dark:text-alabaster">
                       {plan.title}
                     </h3>
-                    <fetcher.Form method="post">
-                      <input type="hidden" name="intent" value="useTemplate" />
-                      <input type="hidden" name="templateId" value={plan.id} />
-                      <button
-                        type="submit"
-                        className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
-                        title="Use Template"
-                      >
-                        Use Template
-                      </button>
-                    </fetcher.Form>
+                    <div className="flex gap-2">
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="useTemplate" />
+                        <input type="hidden" name="templateId" value={plan.id} />
+                        <button
+                          type="submit"
+                          className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
+                          title="Use Template"
+                        >
+                          Use Template
+                        </button>
+                      </fetcher.Form>
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="deleteTemplate" />
+                        <input type="hidden" name="templateId" value={plan.id} />
+                        <button
+                          type="submit"
+                          className="text-red-500 hover:text-red-600 p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/20"
+                          title="Delete Template"
+                          onClick={(e) => {
+                            if (!confirm("Are you sure you want to delete this template? This action cannot be undone.")) {
+                              e.preventDefault();
+                            }
+                          }}
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      </fetcher.Form>
+                    </div>
                   </div>
                   <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
                     {plan.description}

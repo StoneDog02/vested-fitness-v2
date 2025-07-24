@@ -615,6 +615,55 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(request.url);
   }
 
+  if (intent === "deleteTemplate") {
+    const templateId = formData.get("templateId") as string;
+    
+    // Verify this is a template owned by the coach
+    const { data: template, error: templateError } = await supabase
+      .from("workout_plans")
+      .select("id, is_template, user_id")
+      .eq("id", templateId)
+      .single();
+
+    if (templateError || !template) {
+      return json({ error: "Template not found" }, { status: 404 });
+    }
+
+    if (!template.is_template || template.user_id !== coachId) {
+      return json({ error: "Unauthorized to delete this template" }, { status: 403 });
+    }
+
+    // Get all workout days for this template
+    const { data: days } = await supabase
+      .from("workout_days")
+      .select("id")
+      .eq("workout_plan_id", templateId);
+    
+    // Delete all workout exercises for these days
+    if (days) {
+      for (const day of days) {
+        await supabase
+          .from("workout_exercises")
+          .delete()
+          .eq("workout_day_id", day.id);
+      }
+    }
+    
+    // Delete the workout days
+    await supabase
+      .from("workout_days")
+      .delete()
+      .eq("workout_plan_id", templateId);
+    
+    // Delete the workout plan template
+    await supabase
+      .from("workout_plans")
+      .delete()
+      .eq("id", templateId);
+    
+    return redirect(`${request.url}?deletedTemplate=${templateId}`);
+  }
+
   if (intent === "create") {
     // First, create template plan
     const { data: newTemplate, error: templateError } = await supabase
@@ -906,10 +955,13 @@ export default function ClientWorkouts() {
     weekStart: string;
     workoutPlansHasMore?: boolean;
   }>();
-  const { workoutPlans, libraryPlans, client, complianceData: initialComplianceData, weekStart, workoutPlansHasMore: loaderWorkoutPlansHasMore } = loaderData;
+  const { workoutPlans, libraryPlans: initialLibraryPlans, client, complianceData: initialComplianceData, weekStart, workoutPlansHasMore: loaderWorkoutPlansHasMore } = loaderData;
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   const revalidator = useRevalidator();
+  
+  // State for library plans
+  const [libraryPlans, setLibraryPlans] = useState(initialLibraryPlans);
 
   // Refresh page data when workout plan form submission completes successfully
   useEffect(() => {
@@ -1622,6 +1674,10 @@ export default function ClientWorkouts() {
                 : null,
             })),
           }))}
+          onTemplateDeleted={(templateId) => {
+            // Update the local library plans state
+            setLibraryPlans(prev => prev.filter(plan => plan.id !== templateId));
+          }}
         />
       </div>
     </ClientDetailLayout>

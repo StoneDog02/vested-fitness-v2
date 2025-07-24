@@ -524,6 +524,43 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(request.url);
   }
 
+  if (intent === "deleteTemplate") {
+    const templateId = formData.get("templateId") as string;
+    
+    // Verify this is a template owned by the coach
+    const { data: template, error: templateError } = await supabase
+      .from("meal_plans")
+      .select("id, is_template, user_id")
+      .eq("id", templateId)
+      .single();
+
+    if (templateError || !template) {
+      return json({ error: "Template not found" }, { status: 404 });
+    }
+
+    if (!template.is_template || template.user_id !== coachId) {
+      return json({ error: "Unauthorized to delete this template" }, { status: 403 });
+    }
+
+    // Get all meals for this template
+    const { data: meals } = await supabase
+      .from("meals")
+      .select("id")
+      .eq("meal_plan_id", templateId);
+
+    // Delete foods, meals, then template plan
+    if (meals) {
+      for (const meal of meals) {
+        await supabase.from("foods").delete().eq("meal_id", meal.id);
+      }
+      await supabase.from("meals").delete().eq("meal_plan_id", templateId);
+    }
+    
+    await supabase.from("meal_plans").delete().eq("id", templateId);
+    
+    return redirect(`${request.url}?deletedTemplate=${templateId}`);
+  }
+
   // Create or edit
   const title = formData.get("title") as string;
   const description = formData.get("description") as string;
@@ -763,10 +800,13 @@ export default function ClientMeals() {
     complianceData: number[];
     mealPlansHasMore?: boolean;
   }>();
-  const { mealPlans, libraryPlans, client, complianceData: initialComplianceData, mealPlansHasMore: loaderMealPlansHasMore } = loaderData;
+  const { mealPlans, libraryPlans: initialLibraryPlans, client, complianceData: initialComplianceData, mealPlansHasMore: loaderMealPlansHasMore } = loaderData;
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   const revalidator = useRevalidator();
+  
+  // State for library plans
+  const [libraryPlans, setLibraryPlans] = React.useState(initialLibraryPlans);
 
   // Refresh page data when meal plan form submission completes successfully
   React.useEffect(() => {
@@ -1400,6 +1440,10 @@ export default function ClientMeals() {
           isOpen={isLibraryModalOpen}
           onClose={() => setIsLibraryModalOpen(false)}
           libraryPlans={libraryPlans}
+          onTemplateDeleted={(templateId) => {
+            // Update the local library plans state
+            setLibraryPlans(prev => prev.filter(plan => plan.id !== templateId));
+          }}
         />
       </div>
     </ClientDetailLayout>
