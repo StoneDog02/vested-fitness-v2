@@ -12,6 +12,7 @@ export function init() {
     "OPENAI_API_KEY",
     "SUPABASE_URL",
     "SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_KEY",
     "SESSION_SECRET",
   ].forEach(getEnvVar);
 }

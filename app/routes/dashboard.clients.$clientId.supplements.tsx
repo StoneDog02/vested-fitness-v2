@@ -512,8 +512,6 @@ export default function ClientSupplements() {
                 <div className="flex flex-col gap-2">
                   {dayLabels.map((label, i) => {
                     const thisDate = dayjs(calendarStart).tz(USER_TIMEZONE).add(i, "day").startOf("day");
-                    const signupDate = client?.created_at ? dayjs(client.created_at).tz(USER_TIMEZONE).startOf("day") : null;
-                    const isBeforeSignup = signupDate && thisDate.isBefore(signupDate, "day");
                     // Find if a plan exists for this day
                     const planForDay = supplements && supplements.length > 0 ? true : false;
                     const isNoPlan = !planForDay;
@@ -531,7 +529,11 @@ export default function ClientSupplements() {
                     let barColor = 'transparent';
                     
                     // Handle special cases first
-                    if (complianceValue === -1) {
+                    if (complianceValue === -3) {
+                      // Client was not signed up yet - N/A
+                      displayPercentage = 0;
+                      barColor = 'transparent';
+                    } else if (complianceValue === -1) {
                       // Supplements added today - N/A
                       displayPercentage = 0;
                       barColor = 'transparent';
@@ -570,7 +572,7 @@ export default function ClientSupplements() {
                             />
                           </div>
                           <span className="ml-4 text-xs font-medium text-right whitespace-nowrap min-w-[40px]">
-                            {isBeforeSignup ? (
+                            {complianceValue === -3 ? (
                               <NABadge reason="Client was not signed up yet" />
                             ) : complianceValue === -1 ? (
                               <NABadge reason="Supplements added today - compliance starts tomorrow" />
@@ -579,7 +581,7 @@ export default function ClientSupplements() {
                             ) : isToday ? (
                               <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                             ) : isFuture ? (
-                              <span className="text-gray-500">Pending</span>
+                              <span className="text-gray-700 dark:text-gray-300">Pending</span>
                             ) : isNoPlan ? (
                               <NABadge reason="Plan hasn’t been created for client yet" />
                             ) : (

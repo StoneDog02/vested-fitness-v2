@@ -248,6 +248,35 @@ export interface Database {
           created_at?: string;
         };
       };
+      supplements: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          dosage: string;
+          frequency: string;
+          instructions: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          dosage: string;
+          frequency: string;
+          instructions?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          dosage?: string;
+          frequency?: string;
+          instructions?: string;
+          created_at?: string;
+        };
+      };
     };
   };
 }
