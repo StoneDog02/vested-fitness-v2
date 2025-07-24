@@ -75,9 +75,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Build complianceData: for each day, percent of supplements completed
   const complianceData: number[] = [];
   const hasSupplementsAssigned = (supplementsRaw || []).length > 0;
-  const today = getCurrentDate();
+    const today = getCurrentDate();
 
-
+  console.log('🔍 [SUPPLEMENT COMPLIANCE] Week range:', {
+    weekStartParam,
+    weekStart: weekStart.format('YYYY-MM-DD HH:mm:ss'),
+    weekEnd: weekEnd.format('YYYY-MM-DD HH:mm:ss'),
+    today: today.format('YYYY-MM-DD HH:mm:ss')
+  });
   
 
   
@@ -132,12 +137,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Check if any supplements were created on this specific day
     const supplementsCreatedOnThisDay = (supplementsRaw || []).some(supplement => {
       if (!supplement.created_at) return false;
-      const supplementCreatedDate = dayjs(supplement.created_at).tz(USER_TIMEZONE).startOf("day");
-      return supplementCreatedDate.isSame(day, "day");
+      
+      // Try direct date comparison without timezone conversion
+      const supplementCreatedDate = supplement.created_at.split('T')[0]; // Get YYYY-MM-DD from UTC timestamp
+      const isCreatedOnThisDay = supplementCreatedDate === dayStr;
+      
+      // Debug logging for supplement creation dates
+      if (i === 0) { // Only log for first day to avoid spam
+        console.log('🔍 [SUPPLEMENT COMPLIANCE] Debug supplement dates:', {
+          dayStr: dayStr,
+          supplementCreatedAt: supplement.created_at,
+          supplementCreatedDate: supplementCreatedDate,
+          isCreatedOnThisDay
+        });
+      }
+      
+      return isCreatedOnThisDay;
     });
     
     // If supplements were created on this day, show -1 (supplements added today - compliance starts tomorrow)
     if (supplementsCreatedOnThisDay) {
+      console.log('📅 [SUPPLEMENT COMPLIANCE] Setting -1 for day:', dayStr);
       complianceData.push(-1);
       continue;
     }
