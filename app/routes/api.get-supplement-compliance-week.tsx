@@ -76,6 +76,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const complianceData: number[] = [];
   const hasSupplementsAssigned = (supplementsRaw || []).length > 0;
   const today = getCurrentDate();
+
+
   
 
   

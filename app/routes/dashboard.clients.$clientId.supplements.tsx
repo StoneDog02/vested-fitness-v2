@@ -172,7 +172,7 @@ export const loader = async ({
   const result = {
     supplements,
     complianceData,
-    weekStart: weekStart.toISOString(),
+    weekStart: dayjs(weekStart).tz(USER_TIMEZONE).format('YYYY-MM-DD'),
     client: { id: client.id, created_at: client.created_at, name: "Client" },
   };
   // Cache result
@@ -301,8 +301,8 @@ export default function ClientSupplements() {
   useEffect(() => {
     if (client?.id) {
       const params = new URLSearchParams();
-      // Convert ISO string to YYYY-MM-DD format to avoid timezone issues
-      const weekStartDate = currentWeekStart ? currentWeekStart.split('T')[0] : '';
+      // weekStart is already in YYYY-MM-DD format
+      const weekStartDate = currentWeekStart || '';
       params.set("weekStart", weekStartDate);
       params.set("clientId", client.id);
 
@@ -478,7 +478,7 @@ export default function ClientSupplements() {
                         
                         // Use fetcher for fast data loading
                         const params = new URLSearchParams();
-                        params.set("weekStart", prev.toISOString().split('T')[0]); // Use YYYY-MM-DD format
+                        params.set("weekStart", dayjs(prev).tz(USER_TIMEZONE).format('YYYY-MM-DD'));
                         params.set("clientId", client?.id || "");
                         complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
                       }}
@@ -500,7 +500,7 @@ export default function ClientSupplements() {
                         
                         // Use fetcher for fast data loading
                         const params = new URLSearchParams();
-                        params.set("weekStart", next.toISOString().split('T')[0]); // Use YYYY-MM-DD format
+                        params.set("weekStart", dayjs(next).tz(USER_TIMEZONE).format('YYYY-MM-DD'));
                         params.set("clientId", client?.id || "");
                         complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
                       }}
