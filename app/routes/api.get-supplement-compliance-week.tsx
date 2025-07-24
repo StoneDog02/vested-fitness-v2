@@ -127,16 +127,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       continue;
     }
     
-    // Check if this is today and if any supplements were created today
-    const isToday = day.isSame(today, "day");
-    const supplementsCreatedToday = (supplementsRaw || []).some(supplement => {
+    // Check if any supplements were created on this specific day
+    const supplementsCreatedOnThisDay = (supplementsRaw || []).some(supplement => {
       if (!supplement.created_at) return false;
       const supplementCreatedDate = dayjs(supplement.created_at).tz(USER_TIMEZONE).startOf("day");
-      return supplementCreatedDate.isSame(today, "day");
+      return supplementCreatedDate.isSame(day, "day");
     });
     
-    // If supplements were created today, show -1 (supplements added today - compliance starts tomorrow)
-    if (isToday && supplementsCreatedToday) {
+    // If supplements were created on this day, show -1 (supplements added today - compliance starts tomorrow)
+    if (supplementsCreatedOnThisDay) {
       complianceData.push(-1);
       continue;
     }
