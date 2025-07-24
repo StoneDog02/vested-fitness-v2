@@ -4,7 +4,7 @@ import Button from "~/components/ui/Button";
 interface SetData {
   setNumber: number;
   weight?: number;
-  reps: number;
+  reps: string;
   completed?: boolean;
   notes?: string;
 }

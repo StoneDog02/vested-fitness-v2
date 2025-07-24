@@ -48,8 +48,8 @@ interface Group {
   exercises: Array<{
     name: string;
     videoUrl?: string;
-    sets: number;
-    reps: number;
+    sets: string;
+    reps: string;
     notes?: string;
   }>;
 }
@@ -1596,7 +1596,7 @@ export default function ClientWorkouts() {
                       id: `${groupIdx}-${exIdx}`,
                       name: ex.name,
                       description: ex.notes || "",
-                      sets: Array.from({ length: ex.sets }).map((_, i) => ({
+                      sets: Array.from({ length: typeof ex.sets === "number" ? ex.sets : parseInt(ex.sets) || 1 }).map((_, i) => ({
                         setNumber: i + 1,
                         reps: ex.reps,
                         weight: undefined,
@@ -1666,8 +1666,8 @@ export default function ClientWorkouts() {
                     exercises: (day.workout.exercises || []).flatMap((group: any) =>
                       (group.exercises || []).map((ex: any) => ({
                         name: ex.name,
-                        sets: typeof ex.sets === "number" ? ex.sets : 3,
-                        reps: typeof ex.reps === "number" ? ex.reps : 10,
+                        sets: ex.sets,
+                        reps: ex.reps,
                       }))
                     ),
                   }

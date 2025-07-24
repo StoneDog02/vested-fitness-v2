@@ -8,8 +8,8 @@ interface WorkoutSection {
   name: string;
   videoUrl?: string;
   videoFile?: File;
-  sets: number;
-  reps: number;
+  sets: string;
+  reps: string;
   notes?: string;
 }
 
@@ -120,7 +120,7 @@ export default function CreateWorkoutModal({
               groups: prev[currentDay]?.groups || [
                 {
                   type: "Single",
-                  exercises: [{ name: "", sets: 3, reps: 10 }],
+                  exercises: [{ name: "", sets: "", reps: "" }],
                 },
               ],
             }
@@ -131,7 +131,7 @@ export default function CreateWorkoutModal({
   const handleGroupTypeChange = (groupIdx: number, newType: WorkoutType) => {
     setWeekPlans((prev) => {
       const groups = prev[currentDay]?.groups || [
-        { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+        { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
       ];
       return {
         ...prev,
@@ -144,16 +144,16 @@ export default function CreateWorkoutModal({
                   type: newType,
                   exercises:
                     newType === "Single"
-                      ? [{ name: "", sets: 3, reps: 10 }]
+                      ? [{ name: "", sets: "", reps: "" }]
                       : newType === "Super Set"
                       ? [
-                          { name: "", sets: 3, reps: 10 },
-                          { name: "", sets: 3, reps: 10 },
+                          { name: "", sets: "", reps: "" },
+                          { name: "", sets: "", reps: "" },
                         ]
                       : [
-                          { name: "", sets: 3, reps: 10 },
-                          { name: "", sets: 3, reps: 10 },
-                          { name: "", sets: 3, reps: 10 },
+                          { name: "", sets: "", reps: "" },
+                          { name: "", sets: "", reps: "" },
+                          { name: "", sets: "", reps: "" },
                         ],
                 }
               : group
@@ -172,7 +172,7 @@ export default function CreateWorkoutModal({
   ) => {
     setWeekPlans((prev) => {
       const groups = prev[currentDay]?.groups || [
-        { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+        { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
       ];
       return {
         ...prev,
@@ -196,7 +196,7 @@ export default function CreateWorkoutModal({
   const addExerciseToGroup = (groupIdx: number) => {
     setWeekPlans((prev) => {
       const groups = prev[currentDay]?.groups || [
-        { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+        { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
       ];
       return {
         ...prev,
@@ -208,7 +208,7 @@ export default function CreateWorkoutModal({
                   ...group,
                   exercises: [
                     ...group.exercises,
-                    { name: "", sets: 3, reps: 10 },
+                    { name: "", sets: "", reps: "" },
                   ],
                 }
               : group
@@ -221,7 +221,7 @@ export default function CreateWorkoutModal({
   const removeExerciseFromGroup = (groupIdx: number, exIdx: number) => {
     setWeekPlans((prev) => {
       const groups = prev[currentDay]?.groups || [
-        { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+        { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
       ];
       return {
         ...prev,
@@ -243,7 +243,7 @@ export default function CreateWorkoutModal({
   const addGroup = () => {
     setWeekPlans((prev) => {
       const groups = prev[currentDay]?.groups || [
-        { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+        { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
       ];
       return {
         ...prev,
@@ -251,7 +251,7 @@ export default function CreateWorkoutModal({
           ...prev[currentDay],
           groups: [
             ...groups,
-            { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+            { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
           ],
         },
       };
@@ -261,7 +261,7 @@ export default function CreateWorkoutModal({
   const removeGroup = (groupIdx: number) => {
     setWeekPlans((prev) => {
       const groups = prev[currentDay]?.groups || [
-        { type: "Single", exercises: [{ name: "", sets: 3, reps: 10 }] },
+        { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
       ];
       return {
         ...prev,
@@ -370,7 +370,7 @@ export default function CreateWorkoutModal({
                 currentPlan.groups || [
                   {
                     type: "Single",
-                    exercises: [{ name: "", sets: 3, reps: 10 }],
+                    exercises: [{ name: "", sets: "", reps: "" }],
                   },
                 ]
               ).map((group, groupIdx) => (
@@ -471,17 +471,17 @@ export default function CreateWorkoutModal({
                               </label>
                               <input
                                 id={`sets-${groupIdx}-${exIdx}`}
-                                type="number"
-                                min={1}
+                                type="text"
                                 value={exercise.sets}
                                 onChange={(e) =>
                                   handleExerciseChange(
                                     groupIdx,
                                     exIdx,
                                     "sets",
-                                    Number(e.target.value)
+                                    e.target.value
                                   )
                                 }
+                                placeholder="e.g., 3, AMRAP, 5-8"
                                 className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
                                 required
                               />
@@ -495,17 +495,17 @@ export default function CreateWorkoutModal({
                               </label>
                               <input
                                 id={`reps-${groupIdx}-${exIdx}`}
-                                type="number"
-                                min={1}
+                                type="text"
                                 value={exercise.reps}
                                 onChange={(e) =>
                                   handleExerciseChange(
                                     groupIdx,
                                     exIdx,
                                     "reps",
-                                    Number(e.target.value)
+                                    e.target.value
                                   )
                                 }
+                                placeholder="e.g., 10, AMRAP, 8-12"
                                 className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
                                 required
                               />
