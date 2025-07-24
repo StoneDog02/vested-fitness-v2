@@ -541,6 +541,10 @@ export default function ClientSupplements() {
                       // No supplements assigned - N/A
                       displayPercentage = 0;
                       barColor = 'transparent';
+                    } else if (complianceValue === -1) {
+                      // Supplements added today - compliance starts tomorrow
+                      displayPercentage = 0;
+                      barColor = 'transparent';
                     } else if (isFuture || (isToday && complianceValue === 0)) {
                       // Future days or today with no completions
                       displayPercentage = 0;
@@ -576,12 +580,14 @@ export default function ClientSupplements() {
                               <NABadge reason="Client was not signed up yet" />
                             ) : complianceValue === -2 ? (
                               <NABadge reason="No supplements assigned by coach" />
+                            ) : complianceValue === -1 ? (
+                              <NABadge reason="Supplements added today - compliance starts tomorrow" />
                             ) : isToday ? (
                               <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                             ) : isFuture ? (
                               <span className="text-gray-700 dark:text-gray-300">Pending</span>
                             ) : isNoPlan ? (
-                              <NABadge reason="Plan hasn’t been created for client yet" />
+                              <NABadge reason="Plan hasn't been created for client yet" />
                             ) : (
                               `${percentage}%`
                             )}

@@ -135,10 +135,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return supplementCreatedDate.isSame(today, "day");
     });
     
-
-    
-    // Don't show N/A for today even if supplements were created today
-    // Show actual compliance for today
+    // If supplements were created today, show -1 (supplements added today - compliance starts tomorrow)
+    if (isToday && supplementsCreatedToday) {
+      complianceData.push(-1);
+      continue;
+    }
     
     // For each supplement, check if a completion exists for this day
     const supplementIds = (supplementsRaw || []).map((s) => s.id);
