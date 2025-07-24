@@ -129,8 +129,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const isToday = day.isSame(today, "day");
     const supplementsCreatedToday = (supplementsRaw || []).some(supplement => {
       if (!supplement.created_at) return false;
-      const createdStr = supplement.created_at.slice(0, 10);
-      return createdStr === today.format("YYYY-MM-DD");
+      const supplementCreatedDate = dayjs(supplement.created_at).tz(USER_TIMEZONE).startOf("day");
+      return supplementCreatedDate.isSame(today, "day");
     });
     
     if (isToday && supplementsCreatedToday) {
