@@ -455,13 +455,57 @@ export default function ClientSupplements() {
             ) : (
               supplements.map((supplement) => (
                 <Card key={supplement.id}>
-                  <div className="p-6">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="text-xl font-semibold text-secondary dark:text-alabaster mb-2">
-                          {supplement.name}
-                        </h3>
-                        <div className="space-y-2">
+                  <div className="p-4 sm:p-6">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <h3 className="text-lg sm:text-xl font-semibold text-secondary dark:text-alabaster truncate">
+                            {supplement.name}
+                          </h3>
+                          <div className="flex gap-1 sm:gap-2 flex-shrink-0">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditClick(supplement)}
+                              className="text-xs sm:text-sm px-2 sm:px-3"
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 p-2"
+                              onClick={() => {
+                                handleRemoveClick(supplement.id);
+                                const formData = new FormData();
+                                formData.append("intent", "remove");
+                                formData.append("id", supplement.id);
+                                fetcher.submit(formData, { method: "post" });
+                              }}
+                              disabled={removingSupplementId === supplement.id}
+                            >
+                              {removingSupplementId === supplement.id ? (
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500"></div>
+                              ) : (
+                                <svg
+                                  className="h-4 w-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                  xmlns="http://www.w3.org/2000/svg"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                  />
+                                </svg>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="space-y-1 sm:space-y-2">
                           <p className="text-sm text-gray-dark dark:text-gray-light">
                             <span className="font-medium">Dosage:</span>{" "}
                             {supplement.dosage}
@@ -477,37 +521,6 @@ export default function ClientSupplements() {
                             </p>
                           )}
                         </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEditClick(supplement)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
-                          onClick={() => {
-                            handleRemoveClick(supplement.id);
-                            const formData = new FormData();
-                            formData.append("intent", "remove");
-                            formData.append("id", supplement.id);
-                            fetcher.submit(formData, { method: "post" });
-                          }}
-                          disabled={removingSupplementId === supplement.id}
-                        >
-                          {removingSupplementId === supplement.id ? (
-                            <>
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500 mr-2"></div>
-                              Removing...
-                            </>
-                          ) : (
-                            'Remove'
-                          )}
-                        </Button>
                       </div>
                     </div>
                   </div>
