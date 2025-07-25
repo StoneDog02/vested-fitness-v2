@@ -257,6 +257,7 @@ export interface Database {
           frequency: string;
           instructions: string;
           created_at: string;
+          active_from: string;
         };
         Insert: {
           id?: string;
@@ -266,6 +267,7 @@ export interface Database {
           frequency: string;
           instructions?: string;
           created_at?: string;
+          active_from?: string;
         };
         Update: {
           id?: string;
@@ -275,6 +277,7 @@ export interface Database {
           frequency?: string;
           instructions?: string;
           created_at?: string;
+          active_from?: string;
         };
       };
     };

@@ -22,6 +22,7 @@ interface Supplement {
   dosage: string;
   frequency: string;
   instructions?: string;
+  active_from?: string;
   compliance: number;
 }
 
@@ -95,7 +96,7 @@ export const loader = async ({
   const [supplementsRaw, completionsRaw, completions7dRaw] = await Promise.all([
     supabase
       .from("supplements")
-      .select("id, name, dosage, frequency, instructions")
+      .select("id, name, dosage, frequency, instructions, active_from")
       .eq("user_id", client.id),
     supabase
       .from("supplement_completions")
@@ -165,6 +166,7 @@ export const loader = async ({
       dosage: supplement.dosage,
       frequency: supplement.frequency,
       instructions: supplement.instructions ?? "",
+      active_from: supplement.active_from,
       compliance,
     };
   });
@@ -220,6 +222,8 @@ export const action = async ({
     const dosage = formData.get("dosage") as string;
     const frequency = formData.get("frequency") as string;
     const instructions = formData.get("instructions") as string;
+    const active_from = formData.get("active_from") as string;
+    
     const { data, error } = await supabase
       .from("supplements")
       .insert({
@@ -228,6 +232,7 @@ export const action = async ({
         dosage,
         frequency,
         instructions: instructions || null,
+        active_from: active_from || new Date().toISOString().split('T')[0], // Default to today if not provided
       })
       .select()
       .single();
@@ -246,9 +251,16 @@ export const action = async ({
     const dosage = formData.get("dosage") as string;
     const frequency = formData.get("frequency") as string;
     const instructions = formData.get("instructions") as string;
+    const active_from = formData.get("active_from") as string;
+    
+    const updateData: any = { name, dosage, frequency, instructions: instructions || null };
+    if (active_from) {
+      updateData.active_from = active_from;
+    }
+    
     const { data, error } = await supabase
       .from("supplements")
-      .update({ name, dosage, frequency, instructions: instructions || null })
+      .update(updateData)
       .eq("id", id)
       .select()
       .single();
@@ -288,12 +300,18 @@ export default function ClientSupplements() {
     weekStart: string;
     client: { id: string; name: string; created_at?: string } | null;
   }>();
+  
+  // State to track newly activated supplements for each day
+  const [newlyActivatedSupplements, setNewlyActivatedSupplements] = useState<{ [day: string]: string[] }>({});
   const fetcher = useFetcher<{
     supplement?: any;
     deletedSupplement?: any;
     error?: string;
   }>();
-  const complianceFetcher = useFetcher<{ complianceData: number[] }>();
+  const complianceFetcher = useFetcher<{ 
+    complianceData: number[];
+    newlyActivatedSupplements?: { [day: string]: string[] };
+  }>();
   const revalidator = useRevalidator();
   const { clientId } = useParams();
 
@@ -333,6 +351,9 @@ export default function ClientSupplements() {
   useEffect(() => {
     if (complianceFetcher.data?.complianceData) {
       setComplianceData(complianceFetcher.data.complianceData);
+    }
+    if (complianceFetcher.data?.newlyActivatedSupplements) {
+      setNewlyActivatedSupplements(complianceFetcher.data.newlyActivatedSupplements);
     }
   }, [complianceFetcher.data]);
 
@@ -392,6 +413,11 @@ export default function ClientSupplements() {
 
   const handleRemoveClick = (supplementId: string) => {
     setRemovingSupplementId(supplementId);
+  };
+
+  // Helper function to check if a supplement was newly activated on a given day
+  const isSupplementNewlyActivated = (supplementId: string, date: string) => {
+    return newlyActivatedSupplements[date]?.includes(supplementId) || false;
   };
 
   // Refresh page data when supplement form submission completes successfully
@@ -459,9 +485,22 @@ export default function ClientSupplements() {
                     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-2">
-                          <h3 className="text-lg sm:text-xl font-semibold text-secondary dark:text-alabaster truncate">
-                            {supplement.name}
-                          </h3>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-lg sm:text-xl font-semibold text-secondary dark:text-alabaster truncate">
+                              {supplement.name}
+                            </h3>
+                            {/* Show indicator if supplement was newly activated today */}
+                            {supplement.active_from && isSupplementNewlyActivated(supplement.id, supplement.active_from) && (
+                              <div className="mt-1">
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+                                  <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                  </svg>
+                                  New supplement added. Compliance will start tomorrow for this supplement.
+                                </span>
+                              </div>
+                            )}
+                          </div>
                           <div className="flex gap-1 sm:gap-2 flex-shrink-0">
                             <Button
                               variant="outline"
@@ -684,6 +723,12 @@ export default function ClientSupplements() {
             form.append("dosage", fields.dosage);
             form.append("frequency", fields.frequency);
             form.append("instructions", fields.instructions || "");
+            if (fields.active_from) {
+              form.append("active_from", fields.active_from);
+            }
+            if (editingSupplement) {
+              form.append("id", editingSupplement.id);
+            }
             fetcher.submit(form, { method: "post" });
             // Don't close modal immediately - let the useEffect handle it after successful submission
           }}

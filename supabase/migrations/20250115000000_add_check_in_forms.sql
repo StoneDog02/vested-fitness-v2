@@ -44,6 +44,8 @@ CREATE TABLE check_in_form_responses (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+
+
 -- Add indexes for better performance
 CREATE INDEX idx_check_in_forms_coach_id ON check_in_forms(coach_id);
 CREATE INDEX idx_check_in_form_questions_form_id ON check_in_form_questions(form_id);

@@ -50,7 +50,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Fetch all supplements for this client
   const { data: supplementsRaw, error: supplementsError } = await supabase
     .from("supplements")
-    .select("id, created_at")
+    .select("id, created_at, active_from")
     .eq("user_id", clientId);
 
   if (supplementsError) {
@@ -126,27 +126,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       continue;
     }
     
-    // Check if any supplements were created on this specific day
-    const supplementsCreatedOnThisDay = (supplementsRaw || []).some(supplement => {
-      if (!supplement.created_at) return false;
+    // Get supplements that are active for this specific day
+    const activeSupplementsForDay = (supplementsRaw || []).filter(supplement => {
+      if (!supplement.active_from) return false;
       
-      // Try direct date comparison without timezone conversion
-      const supplementCreatedDate = supplement.created_at.split('T')[0]; // Get YYYY-MM-DD from UTC timestamp
-      const isCreatedOnThisDay = supplementCreatedDate === dayStr;
+      // Check if this supplement is active for this day
+      const activeFromDate = supplement.active_from;
+      const isActiveForDay = activeFromDate <= dayStr;
       
-      return isCreatedOnThisDay;
+      return isActiveForDay;
     });
     
-    // If supplements were created on this day, show -1 (supplements added today - compliance starts tomorrow)
-    if (supplementsCreatedOnThisDay) {
+    // If no supplements are active for this day, show -2 (no supplements assigned)
+    if (activeSupplementsForDay.length === 0) {
+      complianceData.push(-2);
+      continue;
+    }
+    
+    // Check if any supplements became active on this specific day
+    const supplementsActivatedOnThisDay = activeSupplementsForDay.filter(supplement => {
+      if (!supplement.active_from) return false;
+      
+      const activeFromDate = supplement.active_from;
+      const isActivatedOnThisDay = activeFromDate === dayStr;
+      
+      return isActivatedOnThisDay;
+    });
+    
+    // If supplements were activated on this day, show -1 (supplements added today - compliance starts tomorrow)
+    if (supplementsActivatedOnThisDay.length > 0) {
       complianceData.push(-1);
       continue;
     }
     
-    // For each supplement, check if a completion exists for this day
-    const supplementIds = (supplementsRaw || []).map((s) => s.id);
+    // For each active supplement, check if a completion exists for this day
+    const activeSupplementIds = activeSupplementsForDay.map((s) => s.id);
     let completedCount = 0;
-    for (const supplementId of supplementIds) {
+    for (const supplementId of activeSupplementIds) {
       const found = (completionsRaw || []).find((c) => {
         return (
           c.completed_at.startsWith(dayStr) &&
@@ -156,9 +172,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       if (found) completedCount++;
     }
     const percent =
-      supplementIds.length > 0 ? completedCount / supplementIds.length : 0;
+      activeSupplementIds.length > 0 ? completedCount / activeSupplementIds.length : 0;
     complianceData.push(percent);
   }
 
-  return json({ complianceData });
+  // Build data about newly activated supplements for each day
+  const newlyActivatedSupplements: { [day: string]: string[] } = {};
+  
+  for (let i = 0; i < 7; i++) {
+    const day = weekStart.add(i, "day");
+    const dayStr = day.format("YYYY-MM-DD");
+    
+    const supplementsActivatedOnThisDay = (supplementsRaw || []).filter(supplement => {
+      if (!supplement.active_from) return false;
+      return supplement.active_from === dayStr;
+    });
+    
+    if (supplementsActivatedOnThisDay.length > 0) {
+      newlyActivatedSupplements[dayStr] = supplementsActivatedOnThisDay.map(s => s.id);
+    }
+  }
+
+  return json({ 
+    complianceData,
+    newlyActivatedSupplements 
+  });
 }; 

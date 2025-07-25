@@ -10,12 +10,14 @@ interface AddSupplementModalProps {
     dosage: string;
     frequency: string;
     instructions?: string;
+    active_from?: string;
   }) => void;
   editingSupplement?: {
     name: string;
     dosage: string;
     frequency: string;
     instructions?: string;
+    active_from?: string;
   } | null;
   isLoading?: boolean;
 }
@@ -32,6 +34,7 @@ export default function AddSupplementModal({
     dosage: "",
     frequency: "",
     instructions: "",
+    active_from: "",
   });
 
   // Update form data when editing a supplement
@@ -42,6 +45,7 @@ export default function AddSupplementModal({
         dosage: editingSupplement.dosage,
         frequency: editingSupplement.frequency,
         instructions: editingSupplement.instructions || "",
+        active_from: editingSupplement.active_from || "",
       });
     } else {
       setFormData({
@@ -49,6 +53,7 @@ export default function AddSupplementModal({
         dosage: "",
         frequency: "",
         instructions: "",
+        active_from: "",
       });
     }
   }, [editingSupplement]);
@@ -62,6 +67,7 @@ export default function AddSupplementModal({
         dosage: "",
         frequency: "",
         instructions: "",
+        active_from: "",
       });
     }
   };
@@ -172,6 +178,31 @@ export default function AddSupplementModal({
                 placeholder="e.g., Mix 1 scoop with water or juice in the morning"
                 rows={3}
               />
+            </div>
+
+            <div>
+              <label
+                htmlFor="active_from"
+                className="block text-sm font-medium text-secondary dark:text-alabaster mb-1"
+              >
+                Start Date (optional)
+              </label>
+              <input
+                type="date"
+                id="active_from"
+                value={formData.active_from}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    active_from: e.target.value,
+                  }))
+                }
+                className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-night text-secondary dark:text-alabaster"
+                placeholder="When should compliance tracking start?"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Leave empty to start tracking from today. Set a future date to delay compliance tracking.
+              </p>
             </div>
 
             <div className="flex justify-end gap-3 mt-6">

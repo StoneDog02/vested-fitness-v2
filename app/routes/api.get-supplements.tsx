@@ -64,7 +64,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get all supplements for the user
     const { data: supplements, error: supplementsError } = await supabase
       .from("supplements")
-      .select("id, name, dosage, frequency, instructions")
+      .select("id, name, dosage, frequency, instructions, active_from")
       .eq("user_id", user.id)
       .order("name", { ascending: true });
 
