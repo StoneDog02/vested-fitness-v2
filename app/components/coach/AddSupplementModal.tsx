@@ -27,6 +27,8 @@ export default function AddSupplementModal({
   editingSupplement,
   isLoading = false,
 }: AddSupplementModalProps) {
+  console.log('🔍 [MODAL] AddSupplementModal render - isOpen:', isOpen, 'editingSupplement:', editingSupplement?.name);
+  
   const [formData, setFormData] = useState({
     name: "",
     dosage: "",
@@ -36,7 +38,9 @@ export default function AddSupplementModal({
 
   // Update form data when editing a supplement
   useEffect(() => {
+    console.log('🔍 [MODAL] useEffect triggered - editingSupplement:', editingSupplement?.name);
     if (editingSupplement) {
+      console.log('🔍 [MODAL] Setting form data for editing:', editingSupplement);
       setFormData({
         name: editingSupplement.name,
         dosage: editingSupplement.dosage,
@@ -44,6 +48,7 @@ export default function AddSupplementModal({
         instructions: editingSupplement.instructions || "",
       });
     } else {
+      console.log('🔍 [MODAL] Clearing form data for new supplement');
       setFormData({
         name: "",
         dosage: "",
@@ -55,7 +60,9 @@ export default function AddSupplementModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('🔍 [MODAL] Form submitted - isLoading:', isLoading);
     if (!isLoading) {
+      console.log('🔍 [MODAL] Calling onAdd with formData:', formData);
       onAdd(formData);
       setFormData({
         name: "",
@@ -66,10 +73,17 @@ export default function AddSupplementModal({
     }
   };
 
+  const handleClose = () => {
+    console.log('🔍 [MODAL] handleClose called - isLoading:', isLoading);
+    if (!isLoading) {
+      onClose();
+    }
+  };
+
   return (
     <Dialog
       open={isOpen}
-      onClose={isLoading ? () => {} : onClose}
+      onClose={handleClose}
       className="fixed inset-0 z-10 overflow-y-auto"
     >
       {/* Enhanced backdrop overlay */}
