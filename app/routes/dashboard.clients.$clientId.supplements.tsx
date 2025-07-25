@@ -23,6 +23,7 @@ interface Supplement {
   frequency: string;
   instructions?: string;
   active_from?: string;
+  created_at?: string;
   compliance: number;
 }
 
@@ -96,7 +97,7 @@ export const loader = async ({
   const [supplementsRaw, completionsRaw, completions7dRaw] = await Promise.all([
     supabase
       .from("supplements")
-      .select("id, name, dosage, frequency, instructions, active_from")
+      .select("id, name, dosage, frequency, instructions, active_from, created_at")
       .eq("user_id", client.id),
     supabase
       .from("supplement_completions")
@@ -167,6 +168,7 @@ export const loader = async ({
       frequency: supplement.frequency,
       instructions: supplement.instructions ?? "",
       active_from: supplement.active_from,
+      created_at: supplement.created_at,
       compliance,
     };
   });
@@ -301,8 +303,8 @@ export default function ClientSupplements() {
     client: { id: string; name: string; created_at?: string } | null;
   }>();
   
-  // State to track newly activated supplements for each day
-  const [newlyActivatedSupplements, setNewlyActivatedSupplements] = useState<{ [day: string]: string[] }>({});
+  // State to track newly created supplements for each day
+  const [newlyCreatedSupplements, setNewlyCreatedSupplements] = useState<{ [day: string]: string[] }>({});
   const fetcher = useFetcher<{
     supplement?: any;
     deletedSupplement?: any;
@@ -310,7 +312,7 @@ export default function ClientSupplements() {
   }>();
   const complianceFetcher = useFetcher<{ 
     complianceData: number[];
-    newlyActivatedSupplements?: { [day: string]: string[] };
+    newlyCreatedSupplements?: { [day: string]: string[] };
   }>();
   const revalidator = useRevalidator();
   const { clientId } = useParams();
@@ -352,8 +354,8 @@ export default function ClientSupplements() {
     if (complianceFetcher.data?.complianceData) {
       setComplianceData(complianceFetcher.data.complianceData);
     }
-    if (complianceFetcher.data?.newlyActivatedSupplements) {
-      setNewlyActivatedSupplements(complianceFetcher.data.newlyActivatedSupplements);
+    if (complianceFetcher.data?.newlyCreatedSupplements) {
+      setNewlyCreatedSupplements(complianceFetcher.data.newlyCreatedSupplements);
     }
   }, [complianceFetcher.data]);
 
@@ -415,10 +417,13 @@ export default function ClientSupplements() {
     setRemovingSupplementId(supplementId);
   };
 
-  // Helper function to check if a supplement was newly activated on a given day
-  const isSupplementNewlyActivated = (supplementId: string, date: string) => {
-    return newlyActivatedSupplements[date]?.includes(supplementId) || false;
+  // Helper function to check if a supplement was newly created on a given day
+  const isSupplementNewlyCreated = (supplementId: string, date: string) => {
+    return newlyCreatedSupplements[date]?.includes(supplementId) || false;
   };
+
+  // Get current date string for comparison
+  const currentDateString = new Date().toISOString().split('T')[0];
 
   // Refresh page data when supplement form submission completes successfully
   useEffect(() => {
@@ -489,8 +494,8 @@ export default function ClientSupplements() {
                             <h3 className="text-lg sm:text-xl font-semibold text-secondary dark:text-alabaster truncate">
                               {supplement.name}
                             </h3>
-                            {/* Show indicator if supplement was newly activated today */}
-                            {supplement.active_from && isSupplementNewlyActivated(supplement.id, supplement.active_from) && (
+                            {/* Show indicator if supplement was created today */}
+                            {supplement.created_at && supplement.created_at.startsWith(currentDateString) && (
                               <div className="mt-1">
                                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
                                   <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">

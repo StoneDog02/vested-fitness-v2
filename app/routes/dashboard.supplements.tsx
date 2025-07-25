@@ -37,6 +37,7 @@ interface Supplement {
   frequency: string;
   instructions?: string;
   active_from?: string;
+  created_at?: string;
 }
 
 interface LoaderData {
@@ -452,8 +453,8 @@ export default function Supplements() {
                         >
                           {supplement.name}
                         </label>
-                        {/* Show indicator if supplement was newly activated today */}
-                        {supplement.active_from && supplement.active_from === currentDateString && (
+                        {/* Show indicator if supplement was created today */}
+                        {supplement.created_at && supplement.created_at.startsWith(currentDateString) && (
                           <div className="mt-1">
                             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
                               <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
