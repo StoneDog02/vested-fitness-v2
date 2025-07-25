@@ -6,7 +6,7 @@ import AddSupplementModal from "~/components/coach/AddSupplementModal";
 import { json, redirect } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
-import { useLoaderData, useFetcher, useSearchParams, useRevalidator } from "@remix-run/react";
+import { useLoaderData, useFetcher, useSearchParams, useRevalidator, useParams } from "@remix-run/react";
 import { useState, useEffect, useRef } from "react";
 import {
   ChevronLeftIcon,
@@ -295,6 +295,7 @@ export default function ClientSupplements() {
   }>();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   const revalidator = useRevalidator();
+  const { clientId } = useParams();
 
   // Track if we've already processed the current fetcher data
   const processedFetcherData = useRef<any>(null);
@@ -303,6 +304,7 @@ export default function ClientSupplements() {
   const [editingSupplement, setEditingSupplement] = useState<Supplement | null>(
     null
   );
+  const [removingSupplementId, setRemovingSupplementId] = useState<string | null>(null);
 
   // Log modal state changes
   useEffect(() => {
@@ -397,6 +399,11 @@ export default function ClientSupplements() {
     console.log('🔍 [EDIT] Modal state cleared - isAddModalOpen: false, editingSupplement: null');
   };
 
+  const handleRemoveClick = (supplementId: string) => {
+    console.log('🔍 [REMOVE] handleRemoveClick called for supplement:', supplementId);
+    setRemovingSupplementId(supplementId);
+  };
+
   // Refresh page data when supplement form submission completes successfully
   useEffect(() => {
     console.log('🔍 [EDIT] useEffect triggered - fetcher.state:', fetcher.state, 'fetcher.data:', fetcher.data);
@@ -409,23 +416,32 @@ export default function ClientSupplements() {
       console.log('🔍 [EDIT] Processing fetcher data');
       processedFetcherData.current = fetcher.data;
       
-      // Revalidate the page data
-      console.log('🔍 [EDIT] Calling revalidator.revalidate()');
-      // Add a small delay to ensure cache is cleared
-      setTimeout(() => {
+      // For delete operations, clear cache immediately and delay revalidation
+      if (fetcher.data.deletedSupplement) {
+        console.log('🔍 [EDIT] Delete operation - clearing cache and delaying revalidation');
+        // Clear cache immediately using the correct key
+        if (clientId) {
+          delete clientSupplementsCache[clientId];
+          console.log('🔍 [EDIT] Cache cleared for key:', clientId);
+        }
+        // Clear removing state
+        setRemovingSupplementId(null);
+        // Delay revalidation to ensure cache is cleared
+        setTimeout(() => {
+          console.log('🔍 [EDIT] Calling revalidator.revalidate() after cache clear');
+          revalidator.revalidate();
+        }, 200);
+      } else {
+        // For add/edit operations, proceed normally
+        console.log('🔍 [EDIT] Add/Edit operation - calling revalidator.revalidate()');
         revalidator.revalidate();
-      }, 100);
-      
-      // Only close modal for add/edit operations, not for delete operations
-      if (fetcher.data.supplement && !fetcher.data.deletedSupplement) {
+        
         console.log('🔍 [EDIT] Closing modal due to successful add/edit submission');
         setIsAddModalOpen(false);
         setEditingSupplement(null);
-      } else {
-        console.log('🔍 [EDIT] Delete operation completed - keeping modal state unchanged');
       }
     }
-  }, [fetcher.state, fetcher.data, revalidator]);
+  }, [fetcher.state, fetcher.data, revalidator, clientId]);
 
   // Log when supplements data changes
   useEffect(() => {
@@ -505,8 +521,17 @@ export default function ClientSupplements() {
                             size="sm"
                             className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
                             type="submit"
+                            onClick={() => handleRemoveClick(supplement.id)}
+                            disabled={removingSupplementId === supplement.id}
                           >
-                            Remove
+                            {removingSupplementId === supplement.id ? (
+                              <>
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500 mr-2"></div>
+                                Removing...
+                              </>
+                            ) : (
+                              'Remove'
+                            )}
                           </Button>
                         </fetcher.Form>
                       </div>
