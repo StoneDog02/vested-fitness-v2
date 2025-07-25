@@ -7,7 +7,7 @@ import { json, redirect } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { useLoaderData, useFetcher, useSearchParams, useRevalidator } from "@remix-run/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -296,6 +296,9 @@ export default function ClientSupplements() {
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   const revalidator = useRevalidator();
 
+  // Track if we've already processed the current fetcher data
+  const processedFetcherData = useRef<any>(null);
+
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingSupplement, setEditingSupplement] = useState<Supplement | null>(
     null
@@ -305,6 +308,13 @@ export default function ClientSupplements() {
   useEffect(() => {
     console.log('🔍 [STATE] Modal state changed - isAddModalOpen:', isAddModalOpen, 'editingSupplement:', editingSupplement?.name);
   }, [isAddModalOpen, editingSupplement]);
+
+  // Cleanup processed data on unmount
+  useEffect(() => {
+    return () => {
+      processedFetcherData.current = null;
+    };
+  }, []);
   const [, setSearchParams] = useSearchParams();
   const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
   const [currentWeekStart, setCurrentWeekStart] = useState(weekStart);
@@ -371,6 +381,8 @@ export default function ClientSupplements() {
 
   const handleEditClick = (supplement: Supplement) => {
     console.log('🔍 [EDIT] handleEditClick called with supplement:', supplement);
+    // Reset processed data when starting a new edit operation
+    processedFetcherData.current = null;
     setEditingSupplement(supplement);
     setIsAddModalOpen(true);
     console.log('🔍 [EDIT] Modal state set - isAddModalOpen: true, editingSupplement set');
@@ -378,6 +390,8 @@ export default function ClientSupplements() {
 
   const handleModalClose = () => {
     console.log('🔍 [EDIT] handleModalClose called');
+    // Reset processed data when closing modal
+    processedFetcherData.current = null;
     setIsAddModalOpen(false);
     setEditingSupplement(null);
     console.log('🔍 [EDIT] Modal state cleared - isAddModalOpen: false, editingSupplement: null');
@@ -386,8 +400,15 @@ export default function ClientSupplements() {
   // Refresh page data when supplement form submission completes successfully
   useEffect(() => {
     console.log('🔍 [EDIT] useEffect triggered - fetcher.state:', fetcher.state, 'fetcher.data:', fetcher.data);
-    if (fetcher.state === "idle" && fetcher.data && (fetcher.data.supplement || fetcher.data.deletedSupplement)) {
+    
+    // Only process if we have new data and haven't processed it yet
+    if (fetcher.state === "idle" && fetcher.data && 
+        (fetcher.data.supplement || fetcher.data.deletedSupplement) &&
+        processedFetcherData.current !== fetcher.data) {
+      
       console.log('🔍 [EDIT] Closing modal due to successful submission');
+      processedFetcherData.current = fetcher.data;
+      
       // Only revalidate and close modal if we have actual data to update
       revalidator.revalidate();
       setIsAddModalOpen(false);

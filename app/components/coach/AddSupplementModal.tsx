@@ -27,7 +27,10 @@ export default function AddSupplementModal({
   editingSupplement,
   isLoading = false,
 }: AddSupplementModalProps) {
-  console.log('🔍 [MODAL] AddSupplementModal render - isOpen:', isOpen, 'editingSupplement:', editingSupplement?.name);
+  // Only log when modal is open or when props change significantly
+  if (isOpen) {
+    console.log('🔍 [MODAL] AddSupplementModal render - isOpen:', isOpen, 'editingSupplement:', editingSupplement?.name);
+  }
   
   const [formData, setFormData] = useState({
     name: "",
