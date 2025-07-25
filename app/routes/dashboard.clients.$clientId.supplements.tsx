@@ -509,31 +509,28 @@ export default function ClientSupplements() {
                         >
                           Edit
                         </Button>
-                        <fetcher.Form method="post">
-                          <input type="hidden" name="intent" value="remove" />
-                          <input
-                            type="hidden"
-                            name="id"
-                            value={supplement.id}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
-                            type="submit"
-                            onClick={() => handleRemoveClick(supplement.id)}
-                            disabled={removingSupplementId === supplement.id}
-                          >
-                            {removingSupplementId === supplement.id ? (
-                              <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500 mr-2"></div>
-                                Removing...
-                              </>
-                            ) : (
-                              'Remove'
-                            )}
-                          </Button>
-                        </fetcher.Form>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
+                          onClick={() => {
+                            handleRemoveClick(supplement.id);
+                            const formData = new FormData();
+                            formData.append("intent", "remove");
+                            formData.append("id", supplement.id);
+                            fetcher.submit(formData, { method: "post" });
+                          }}
+                          disabled={removingSupplementId === supplement.id}
+                        >
+                          {removingSupplementId === supplement.id ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500 mr-2"></div>
+                              Removing...
+                            </>
+                          ) : (
+                            'Remove'
+                          )}
+                        </Button>
                       </div>
                     </div>
                   </div>
