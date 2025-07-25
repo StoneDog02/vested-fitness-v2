@@ -78,15 +78,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const hasSupplementsAssigned = (supplementsRaw || []).length > 0;
     const today = getCurrentDate();
 
-  console.log('🔍 [SUPPLEMENT COMPLIANCE] Week range:', {
-    weekStartParam,
-    weekStart: weekStart.format('YYYY-MM-DD HH:mm:ss'),
-    weekEnd: weekEnd.format('YYYY-MM-DD HH:mm:ss'),
-    today: today.format('YYYY-MM-DD HH:mm:ss')
-  });
-  
-
-  
   for (let i = 0; i < 7; i++) {
     const day = weekStart.add(i, "day");
     const dayStr = day.format("YYYY-MM-DD"); // Get YYYY-MM-DD format
@@ -143,22 +134,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const supplementCreatedDate = supplement.created_at.split('T')[0]; // Get YYYY-MM-DD from UTC timestamp
       const isCreatedOnThisDay = supplementCreatedDate === dayStr;
       
-      // Debug logging for supplement creation dates
-      if (i === 0) { // Only log for first day to avoid spam
-        console.log('🔍 [SUPPLEMENT COMPLIANCE] Debug supplement dates:', {
-          dayStr: dayStr,
-          supplementCreatedAt: supplement.created_at,
-          supplementCreatedDate: supplementCreatedDate,
-          isCreatedOnThisDay
-        });
-      }
-      
       return isCreatedOnThisDay;
     });
     
     // If supplements were created on this day, show -1 (supplements added today - compliance starts tomorrow)
     if (supplementsCreatedOnThisDay) {
-      console.log('📅 [SUPPLEMENT COMPLIANCE] Setting -1 for day:', dayStr);
       complianceData.push(-1);
       continue;
     }

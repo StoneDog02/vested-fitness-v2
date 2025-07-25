@@ -874,21 +874,6 @@ export default function Workouts() {
                 const isToday = thisDate.isSame(today, "day");
                 const isFuture = thisDate.isAfter(today, "day");
                 
-                // Debug logging for timezone issues
-                if (i === 0) {
-                  console.log('🔍 [WORKOUTS] Debug timezone info:', {
-                    today: today.format('YYYY-MM-DD HH:mm:ss'),
-                    todayTz: today.format('Z'),
-                    startOfWeek: startOfWeek.format('YYYY-MM-DD HH:mm:ss'),
-                    startOfWeekTz: startOfWeek.format('Z'),
-                    thisDate: thisDate.format('YYYY-MM-DD HH:mm:ss'),
-                    thisDateTz: thisDate.format('Z'),
-                    isToday,
-                    dayIndex: i,
-                    label
-                  });
-                }
-                
                 // Check if there are workouts assigned for this day
                 const dateStr = thisDate.format("YYYY-MM-DD");
                 const dayWorkout = weekWorkouts[dateStr];

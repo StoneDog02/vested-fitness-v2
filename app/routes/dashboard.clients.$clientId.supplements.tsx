@@ -533,27 +533,6 @@ export default function ClientSupplements() {
                     const isToday = thisDate.isSame(today, "day");
                     const isFuture = thisDate.isAfter(today, "day");
                     
-                    // Debug logging for frontend dates
-                    if (i === 0) {
-                      console.log('🔍 [FRONTEND] Debug calendar dates:', {
-                        calendarStart: dayjs(calendarStart).tz(USER_TIMEZONE).format('YYYY-MM-DD HH:mm:ss'),
-                        thisDate: thisDate.format('YYYY-MM-DD HH:mm:ss'),
-                        today: today.format('YYYY-MM-DD HH:mm:ss'),
-                        label,
-                        index: i,
-                        complianceValue: complianceData[i]
-                      });
-                    }
-                    
-                    // Debug: log all compliance values to see the mapping
-                    if (i === 0) {
-                      console.log('🔍 [FRONTEND] All compliance values:', complianceData);
-                    }
-                    
-
-                    
-
-                    
                     // Determine percentage for display
                     const complianceValue = complianceData[i] || 0;
                     let percentage = 0;

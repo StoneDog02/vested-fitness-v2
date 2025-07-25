@@ -84,8 +84,11 @@ export default function AddSupplementModal({
       onClose={isLoading ? () => {} : onClose}
       className="fixed inset-0 z-10 overflow-y-auto"
     >
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <Dialog.Panel className="relative mx-auto max-w-md rounded-xl bg-white dark:bg-night p-6 w-full">
+      {/* Enhanced backdrop overlay */}
+      <div className="fixed inset-0 bg-black/50 transition-opacity" />
+      
+      <div className="flex min-h-screen items-center justify-center p-4 relative z-20">
+        <Dialog.Panel className="relative mx-auto max-w-md rounded-xl bg-white dark:bg-night p-6 w-full shadow-xl">
           <div className="relative">
           <Dialog.Title className="text-xl font-semibold text-secondary dark:text-alabaster mb-4">
             {editingSupplement ? "Edit Supplement" : "Add New Supplement"}
