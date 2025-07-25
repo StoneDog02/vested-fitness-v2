@@ -87,6 +87,141 @@ export default function VideoRecorder({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
   const transcriptRef = useRef<string>(''); // Use ref to always have latest transcript
+  const accumulatedTranscriptRef = useRef<string>(''); // Store transcript across pause/resume cycles
+  const speechRecognitionRestartRef = useRef<NodeJS.Timeout | null>(null); // For auto-restarting speech recognition
+  const speechRecognitionMonitorRef = useRef<NodeJS.Timeout | null>(null); // For monitoring speech recognition state
+
+  const startSpeechRecognition = useCallback(() => {
+    if (!enableDictation || !SpeechRecognitionAPI || typeof window === 'undefined') {
+      return null;
+    }
+
+    try {
+      const recognition = new SpeechRecognitionAPI();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        let finalTranscript = '';
+        let interimTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        // Combine accumulated transcript with new results
+        const newTranscript = accumulatedTranscriptRef.current + finalTranscript + interimTranscript;
+        console.log('Speech recognition result:', {
+          finalTranscript,
+          interimTranscript,
+          newTranscript,
+          resultLength: newTranscript.length,
+          accumulatedLength: accumulatedTranscriptRef.current.length
+        });
+        
+        setTranscript(newTranscript);
+        transcriptRef.current = newTranscript;
+        
+        // Update accumulated transcript with final results
+        if (finalTranscript) {
+          accumulatedTranscriptRef.current = accumulatedTranscriptRef.current + finalTranscript;
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setIsTranscribing(false);
+        
+        // Auto-restart speech recognition on certain errors
+        if (event.error === 'no-speech' || event.error === 'audio-capture' || event.error === 'network') {
+          console.log('Auto-restarting speech recognition due to error:', event.error);
+          if (speechRecognitionRestartRef.current) {
+            clearTimeout(speechRecognitionRestartRef.current);
+          }
+          speechRecognitionRestartRef.current = setTimeout(() => {
+            if (isRecording && !isPaused) {
+              const newRecognition = startSpeechRecognition();
+              if (newRecognition) {
+                setSpeechRecognition(newRecognition);
+                setIsTranscribing(true);
+              }
+            }
+          }, 1000);
+        }
+      };
+
+      recognition.onend = () => {
+        console.log('Speech recognition ended, final transcript:', {
+          transcript: transcriptRef.current,
+          transcriptLength: transcriptRef.current?.length
+        });
+        
+        // Preserve the current transcript when speech recognition ends
+        // Don't clear it, just mark as not transcribing
+        setIsTranscribing(false);
+        
+        // Auto-restart speech recognition if recording is still active
+        if (isRecording && !isPaused) {
+          console.log('Auto-restarting speech recognition after end');
+          if (speechRecognitionRestartRef.current) {
+            clearTimeout(speechRecognitionRestartRef.current);
+          }
+          speechRecognitionRestartRef.current = setTimeout(() => {
+            if (isRecording && !isPaused) {
+              console.log('Attempting to restart speech recognition...');
+              const newRecognition = startSpeechRecognition();
+              if (newRecognition) {
+                setSpeechRecognition(newRecognition);
+                setIsTranscribing(true);
+                console.log('Speech recognition restarted successfully');
+              } else {
+                console.log('Failed to restart speech recognition');
+              }
+            }
+          }, 100); // Reduced delay for faster restart
+        }
+      };
+
+      recognition.start();
+      console.log('Speech recognition started successfully');
+      return recognition;
+    } catch (error) {
+      console.error('Speech recognition not supported:', error);
+      return null;
+    }
+  }, [enableDictation, isRecording, isPaused]);
+
+  const startSpeechRecognitionMonitor = useCallback(() => {
+    // Clear any existing monitor
+    if (speechRecognitionMonitorRef.current) {
+      clearInterval(speechRecognitionMonitorRef.current);
+    }
+
+    // Start monitoring speech recognition state
+    speechRecognitionMonitorRef.current = setInterval(() => {
+      if (isRecording && !isPaused && enableDictation && !isTranscribing) {
+        console.log('Speech recognition monitor: restarting inactive recognition');
+        const newRecognition = startSpeechRecognition();
+        if (newRecognition) {
+          setSpeechRecognition(newRecognition);
+          setIsTranscribing(true);
+        }
+      }
+    }, 3000); // Check every 3 seconds - less aggressive
+  }, [isRecording, isPaused, enableDictation, isTranscribing, startSpeechRecognition]);
+
+  const stopSpeechRecognitionMonitor = useCallback(() => {
+    if (speechRecognitionMonitorRef.current) {
+      clearInterval(speechRecognitionMonitorRef.current);
+      speechRecognitionMonitorRef.current = null;
+    }
+  }, []);
 
   const startRecording = useCallback(async () => {
     try {
@@ -161,62 +296,19 @@ export default function VideoRecorder({
       setIsPaused(false);
       setRecordingTime(0);
       setTranscript(''); // Reset transcript
+      accumulatedTranscriptRef.current = ''; // Reset accumulated transcript
       startTimeRef.current = Date.now();
 
       // Start speech recognition if enabled
-      if (enableDictation && SpeechRecognitionAPI && typeof window !== 'undefined') {
+      if (enableDictation) {
         console.log('Starting speech recognition...');
-        try {
-          const recognition = new SpeechRecognitionAPI();
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          recognition.lang = 'en-US';
-
-          recognition.onresult = (event) => {
-            let finalTranscript = '';
-            let interimTranscript = '';
-
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-              const transcript = event.results[i][0].transcript;
-              if (event.results[i].isFinal) {
-                finalTranscript += transcript;
-              } else {
-                interimTranscript += transcript;
-              }
-            }
-
-            const newTranscript = finalTranscript + interimTranscript;
-            console.log('Speech recognition result:', {
-              finalTranscript,
-              interimTranscript,
-              newTranscript,
-              resultLength: newTranscript.length
-            });
-            
-            setTranscript(newTranscript);
-            transcriptRef.current = newTranscript; // Update ref with latest transcript
-          };
-
-          recognition.onerror = (event) => {
-            console.error('Speech recognition error:', event.error);
-            setIsTranscribing(false);
-          };
-
-          recognition.onend = () => {
-            console.log('Speech recognition ended, final transcript:', {
-              transcript: transcriptRef.current,
-              transcriptLength: transcriptRef.current?.length
-            });
-            setIsTranscribing(false);
-          };
-
-          recognition.start();
-          console.log('Speech recognition started successfully');
+        const recognition = startSpeechRecognition();
+        if (recognition) {
           setSpeechRecognition(recognition);
           setIsTranscribing(true);
-        } catch (error) {
-          console.error('Speech recognition not supported:', error);
         }
+        // Start monitoring speech recognition state
+        startSpeechRecognitionMonitor();
       }
 
       // Start timer
@@ -232,6 +324,15 @@ export default function VideoRecorder({
   }, [recordingType, onRecordingComplete]);
 
   const stopRecording = useCallback(() => {
+    // Clear any pending speech recognition restart
+    if (speechRecognitionRestartRef.current) {
+      clearTimeout(speechRecognitionRestartRef.current);
+      speechRecognitionRestartRef.current = null;
+    }
+
+    // Stop speech recognition monitor
+    stopSpeechRecognitionMonitor();
+
     if (mediaRecorder && isRecording) {
       mediaRecorder.stop();
       setIsRecording(false);
@@ -246,21 +347,85 @@ export default function VideoRecorder({
         stream.getTracks().forEach(track => track.stop());
         setStream(null);
       }
+    } else if (isPaused) {
+      // If we're paused, we need to stop the stream and finalize
+      setIsRecording(false);
+      setIsPaused(false);
+      
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        setStream(null);
+      }
+      
+      // Create final blob from recorded chunks
+      if (recordedChunks.length > 0) {
+        const blob = new Blob(recordedChunks, { 
+          type: recordingType === 'video' ? 'video/webm' : 'audio/webm' 
+        });
+        const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        
+        // Capture the current transcript
+        const finalTranscript = transcriptRef.current;
+        
+        // Stop speech recognition if it's running
+        if (speechRecognition) {
+          speechRecognition.stop();
+          setSpeechRecognition(null);
+          setIsTranscribing(false);
+        }
+        
+        // Call onRecordingComplete with the captured transcript
+        onRecordingComplete(blob, duration, recordingType, finalTranscript);
+      }
     }
-  }, [mediaRecorder, isRecording, stream]);
+  }, [mediaRecorder, isRecording, isPaused, stream, recordedChunks, recordingType, speechRecognition, onRecordingComplete]);
 
   const pauseRecording = useCallback(() => {
     if (mediaRecorder && isRecording) {
       if (isPaused) {
-        mediaRecorder.resume();
+        // Resume recording - just resume timer and speech recognition
         setIsPaused(false);
         startTimeRef.current = Date.now() - (recordingTime * 1000);
+
+        // Resume speech recognition if it was enabled
+        if (enableDictation) {
+          const recognition = startSpeechRecognition();
+          if (recognition) {
+            setSpeechRecognition(recognition);
+            setIsTranscribing(true);
+          }
+          // Restart speech recognition monitor
+          startSpeechRecognitionMonitor();
+        }
+
+        // Resume timer
+        timerRef.current = setInterval(() => {
+          setRecordingTime(prev => prev + 1);
+        }, 1000);
       } else {
-        mediaRecorder.pause();
+        // Pause recording - don't stop MediaRecorder, just pause timer and speech recognition
         setIsPaused(true);
+        
+        // Stop timer
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+
+        // Pause speech recognition and save current transcript
+        if (speechRecognition) {
+          // Save the current transcript before stopping
+          accumulatedTranscriptRef.current = transcriptRef.current;
+          speechRecognition.stop();
+          setSpeechRecognition(null);
+          setIsTranscribing(false);
+        }
+        
+        // Stop speech recognition monitor when paused
+        stopSpeechRecognitionMonitor();
       }
     }
-  }, [mediaRecorder, isRecording, isPaused, recordingTime]);
+  }, [mediaRecorder, isRecording, isPaused, recordingTime, stream, recordingType, enableDictation, onRecordingComplete, recordedChunks]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -346,6 +511,7 @@ export default function VideoRecorder({
             autoPlay
             muted
             className="w-full h-64 object-contain"
+            style={{ transform: 'scaleX(-1)' }}
           />
           {isRecording && (
             <div className="absolute top-2 left-2 bg-red-500 text-white px-2 py-1 rounded text-xs font-medium">
@@ -381,9 +547,9 @@ export default function VideoRecorder({
       {enableDictation && isRecording && (
         <div className="bg-gray-50 dark:bg-davyGray rounded-lg p-4">
           <div className="flex items-center space-x-2 mb-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <div className={`w-2 h-2 rounded-full ${isTranscribing ? 'bg-green-500 animate-pulse' : transcript ? 'bg-yellow-500' : 'bg-gray-400'}`}></div>
             <span className="text-sm font-medium text-gray-dark dark:text-gray-light">
-              Live Transcription
+              {isTranscribing ? 'Live Transcription' : transcript ? 'Transcription (Paused)' : 'Live Transcription'}
             </span>
           </div>
           <div className="text-sm text-gray-dark dark:text-gray-light min-h-[60px] max-h-[120px] overflow-y-auto">
