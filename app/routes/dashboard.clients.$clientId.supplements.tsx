@@ -306,11 +306,6 @@ export default function ClientSupplements() {
   );
   const [removingSupplementId, setRemovingSupplementId] = useState<string | null>(null);
 
-  // Log modal state changes
-  useEffect(() => {
-    console.log('🔍 [STATE] Modal state changed - isAddModalOpen:', isAddModalOpen, 'editingSupplement:', editingSupplement?.name);
-  }, [isAddModalOpen, editingSupplement]);
-
   // Cleanup processed data on unmount
   useEffect(() => {
     return () => {
@@ -382,71 +377,53 @@ export default function ClientSupplements() {
   }
 
   const handleEditClick = (supplement: Supplement) => {
-    console.log('🔍 [EDIT] handleEditClick called with supplement:', supplement);
     // Reset processed data when starting a new edit operation
     processedFetcherData.current = null;
     setEditingSupplement(supplement);
     setIsAddModalOpen(true);
-    console.log('🔍 [EDIT] Modal state set - isAddModalOpen: true, editingSupplement set');
   };
 
   const handleModalClose = () => {
-    console.log('🔍 [EDIT] handleModalClose called');
     // Reset processed data when closing modal
     processedFetcherData.current = null;
     setIsAddModalOpen(false);
     setEditingSupplement(null);
-    console.log('🔍 [EDIT] Modal state cleared - isAddModalOpen: false, editingSupplement: null');
   };
 
   const handleRemoveClick = (supplementId: string) => {
-    console.log('🔍 [REMOVE] handleRemoveClick called for supplement:', supplementId);
     setRemovingSupplementId(supplementId);
   };
 
   // Refresh page data when supplement form submission completes successfully
   useEffect(() => {
-    console.log('🔍 [EDIT] useEffect triggered - fetcher.state:', fetcher.state, 'fetcher.data:', fetcher.data);
-    
     // Only process if we have new data and haven't processed it yet
     if (fetcher.state === "idle" && fetcher.data && 
         (fetcher.data.supplement || fetcher.data.deletedSupplement) &&
         processedFetcherData.current !== fetcher.data) {
       
-      console.log('🔍 [EDIT] Processing fetcher data');
       processedFetcherData.current = fetcher.data;
       
       // For delete operations, clear cache immediately and delay revalidation
       if (fetcher.data.deletedSupplement) {
-        console.log('🔍 [EDIT] Delete operation - clearing cache and delaying revalidation');
         // Clear cache immediately using the correct key
         if (clientId) {
           delete clientSupplementsCache[clientId];
-          console.log('🔍 [EDIT] Cache cleared for key:', clientId);
         }
         // Clear removing state
         setRemovingSupplementId(null);
         // Delay revalidation to ensure cache is cleared
         setTimeout(() => {
-          console.log('🔍 [EDIT] Calling revalidator.revalidate() after cache clear');
           revalidator.revalidate();
         }, 200);
       } else {
         // For add/edit operations, proceed normally
-        console.log('🔍 [EDIT] Add/Edit operation - calling revalidator.revalidate()');
         revalidator.revalidate();
         
-        console.log('🔍 [EDIT] Closing modal due to successful add/edit submission');
         setIsAddModalOpen(false);
         setEditingSupplement(null);
       }
     }
   }, [fetcher.state, fetcher.data, revalidator, clientId]);
-
-  // Log when supplements data changes
-  useEffect(() => {
-    console.log('🔍 [DATA] Supplements data updated - count:', supplements.length, 'supplements:', supplements.map(s => s.name));
-  }, [supplements]);
 
   return (
     <ClientDetailLayout>
