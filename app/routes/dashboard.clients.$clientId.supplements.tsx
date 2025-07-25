@@ -406,15 +406,31 @@ export default function ClientSupplements() {
         (fetcher.data.supplement || fetcher.data.deletedSupplement) &&
         processedFetcherData.current !== fetcher.data) {
       
-      console.log('🔍 [EDIT] Closing modal due to successful submission');
+      console.log('🔍 [EDIT] Processing fetcher data');
       processedFetcherData.current = fetcher.data;
       
-      // Only revalidate and close modal if we have actual data to update
-      revalidator.revalidate();
-      setIsAddModalOpen(false);
-      setEditingSupplement(null);
+      // Revalidate the page data
+      console.log('🔍 [EDIT] Calling revalidator.revalidate()');
+      // Add a small delay to ensure cache is cleared
+      setTimeout(() => {
+        revalidator.revalidate();
+      }, 100);
+      
+      // Only close modal for add/edit operations, not for delete operations
+      if (fetcher.data.supplement && !fetcher.data.deletedSupplement) {
+        console.log('🔍 [EDIT] Closing modal due to successful add/edit submission');
+        setIsAddModalOpen(false);
+        setEditingSupplement(null);
+      } else {
+        console.log('🔍 [EDIT] Delete operation completed - keeping modal state unchanged');
+      }
     }
   }, [fetcher.state, fetcher.data, revalidator]);
+
+  // Log when supplements data changes
+  useEffect(() => {
+    console.log('🔍 [DATA] Supplements data updated - count:', supplements.length, 'supplements:', supplements.map(s => s.name));
+  }, [supplements]);
 
   return (
     <ClientDetailLayout>
