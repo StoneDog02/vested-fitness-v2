@@ -1,6 +1,6 @@
 import { Link } from "@remix-run/react";
 import { Dialog, Transition } from "@headlessui/react";
-import { Fragment } from "react";
+import { Fragment, useState, useEffect } from "react";
 
 interface NavItem {
   name: string;
@@ -21,6 +21,13 @@ export default function MenuDrawer({
   navItems,
   isActive,
 }: MenuDrawerProps) {
+  // Client-side only rendering to prevent hydration mismatches
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   const NavItem = ({
     item,
     isNested = false,
@@ -51,6 +58,11 @@ export default function MenuDrawer({
       )}
     </div>
   );
+
+  // Don't render anything on the server or during hydration
+  if (!isClient) {
+    return null;
+  }
 
   return (
     <Transition.Root show={isOpen} as={Fragment}>

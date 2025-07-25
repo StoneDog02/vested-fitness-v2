@@ -234,6 +234,10 @@ export const action = async ({
     if (error || !data) {
       return json({ error: error?.message || "Failed to add supplement" }, { status: 500 });
     }
+    // Invalidate cache for this client
+    if (params.clientId) {
+      delete clientSupplementsCache[params.clientId];
+    }
     return json({ supplement: data });
   }
   if (intent === "edit") {
@@ -251,6 +255,10 @@ export const action = async ({
     if (error || !data) {
       return json({ error: error?.message || "Failed to update supplement" }, { status: 500 });
     }
+    // Invalidate cache for this client
+    if (params.clientId) {
+      delete clientSupplementsCache[params.clientId];
+    }
     return json({ supplement: data });
   }
   if (intent === "remove") {
@@ -264,6 +272,10 @@ export const action = async ({
     if (error || !data) {
       return json({ error: error?.message || "Failed to delete supplement" }, { status: 500 });
     }
+    // Invalidate cache for this client
+    if (params.clientId) {
+      delete clientSupplementsCache[params.clientId];
+    }
     return json({ deletedSupplement: data });
   }
   return redirect(request.url);
@@ -276,15 +288,21 @@ export default function ClientSupplements() {
     weekStart: string;
     client: { id: string; name: string; created_at?: string } | null;
   }>();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<{
+    supplement?: any;
+    deletedSupplement?: any;
+    error?: string;
+  }>();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   const revalidator = useRevalidator();
 
   // Refresh page data when supplement form submission completes successfully
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
-      // Form submission completed successfully, revalidate the page data and close modal
-      revalidator.revalidate();
+      // Only revalidate if we have actual data to update
+      if (fetcher.data.supplement || fetcher.data.deletedSupplement) {
+        revalidator.revalidate();
+      }
       setIsAddModalOpen(false);
       setEditingSupplement(null);
     }
