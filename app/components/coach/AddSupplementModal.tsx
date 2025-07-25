@@ -34,13 +34,6 @@ export default function AddSupplementModal({
     instructions: "",
   });
 
-  // Client-side only rendering to prevent hydration mismatches
-  const [isClient, setIsClient] = useState(false);
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
   // Update form data when editing a supplement
   useEffect(() => {
     if (editingSupplement) {
@@ -72,11 +65,6 @@ export default function AddSupplementModal({
       });
     }
   };
-
-  // Don't render anything on the server or during hydration
-  if (!isClient) {
-    return null;
-  }
 
   return (
     <Dialog

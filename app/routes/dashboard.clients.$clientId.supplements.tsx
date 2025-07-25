@@ -298,11 +298,9 @@ export default function ClientSupplements() {
 
   // Refresh page data when supplement form submission completes successfully
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data) {
-      // Only revalidate if we have actual data to update
-      if (fetcher.data.supplement || fetcher.data.deletedSupplement) {
-        revalidator.revalidate();
-      }
+    if (fetcher.state === "idle" && fetcher.data && (fetcher.data.supplement || fetcher.data.deletedSupplement)) {
+      // Only revalidate and close modal if we have actual data to update
+      revalidator.revalidate();
       setIsAddModalOpen(false);
       setEditingSupplement(null);
     }
