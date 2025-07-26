@@ -133,7 +133,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .in("workout_plan_id", (workoutPlansRaw.data ?? []).map((p: any) => p.id)),
           supabase
             .from("meals")
-            .select("id, meal_plan_id")
+            .select("id, meal_plan_id, name, time")
             .in("meal_plan_id", (mealPlansRaw.data ?? []).map((p: any) => p.id)),
           supabase
             .from("supplements")
@@ -194,14 +194,68 @@ export const loader: LoaderFunction = async ({ request }) => {
           // Expected meals (7 days worth)
           const mealPlan = mealPlanByUser[client.id];
           if (mealPlan && mealsByPlan[mealPlan.id]) {
-            expectedMeals = (mealsByPlan[mealPlan.id] || []).length * 7;
+            const allMeals = mealsByPlan[mealPlan.id] || [];
+            
+            // Group meals by name and time to handle A/B options as single meals
+            const mealGroups = allMeals.reduce((groups: Record<string, any[]>, meal: any) => {
+              const key = `${meal.name}-${meal.time}`;
+              if (!groups[key]) {
+                groups[key] = [];
+              }
+              groups[key].push(meal);
+              return groups;
+            }, {});
+            
+            // Count unique meal groups (treating A/B options as single meals)
+            const uniqueMealGroups = Object.keys(mealGroups);
+            expectedMeals = uniqueMealGroups.length * 7;
           }
           // Expected supplements (7 days worth)
           const supplements = supplementsByUser[client.id] || [];
           expectedSupplements = supplements.length * 7;
           // Completions
           const completedWorkouts = (workoutCompletionsByUser[client.id] || []).length;
-          const completedMeals = (mealCompletionsByUser[client.id] || []).length;
+          
+          // Calculate completed meals by grouping A/B options
+          let completedMeals = 0;
+          const clientMealPlan = mealPlanByUser[client.id];
+          if (clientMealPlan && mealsByPlan[clientMealPlan.id]) {
+            const allMeals = mealsByPlan[clientMealPlan.id] || [];
+            const clientMealCompletions = mealCompletionsByUser[client.id] || [];
+            
+            // Group meals by name and time
+            const mealGroups = allMeals.reduce((groups: Record<string, any[]>, meal: any) => {
+              const key = `${meal.name}-${meal.time}`;
+              if (!groups[key]) {
+                groups[key] = [];
+              }
+              groups[key].push(meal);
+              return groups;
+            }, {});
+            
+            // Count completed unique meal groups
+            const uniqueMealGroups = Object.keys(mealGroups);
+            const completedUniqueMealGroups = uniqueMealGroups.filter(groupKey => {
+              const [mealName, mealTime] = groupKey.split('-');
+              const groupMeals = allMeals.filter((m: any) => 
+                m.name === mealName && m.time.startsWith(mealTime)
+              );
+              
+              // Check if any meal in this group was completed
+              const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
+              const groupCompletions = clientMealCompletions.filter((c: any) => 
+                groupMealIds.has(c.id)
+              );
+              
+              return groupCompletions.length > 0; // If any meal in the group was completed, the group is complete
+            });
+            
+            completedMeals = completedUniqueMealGroups.length;
+          } else {
+            // Fallback to original calculation if no meal plan
+            completedMeals = (mealCompletionsByUser[client.id] || []).length;
+          }
+          
           const completedSupplements = (supplementCompletionsByUser[client.id] || []).length;
           // Calculate individual compliance percentages
           const workoutCompliance = expectedWorkoutDays > 0

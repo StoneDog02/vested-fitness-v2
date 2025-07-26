@@ -21,6 +21,14 @@ import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import NABadge from "../components/ui/NABadge";
 
+// Helper function to truncate meal plan descriptions
+const truncateDescription = (description: string, maxLength: number = 50) => {
+  if (!description || description.length <= maxLength) {
+    return description;
+  }
+  return description.substring(0, maxLength) + "...";
+};
+
 // Helper function to determine activation status for coaches
 const getActivationStatus = (plan: { isActive: boolean; activatedAt?: string }) => {
   if (!plan.isActive) return null;
@@ -1036,7 +1044,7 @@ export default function ClientMeals() {
                           )}
                         </div>
                         <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                          {plan.description}
+                          {truncateDescription(plan.description)}
                         </p>
                         <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                           Created:{" "}
@@ -1106,7 +1114,7 @@ export default function ClientMeals() {
                   <div>
                     <h4 className="font-semibold">{activeMealPlan.title}</h4>
                     <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                      {activeMealPlan.description}
+                      {truncateDescription(activeMealPlan.description)}
                     </p>
                     <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                       Created:{" "}
@@ -1380,7 +1388,7 @@ export default function ClientMeals() {
                           )}
                         </div>
                         <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                          {plan.description}
+                          {truncateDescription(plan.description)}
                         </p>
                         <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                           Created:{" "}

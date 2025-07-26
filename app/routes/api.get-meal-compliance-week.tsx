@@ -140,13 +140,39 @@ export const loader = async ({ request }: { request: Request }) => {
     
     // Meals for this plan
     const meals = plan.meals;
-    // Completions for this day and these meals
-    const mealIds = new Set(meals.map((m) => m.id));
-    const completions = (completionsRaw || []).filter((c) => {
-      const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
-      return completedDateStr === dayStr && mealIds.has(c.meal_id);
+    
+    // Group meals by name and time to handle A/B options as single meals
+    const mealGroups = meals.reduce((groups: Record<string, any[]>, meal: any) => {
+      const key = `${meal.name}-${meal.time}`;
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(meal);
+      return groups;
+    }, {});
+    
+    const uniqueMealGroups = Object.keys(mealGroups);
+    const totalUniqueMeals = uniqueMealGroups.length;
+    
+    // Count completed unique meal groups
+    const completedUniqueMealGroups = uniqueMealGroups.filter(groupKey => {
+      const [mealName, mealTime] = groupKey.split('-');
+      const groupMeals = meals.filter((m: any) => 
+        m.name === mealName && m.time.startsWith(mealTime)
+      );
+      
+      // Check if any meal in this group was completed
+      const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
+      const groupCompletions = (completionsRaw || []).filter((c: any) => {
+        const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
+        return completedDateStr === dayStr && groupMealIds.has(c.meal_id);
+      });
+      
+      return groupCompletions.length > 0; // If any meal in the group was completed, the group is complete
     });
-    const percent = meals.length > 0 ? completions.length / meals.length : 0;
+    
+    const completedUniqueMeals = completedUniqueMealGroups.length;
+    const percent = totalUniqueMeals > 0 ? completedUniqueMeals / totalUniqueMeals : 0;
     complianceData.push(percent);
   }
 

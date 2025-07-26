@@ -5,6 +5,14 @@ import type { MealPlan } from "~/routes/dashboard.clients.$clientId.meals";
 import { useFetcher } from "@remix-run/react";
 import { TrashIcon } from "@heroicons/react/24/outline";
 
+// Helper function to truncate meal plan descriptions
+const truncateDescription = (description: string, maxLength: number = 50) => {
+  if (!description || description.length <= maxLength) {
+    return description;
+  }
+  return description.substring(0, maxLength) + "...";
+};
+
 type ViewMealPlanLibraryModalProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -143,7 +151,7 @@ export default function ViewMealPlanLibraryModal({
                     </div>
                   </div>
                   <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                    {plan.description}
+                    {truncateDescription(plan.description)}
                   </p>
                   <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                     Created: {new Date(plan.createdAt).toLocaleDateString(undefined, {

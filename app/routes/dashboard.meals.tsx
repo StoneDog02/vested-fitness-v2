@@ -177,6 +177,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           }));
           activeMealPlan = {
             name: planToShow.title,
+            description: planToShow.description,
             date: "", // Could add date range formatting here if needed
             meals,
           };
@@ -640,8 +641,7 @@ export default function Meals() {
     setCalendarData(prev =>
       prev.map(day => {
         if (day.date === currentDate.format("ddd, MMM D")) {
-          const total = currentDayMealPlan?.meals?.length || 0;
-          const percentage = total > 0 ? Math.round((mealIdsForBackend.length / total) * 100) : 0;
+          const percentage = totalUniqueMeals > 0 ? Math.round((completedUniqueMeals / totalUniqueMeals) * 100) : 0;
           return {
             ...day,
             status: "completed",
@@ -669,17 +669,104 @@ export default function Meals() {
   // Calculate the macros based on the food items - need to convert keys back to check against meal IDs with deduplication
   const completedMealIds = [...new Set(checkedMeals.map(getMealIdFromKey).filter(Boolean))] as string[];
   
-
+  // Count unique meal groups (by name and time) instead of individual meal options
+  const uniqueMealGroups = currentDayMealPlan?.meals ? 
+    Object.keys(currentDayMealPlan.meals.reduce((groups: Record<string, any[]>, meal: any) => {
+      const key = `${meal.name}-${meal.time}`;
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(meal);
+      return groups;
+    }, {} as Record<string, any[]>)) : [];
+  
+  const totalUniqueMeals = uniqueMealGroups.length;
+  
+  // Count completed unique meal groups
+  const completedUniqueMealGroups = uniqueMealGroups.filter(groupKey => {
+    const [mealName, mealTime] = groupKey.split('-');
+    const groupMeals = currentDayMealPlan?.meals?.filter((m: any) => 
+      m.name === mealName && m.time.startsWith(mealTime)
+    ) || [];
+    // Check if any meal in this group is completed
+    return groupMeals.some((meal: any) => 
+      completedMealIds.includes(String(meal.id))
+    );
+  });
+  
+  const completedUniqueMeals = completedUniqueMealGroups.length;
   
   // Error detection: If completed meals exceed total meals, clear corrupted data
   useEffect(() => {
-    if (isHydrated && currentDayMealPlan?.meals && completedMealIds.length > currentDayMealPlan.meals.length) {
-      console.error(`Data corruption detected: ${completedMealIds.length} completed meals > ${currentDayMealPlan.meals.length} total meals. Clearing data.`);
+    if (isHydrated && totalUniqueMeals > 0 && completedUniqueMeals > totalUniqueMeals) {
+      console.error(`Data corruption detected: ${completedUniqueMeals} completed meals > ${totalUniqueMeals} total meals. Clearing data.`);
       clearCorruptedData();
     }
-  }, [completedMealIds.length, currentDayMealPlan?.meals?.length, isHydrated, clearCorruptedData]);
+  }, [completedUniqueMeals, totalUniqueMeals, isHydrated, clearCorruptedData]);
   
-  const calculatedMacros = calculateMacros(currentDayMealPlan?.meals || [], completedMealIds);
+  // Calculate macros based on unique meal groups to avoid double-counting A/B options
+  const calculateMacrosForUniqueMeals = (meals: any[], completedUniqueMealGroups: string[]) => {
+    let totalCalories = 0;
+    let totalProtein = 0;
+    let totalCarbs = 0;
+    let totalFat = 0;
+
+    let completedCalories = 0;
+    let completedProtein = 0;
+    let completedCarbs = 0;
+    let completedFat = 0;
+
+    // Group meals by name and time
+    const mealGroups = meals.reduce((groups: Record<string, any[]>, meal: any) => {
+      const key = `${meal.name}-${meal.time}`;
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(meal);
+      return groups;
+    }, {});
+
+    // Calculate totals and completed macros
+    Object.entries(mealGroups).forEach(([groupKey, groupMeals]) => {
+      const isGroupCompleted = completedUniqueMealGroups.includes(groupKey);
+      
+      // For totals, only count the first meal in each group (avoid double-counting)
+      const firstMeal = groupMeals[0];
+      firstMeal.foods.forEach((food: any) => {
+        totalCalories += food.calories;
+        totalProtein += food.protein;
+        totalCarbs += food.carbs;
+        totalFat += food.fat;
+      });
+      
+      // For completed, only count if the group is completed
+      if (isGroupCompleted) {
+        firstMeal.foods.forEach((food: any) => {
+          completedCalories += food.calories;
+          completedProtein += food.protein;
+          completedCarbs += food.carbs;
+          completedFat += food.fat;
+        });
+      }
+    });
+
+    return {
+      total: {
+        calories: Math.round(totalCalories),
+        protein: Math.round(totalProtein),
+        carbs: Math.round(totalCarbs),
+        fat: Math.round(totalFat),
+      },
+      completed: {
+        calories: Math.round(completedCalories),
+        protein: Math.round(completedProtein),
+        carbs: Math.round(completedCarbs),
+        fat: Math.round(completedFat),
+      },
+    };
+  };
+
+  const calculatedMacros = calculateMacrosForUniqueMeals(currentDayMealPlan?.meals || [], completedUniqueMealGroups);
 
   // Use the current day's meal plan
   const mealPlan = currentDayMealPlan;
@@ -871,6 +958,20 @@ export default function Meals() {
                 </Button>
               </div>
 
+              {/* Meal Plan Description */}
+              {mealPlan && mealPlan.description && (
+                <div className="mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                  <div className="p-4 bg-gray-lightest dark:bg-secondary-light/20 rounded-lg">
+                    <h3 className="text-sm font-semibold text-secondary dark:text-alabaster mb-2">
+                      Plan Details
+                    </h3>
+                    <p className="text-sm text-gray-dark dark:text-gray-light whitespace-pre-wrap">
+                      {mealPlan.description}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Activation Day Message */}
               {isActivationDay && dayOffset === 0 && (
                 <div className="mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
@@ -919,7 +1020,7 @@ export default function Meals() {
                     Daily Progress
                   </h3>
                   <span className="text-sm text-gray-dark dark:text-gray-light">
-                    {mealPlan && mealPlan.meals ? `${completedMealIds.length} of ${mealPlan.meals.length} meals` : "0 of 0 meals"}{" "}
+                    {mealPlan && mealPlan.meals ? `${completedUniqueMeals} of ${totalUniqueMeals} meals` : "0 of 0 meals"}{" "}
                     completed
                   </span>
                 </div>
@@ -928,14 +1029,14 @@ export default function Meals() {
                     className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
                     style={{
                       width: mealPlan && mealPlan.meals && mealPlan.meals.length > 0
-                        ? `${(completedMealIds.length / mealPlan.meals.length) * 100}%`
+                        ? `${(completedUniqueMeals / totalUniqueMeals) * 100}%`
                         : "100%",
                     }}
                   ></div>
                 </div>
                 <div className="text-xs text-gray-dark dark:text-gray-light text-right">
                   {mealPlan && mealPlan.meals && mealPlan.meals.length > 0
-                    ? Math.round((completedMealIds.length / mealPlan.meals.length) * 100)
+                    ? Math.round((completedUniqueMeals / totalUniqueMeals) * 100)
                     : 100}
                   % complete
                 </div>

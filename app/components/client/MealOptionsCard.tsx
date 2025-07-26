@@ -24,7 +24,7 @@ interface MealOptionsCardProps {
   isDaySubmitted?: boolean;
   isActivationDay?: boolean;
   isHydrated?: boolean;
-  createMealKey: (meal: { id: string | number; name: string; time: string }) => string;
+  createMealKey: (meal: { id: string | number; name: string; time: string; mealOption?: 'A' | 'B' }) => string;
   checkedMeals?: string[];
   toggleMealCheck: (meal: Meal) => void;
 }
@@ -85,9 +85,22 @@ export default function MealOptionsCard({
         const mealKey = createMealKey({ 
           id: currentMeal.id, 
           name: currentMeal.name, 
-          time: currentMeal.time 
+          time: currentMeal.time,
+          mealOption: currentMeal.mealOption
         });
-        const isChecked = isHydrated && checkedMeals.includes(mealKey);
+        
+        // Check if any meal in this group is completed (for A/B options)
+        const isAnyMealInGroupChecked = mealOptions.some(meal => {
+          const key = createMealKey({ 
+            id: meal.id, 
+            name: meal.name, 
+            time: meal.time,
+            mealOption: meal.mealOption // Include the mealOption in the key
+          });
+          return isHydrated && checkedMeals.includes(key);
+        });
+        
+        const isChecked = isAnyMealInGroupChecked;
 
         return (
           <div
@@ -177,7 +190,25 @@ export default function MealOptionsCard({
                   value={currentMeal.id}
                   checked={isChecked}
                   onChange={() => {
-                    !isDaySubmitted && !isActivationDay && toggleMealCheck(currentMeal);
+                    if (!isDaySubmitted && !isActivationDay && isHydrated) {
+                      // If any meal in the group is checked, uncheck all meals in the group
+                      if (isAnyMealInGroupChecked) {
+                        mealOptions.forEach(meal => {
+                          const key = createMealKey({ 
+                            id: meal.id, 
+                            name: meal.name, 
+                            time: meal.time,
+                            mealOption: meal.mealOption
+                          });
+                          if (checkedMeals.includes(key)) {
+                            toggleMealCheck(meal);
+                          }
+                        });
+                      } else {
+                        // Otherwise, check the currently selected meal
+                        toggleMealCheck(currentMeal);
+                      }
+                    }
                   }}
                   disabled={isDaySubmitted || !isHydrated || isActivationDay}
                   className={`w-4 h-4 sm:w-5 sm:h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
