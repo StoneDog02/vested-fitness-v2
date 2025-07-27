@@ -286,9 +286,75 @@ export interface Database {
 
 // Replace mock resetPassword with real implementation
 import { createClient } from "@supabase/supabase-js";
+import jwt from "jsonwebtoken";
 
 export const resetPassword = async (email: string): Promise<{ error: Error | null }> => {
   const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
   const { error } = await supabase.auth.resetPasswordForEmail(email);
   return { error };
+};
+
+export const validateAndRefreshToken = async (accessToken: string, refreshToken: string) => {
+  try {
+    // Decode the access token to check expiration
+    const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+    if (!decoded || typeof decoded !== "object") {
+      return { valid: false, reason: "Invalid token structure" };
+    }
+
+    // Check if token is expired (with 5 minute buffer)
+    if ("exp" in decoded && typeof decoded.exp === "number") {
+      const exp = decoded.exp as number;
+      const now = Math.floor(Date.now() / 1000);
+      const buffer = 5 * 60; // 5 minutes
+      
+      if (now >= (exp - buffer)) {
+        // Token is expired or will expire soon, try to refresh
+        const supabase = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_ANON_KEY!
+        );
+        
+        const { data, error } = await supabase.auth.refreshSession({
+          refresh_token: refreshToken,
+        });
+        
+        if (error || !data.session) {
+          return { valid: false, reason: "Token refresh failed", error };
+        }
+        
+        return { 
+          valid: true, 
+          newAccessToken: data.session.access_token,
+          newRefreshToken: data.session.refresh_token
+        };
+      }
+    }
+    
+    return { valid: true };
+  } catch (error) {
+    return { valid: false, reason: "Token validation error", error };
+  }
+};
+
+export const extractAuthFromCookie = (cookies: Record<string, string>) => {
+  const supabaseAuthCookieKey = Object.keys(cookies).find(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  
+  if (!supabaseAuthCookieKey) {
+    return { accessToken: null, refreshToken: null };
+  }
+  
+  try {
+    const decoded = Buffer.from(
+      cookies[supabaseAuthCookieKey],
+      "base64"
+    ).toString("utf-8");
+    const [access, refresh] = JSON.parse(JSON.parse(decoded));
+    return { accessToken: access, refreshToken: refresh };
+  } catch (e) {
+    console.error("Failed to extract auth from cookie:", e);
+    return { accessToken: null, refreshToken: null };
+  }
 };

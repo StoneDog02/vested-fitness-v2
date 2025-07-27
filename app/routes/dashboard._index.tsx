@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useMatches, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
@@ -23,6 +23,8 @@ import {
   USER_TIMEZONE 
 } from "~/lib/timezone";
 import React from "react";
+import { extractAuthFromCookie, validateAndRefreshToken } from "~/lib/supabase";
+import { createCookie } from "@remix-run/node";
 
 type LoaderData = {
   clientData?: ClientDashboardData;
@@ -109,35 +111,53 @@ const dashboardCache: Record<string, { data: any; expires: number }> = {};
 
 export const loader: LoaderFunction = async ({ request }) => {
   const cookies = parse(request.headers.get("cookie") || "");
-  const supabaseAuthCookieKey = Object.keys(cookies).find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-  let accessToken;
-  if (supabaseAuthCookieKey) {
-    try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
-    } catch (e) {
-      accessToken = undefined;
+  const { accessToken, refreshToken } = extractAuthFromCookie(cookies);
+  
+  let authId: string | undefined;
+  let needsTokenRefresh = false;
+  let newTokens: { accessToken: string; refreshToken: string } | null = null;
+  
+  if (accessToken && refreshToken) {
+    // Validate and potentially refresh the token
+    const validation = await validateAndRefreshToken(accessToken, refreshToken);
+    
+    if (validation.valid) {
+      if (validation.newAccessToken && validation.newRefreshToken) {
+        // Token was refreshed, we need to update the cookie
+        needsTokenRefresh = true;
+        newTokens = {
+          accessToken: validation.newAccessToken,
+          refreshToken: validation.newRefreshToken
+        };
+        
+        // Extract authId from new token
+        try {
+          const decoded = jwt.decode(validation.newAccessToken) as Record<string, unknown> | null;
+          authId = decoded && typeof decoded === "object" && "sub" in decoded
+            ? (decoded.sub as string)
+            : undefined;
+        } catch (e) {
+          console.error("Failed to decode refreshed token:", e);
+        }
+      } else {
+        // Token is still valid, extract authId
+        try {
+          const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+          authId = decoded && typeof decoded === "object" && "sub" in decoded
+            ? (decoded.sub as string)
+            : undefined;
+        } catch (e) {
+          console.error("Failed to decode access token:", e);
+        }
+      }
+    } else {
+      console.error("Token validation failed:", validation.reason);
     }
   }
-
-  let coachId = null;
-  let authId: string | undefined;
-  if (accessToken) {
-    try {
-      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      authId =
-        decoded && typeof decoded === "object" && "sub" in decoded
-          ? (decoded.sub as string)
-          : undefined;
-    } catch (e) {
-      /* ignore */
-    }
+  
+  // If no valid auth, redirect to login
+  if (!authId) {
+    return redirect("/auth/login");
   }
 
   // Invalidate cache if requested (e.g., after meal completion)
@@ -160,444 +180,432 @@ export const loader: LoaderFunction = async ({ request }) => {
   let recentClients: Client[] = [];
   const recentActivity: Activity[] = [];
 
-  if (authId) {
-    const supabase = createClient<Database>(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
-    );
-    const { data: user } = await supabase
-      .from("users")
-      .select("id, role, coach_id, starting_weight, current_weight")
-      .eq("auth_id", authId)
-      .single();
-    if (user) {
-      coachId = user.role === "coach" ? user.id : user.coach_id;
-      if (user.role === "client") {
-        const today = getCurrentDate();
-        const todayStr = today.format("YYYY-MM-DD");
-        const tomorrowStr = today.add(1, "day").format("YYYY-MM-DD");
-        // Get ALL meal plans for this user (both active and recently deactivated)
-        const { data: allPlans } = await supabase
-          .from("meal_plans")
-          .select("id, title, description, created_at, is_active, activated_at, deactivated_at")
-          .eq("user_id", user.id)
-          .eq("is_template", false)
-          .order("activated_at", { ascending: false, nullsFirst: false });
-        // Determine which plan to show to the client (respecting activation day logic):
-        let planToShow = null;
-        if (allPlans && allPlans.length > 0) {
+  const supabase = createClient<Database>(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
+  
+  const { data: user } = await supabase
+    .from("users")
+    .select("id, role, coach_id, starting_weight, current_weight")
+    .eq("auth_id", authId)
+    .single();
+    
+  if (user) {
+    const coachId = user.role === "coach" ? user.id : user.coach_id;
+    if (user.role === "client") {
+      const today = getCurrentDate();
+      const todayStr = today.format("YYYY-MM-DD");
+      const tomorrowStr = today.add(1, "day").format("YYYY-MM-DD");
+      // Get ALL meal plans for this user (both active and recently deactivated)
+      const { data: allPlans } = await supabase
+        .from("meal_plans")
+        .select("id, title, description, created_at, is_active, activated_at, deactivated_at")
+        .eq("user_id", user.id)
+        .eq("is_template", false)
+        .order("activated_at", { ascending: false, nullsFirst: false });
+      // Determine which plan to show to the client (respecting activation day logic):
+      let planToShow = null;
+      if (allPlans && allPlans.length > 0) {
+        planToShow = allPlans.find(plan => {
+          if (!plan.is_active) return false;
+          if (!plan.activated_at) return true; // Legacy plans without activation date
+          const activatedDate = dayjs(plan.activated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
+          return activatedDate < todayStr; // Only show plans activated before today (not on activation day)
+        });
+        // If no active plan found, look for plan deactivated today (was active until today)
+        if (!planToShow) {
           planToShow = allPlans.find(plan => {
-            if (!plan.is_active) return false;
-            if (!plan.activated_at) return true; // Legacy plans without activation date
-            const activatedDate = dayjs(plan.activated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
-            return activatedDate < todayStr; // Only show plans activated before today (not on activation day)
+            if (!plan.deactivated_at) return false;
+            const deactivatedDate = dayjs(plan.deactivated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
+            return deactivatedDate === todayStr; // Deactivated today, so show until end of day
           });
-          // If no active plan found, look for plan deactivated today (was active until today)
-          if (!planToShow) {
-            planToShow = allPlans.find(plan => {
-              if (!plan.deactivated_at) return false;
-              const deactivatedDate = dayjs(plan.deactivated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
-              return deactivatedDate === todayStr; // Deactivated today, so show until end of day
-            });
+        }
+      }
+      let todaysMeals: Meal[] = [];
+      let completedMealIds: string[] = [];
+      if (planToShow) {
+        // Fetch all meals for the selected plan, order by sequence_order
+        const { data: mealsRaw, error: mealsError } = await supabase
+          .from("meals")
+          .select("id, name, time, sequence_order")
+          .eq("meal_plan_id", planToShow.id)
+          .order("sequence_order", { ascending: true });
+        if (mealsError) console.error('[DASHBOARD] Meals query error:', mealsError);
+        // For each meal, fetch foods and join food_library for macros
+        todaysMeals = await Promise.all((mealsRaw || []).map(async (meal: any) => {
+          const { data: foodsRaw } = await supabase
+            .from("foods")
+            .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+            .eq("meal_id", meal.id);
+          const foods = (foodsRaw || []).map((food: any) => {
+            const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
+            const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
+            const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) || 0 : Number(food.fat) || 0;
+            const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
+            return {
+              id: String(food.id || ''),
+              name: String(food.name || ''),
+              portion: String(food.portion || ''),
+              calories: isFinite(calories) ? calories : 0,
+              protein: isFinite(protein) ? Math.round(protein) : 0,
+              carbs: isFinite(carbs) ? Math.round(carbs) : 0,
+              fat: isFinite(fat) ? Math.round(fat) : 0,
+            };
+          });
+          // Optionally, sum macros for the meal (or keep as foods only)
+          const totalProtein = foods.reduce((sum, f) => sum + (f.protein || 0), 0);
+          const totalCarbs = foods.reduce((sum, f) => sum + (f.carbs || 0), 0);
+          const totalFat = foods.reduce((sum, f) => sum + (f.fat || 0), 0);
+          const totalCalories = foods.reduce((sum, f) => sum + (f.calories || 0), 0);
+          return {
+            id: meal.id,
+            name: meal.name,
+            time: meal.time,
+            completed: false,
+            foods,
+            calories: totalCalories,
+            protein: totalProtein,
+            carbs: totalCarbs,
+            fat: totalFat,
+            description: meal.description,
+          };
+        }));
+        // Fetch today's meal completions for this plan
+        const { data: completions } = await supabase
+          .from("meal_completions")
+          .select("meal_id, completed_at")
+          .eq("user_id", user.id)
+          .gte("completed_at", todayStr)
+          .lt("completed_at", tomorrowStr);
+        completedMealIds = (completions || []).map((mc: any) => {
+          const mealObj = todaysMeals.find((m) => m.id === mc.meal_id);
+          if (mealObj) {
+            return `${mealObj.id}-${mealObj.name}-${mealObj.time.slice(0,5)}`;
+          }
+          return String(mc.meal_id);
+        });
+      }
+      // Fetch updates and weight logs (needed for dashboard)
+      const [updatesRawResult, weightLogsResult] = await Promise.all([
+        supabase
+          .from("coach_updates")
+          .select("message, created_at")
+          .eq("client_id", user.id)
+          .gte("created_at", todayStr)
+          .lt("created_at", tomorrowStr)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("weight_logs")
+          .select("weight, logged_at")
+          .eq("user_id", user.id)
+          .order("logged_at", { ascending: true })
+      ]);
+      // Build updates
+      const updates = (updatesRawResult.data || []).map((u: any) => ({
+        message: u.message,
+                      timestamp: u.created_at ? dayjs(u.created_at).tz(USER_TIMEZONE).format("YYYY-MM-DD HH:mm") : ""
+      }));
+      // Weight change
+      let weightChange = 0;
+      if (weightLogsResult.data && weightLogsResult.data.length > 0) {
+        const first = weightLogsResult.data[0].weight;
+        const last = weightLogsResult.data[weightLogsResult.data.length - 1].weight;
+        weightChange = last - first;
+      } else if (user.starting_weight && user.current_weight) {
+        weightChange = user.current_weight - user.starting_weight;
+      }
+      // Parallelize all independent queries
+      const [
+        workoutCompletionsResult,
+        activePlansResult,
+        workoutPlansResult,
+        supplementsResult,
+        supplementCompletionsResult
+      ] = await Promise.all([
+        supabase
+          .from("workout_completions")
+          .select("completed_at")
+          .eq("user_id", user.id)
+          .gte("completed_at", todayStr)
+          .lt("completed_at", tomorrowStr),
+        supabase
+          .from("workout_plans")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .limit(1),
+        supabase
+          .from("workout_plans")
+          .select("id, title, is_active, activated_at")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .limit(1),
+        supabase
+          .from("supplements")
+          .select("id, name")
+          .eq("user_id", user.id),
+        supabase
+          .from("supplement_completions")
+          .select("supplement_id, completed_at")
+          .eq("user_id", user.id)
+          .gte("completed_at", todayStr)
+          .lt("completed_at", tomorrowStr)
+      ]);
+
+      // Build today's workout (use string day name for workout_days.day_of_week)
+      let workouts: DailyWorkout[] = [];
+      let planName: string | null = null;
+      let isRestDay: boolean | null = null;
+      
+      // Check if there's an active workout plan that was activated before today
+      if (workoutPlansResult.data && workoutPlansResult.data.length > 0) {
+        const workoutPlan = workoutPlansResult.data[0];
+        
+        // Only show workout if plan was activated before today (not on activation day)
+        let shouldShowWorkout = true;
+        if (workoutPlan.activated_at) {
+          const activatedDate = dayjs(workoutPlan.activated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
+          shouldShowWorkout = activatedDate < todayStr; // Only show if activated before today
+        }
+        
+        if (shouldShowWorkout) {
+          const workoutPlanId = workoutPlan.id;
+          const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          const todayName = daysOfWeek[today.day()];
+          // Fetch today's workout day using string day name
+          const { data: daysRaw } = await supabase
+            .from("workout_days")
+            .select("id, workout_plan_id, day_of_week, is_rest, workout_name, workout_type")
+            .eq("workout_plan_id", workoutPlanId)
+            .eq("day_of_week", todayName)
+            .limit(1);
+          if (daysRaw && daysRaw.length > 0) {
+            const day = daysRaw[0];
+            planName = day.workout_name || null;
+            isRestDay = day.is_rest;
+            if (!day.is_rest) {
+              // Fetch all exercises for this day
+              const { data: exercisesRaw } = await supabase
+                .from("workout_exercises")
+                .select("id, workout_day_id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
+                .eq("workout_day_id", day.id)
+                .order("sequence_order", { ascending: true });
+              // Group exercises by group_type
+              const groupsMap: Record<string, any[]> = {};
+              (exercisesRaw || []).forEach((ex) => {
+                if (!groupsMap[ex.group_type]) groupsMap[ex.group_type] = [];
+                groupsMap[ex.group_type].push({
+                  id: ex.id,
+                  name: ex.exercise_name,
+                  description: ex.exercise_description,
+                  type: ex.group_type,
+                  videoUrl: ex.video_url,
+                  sets: ex.sets_data || [],
+                  notes: ex.group_notes,
+                });
+              });
+              const groups = Object.entries(groupsMap).map(([type, exercises]) => ({
+                type: type as WorkoutType,
+                exercises,
+              }));
+              const exercisesFlat = groups.flatMap((g) => g.exercises);
+              workouts = [{
+              id: day.id,
+              name: day.workout_name,
+              exercises: exercisesFlat,
+              date: today.toISOString().slice(0, 10),
+              completed: false,
+              groups,
+            }];
+          } else {
+            workouts = [];
           }
         }
-        let todaysMeals: Meal[] = [];
-        let completedMealIds: string[] = [];
-        if (planToShow) {
-          // Fetch all meals for the selected plan, order by sequence_order
-          const { data: mealsRaw, error: mealsError } = await supabase
-            .from("meals")
-            .select("id, name, time, sequence_order")
-            .eq("meal_plan_id", planToShow.id)
-            .order("sequence_order", { ascending: true });
-          if (mealsError) console.error('[DASHBOARD] Meals query error:', mealsError);
-          // For each meal, fetch foods and join food_library for macros
-          todaysMeals = await Promise.all((mealsRaw || []).map(async (meal: any) => {
-            const { data: foodsRaw } = await supabase
-              .from("foods")
-              .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
-              .eq("meal_id", meal.id);
-            const foods = (foodsRaw || []).map((food: any) => {
-              const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
-              const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
-              const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) || 0 : Number(food.fat) || 0;
-              const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
-              return {
-                id: String(food.id || ''),
-                name: String(food.name || ''),
-                portion: String(food.portion || ''),
-                calories: isFinite(calories) ? calories : 0,
-                protein: isFinite(protein) ? Math.round(protein) : 0,
-                carbs: isFinite(carbs) ? Math.round(carbs) : 0,
-                fat: isFinite(fat) ? Math.round(fat) : 0,
-              };
-            });
-            // Optionally, sum macros for the meal (or keep as foods only)
-            const totalProtein = foods.reduce((sum, f) => sum + (f.protein || 0), 0);
-            const totalCarbs = foods.reduce((sum, f) => sum + (f.carbs || 0), 0);
-            const totalFat = foods.reduce((sum, f) => sum + (f.fat || 0), 0);
-            const totalCalories = foods.reduce((sum, f) => sum + (f.calories || 0), 0);
-            return {
-              id: meal.id,
-              name: meal.name,
-              time: meal.time,
-              completed: false,
-              foods,
-              calories: totalCalories,
-              protein: totalProtein,
-              carbs: totalCarbs,
-              fat: totalFat,
-              description: meal.description,
-            };
-          }));
-          // Fetch today's meal completions for this plan
-          const { data: completions } = await supabase
-            .from("meal_completions")
-            .select("meal_id, completed_at")
-            .eq("user_id", user.id)
-            .gte("completed_at", todayStr)
-            .lt("completed_at", tomorrowStr);
-          completedMealIds = (completions || []).map((mc: any) => {
-            const mealObj = todaysMeals.find((m) => m.id === mc.meal_id);
-            if (mealObj) {
-              return `${mealObj.id}-${mealObj.name}-${mealObj.time.slice(0,5)}`;
-            }
-            return String(mc.meal_id);
-          });
-        }
-        // Fetch updates and weight logs (needed for dashboard)
-        const [updatesRawResult, weightLogsResult] = await Promise.all([
+      }
+      }
+
+      // Build supplements
+      const supplements = (supplementsResult.data || []).map((s) => ({
+        name: s.name,
+      }));
+
+      // Compliance calculations
+      const workoutCompliance = workoutCompletionsResult.data && activePlansResult.data && activePlansResult.data.length > 0
+        ? Math.round((workoutCompletionsResult.data.length / 7) * 100)
+        : 0;
+      const mealCompliance = workoutCompletionsResult.data && todaysMeals.length > 0
+        ? Math.round((workoutCompletionsResult.data.length / todaysMeals.length) * 100)
+        : 0;
+      const supplementCompliance = supplementCompletionsResult.data && supplements.length > 0
+        ? Math.round((supplementCompletionsResult.data.length / supplements.length) * 100)
+        : 0;
+
+      const clientData: ClientDashboardData = {
+        updates,
+        meals: todaysMeals,
+        workouts,
+        supplements,
+        workoutCompliance,
+        mealCompliance,
+        supplementCompliance,
+        weightChange,
+        planName,
+        isRestDay,
+        completedMealIds,
+      };
+      dashboardCache[authId] = { data: { clientData }, expires: Date.now() + 30_000 };
+      return json({ clientData });
+    } else if (user.role === "coach") {
+      // Fetch all clients for this coach
+      const { data: clientsRaw } = await supabase
+        .from("users")
+        .select("id, name, updated_at, created_at, role, status")
+        .eq("coach_id", user.id)
+        .eq("role", "client");
+      const clients = clientsRaw || [];
+      // Count totals
+      const totalClients = clients.length;
+      const activeClients = clients.filter(c => c.status === "active").length;
+      const inactiveClients = clients.filter(c => c.status === "inactive").length;
+      // --- Compliance Calculation ---
+      const activeClientIds = clients.filter(c => c.status === "active").map(c => c.id);
+      let compliance = 0;
+      if (activeClientIds.length > 0) {
+        const weekAgo = getCurrentDate().subtract(7, "day");
+        const weekAgoISO = weekAgo.toISOString();
+        const nowISO = getCurrentTimestampISO();
+        // First, fetch workoutPlansRaw and mealPlansRaw
+        const [workoutPlansRaw, mealPlansRaw] = await Promise.all([
           supabase
-            .from("coach_updates")
-            .select("message, created_at")
-            .eq("client_id", user.id)
-            .gte("created_at", todayStr)
-            .lt("created_at", tomorrowStr)
-            .order("created_at", { ascending: false }),
+            .from("workout_plans")
+            .select("id, user_id, is_active")
+            .in("user_id", activeClientIds)
+            .eq("is_active", true),
           supabase
-            .from("weight_logs")
-            .select("weight, logged_at")
-            .eq("user_id", user.id)
-            .order("logged_at", { ascending: true })
+            .from("meal_plans")
+            .select("id, user_id, is_active")
+            .in("user_id", activeClientIds)
+            .eq("is_active", true)
         ]);
-        // Build updates
-        const updates = (updatesRawResult.data || []).map((u: any) => ({
-          message: u.message,
-                      timestamp: u.created_at ? dayjs(u.created_at).tz(USER_TIMEZONE).format("YYYY-MM-DD HH:mm") : ""
-        }));
-        // Weight change
-        let weightChange = 0;
-        if (weightLogsResult.data && weightLogsResult.data.length > 0) {
-          const first = weightLogsResult.data[0].weight;
-          const last = weightLogsResult.data[weightLogsResult.data.length - 1].weight;
-          weightChange = last - first;
-        } else if (user.starting_weight && user.current_weight) {
-          weightChange = user.current_weight - user.starting_weight;
-        }
-        // Parallelize all independent queries
+        // Now fetch all completions, workout days, meals, and supplements
         const [
-          workoutCompletionsResult,
-          activePlansResult,
-          workoutPlansResult,
-          supplementsResult,
-          supplementCompletionsResult
+          workoutCompletionsRaw,
+          mealCompletionsRaw,
+          supplementCompletionsRaw,
+          workoutDaysRaw,
+          mealsRaw,
+          supplementsRaw
         ] = await Promise.all([
           supabase
             .from("workout_completions")
-            .select("completed_at")
-            .eq("user_id", user.id)
-            .gte("completed_at", todayStr)
-            .lt("completed_at", tomorrowStr),
+            .select("id, completed_at, user_id")
+            .in("user_id", activeClientIds)
+            .gte("completed_at", weekAgoISO)
+            .lt("completed_at", nowISO),
           supabase
-            .from("workout_plans")
-            .select("id")
-            .eq("user_id", user.id)
-            .eq("is_active", true)
-            .limit(1),
-          supabase
-            .from("workout_plans")
-            .select("id, title, is_active, activated_at")
-            .eq("user_id", user.id)
-            .eq("is_active", true)
-            .limit(1),
-          supabase
-            .from("supplements")
-            .select("id, name")
-            .eq("user_id", user.id),
+            .from("meal_completions")
+            .select("id, completed_at, user_id")
+            .in("user_id", activeClientIds)
+            .gte("completed_at", weekAgoISO)
+            .lt("completed_at", nowISO),
           supabase
             .from("supplement_completions")
-            .select("supplement_id, completed_at")
-            .eq("user_id", user.id)
-            .gte("completed_at", todayStr)
-            .lt("completed_at", tomorrowStr)
+            .select("id, completed_at, user_id")
+            .in("user_id", activeClientIds)
+            .gte("completed_at", weekAgoISO)
+            .lt("completed_at", nowISO),
+          supabase
+            .from("workout_days")
+            .select("workout_plan_id, is_rest")
+            .in("workout_plan_id", (workoutPlansRaw.data ?? []).map((p: any) => p.id)),
+          supabase
+            .from("meals")
+            .select("id, meal_plan_id")
+            .in("meal_plan_id", (mealPlansRaw.data ?? []).map((p: any) => p.id)),
+          supabase
+            .from("supplements")
+            .select("id, user_id")
+            .in("user_id", activeClientIds)
         ]);
-
-        // Build today's workout (use string day name for workout_days.day_of_week)
-        let workouts: DailyWorkout[] = [];
-        let planName: string | null = null;
-        let isRestDay: boolean | null = null;
-        
-        // Check if there's an active workout plan that was activated before today
-        if (workoutPlansResult.data && workoutPlansResult.data.length > 0) {
-          const workoutPlan = workoutPlansResult.data[0];
-          
-          // Only show workout if plan was activated before today (not on activation day)
-          let shouldShowWorkout = true;
-          if (workoutPlan.activated_at) {
-            const activatedDate = dayjs(workoutPlan.activated_at).tz(USER_TIMEZONE).format("YYYY-MM-DD");
-            shouldShowWorkout = activatedDate < todayStr; // Only show if activated before today
+        // Group plans and data by user
+        const workoutPlanByUser: Record<string, any> = {};
+        (workoutPlansRaw.data ?? []).forEach((plan: any) => {
+          workoutPlanByUser[plan.user_id] = plan;
+        });
+        const mealPlanByUser: Record<string, any> = {};
+        (mealPlansRaw.data ?? []).forEach((plan: any) => {
+          mealPlanByUser[plan.user_id] = plan;
+        });
+        const workoutDaysByPlan: Record<string, any[]> = {};
+        (workoutDaysRaw.data ?? []).forEach((day: any) => {
+          if (!workoutDaysByPlan[day.workout_plan_id]) workoutDaysByPlan[day.workout_plan_id] = [];
+          workoutDaysByPlan[day.workout_plan_id].push(day);
+        });
+        const mealsByPlan: Record<string, any[]> = {};
+        (mealsRaw.data ?? []).forEach((meal: any) => {
+          if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
+          mealsByPlan[meal.meal_plan_id].push(meal);
+        });
+        const supplementsByUser: Record<string, any[]> = {};
+        (supplementsRaw.data ?? []).forEach((supp: any) => {
+          if (!supplementsByUser[supp.user_id]) supplementsByUser[supp.user_id] = [];
+          supplementsByUser[supp.user_id].push(supp);
+        });
+        // Group completions by user
+        const workoutCompletionsByUser: Record<string, any[]> = {};
+        (workoutCompletionsRaw.data ?? []).forEach((comp: any) => {
+          if (!workoutCompletionsByUser[comp.user_id]) workoutCompletionsByUser[comp.user_id] = [];
+          workoutCompletionsByUser[comp.user_id].push(comp);
+        });
+        const mealCompletionsByUser: Record<string, any[]> = {};
+        (mealCompletionsRaw.data ?? []).forEach((comp: any) => {
+          if (!mealCompletionsByUser[comp.user_id]) mealCompletionsByUser[comp.user_id] = [];
+          mealCompletionsByUser[comp.user_id].push(comp);
+        });
+        const supplementCompletionsByUser: Record<string, any[]> = {};
+        (supplementCompletionsRaw.data ?? []).forEach((comp: any) => {
+          if (!supplementCompletionsByUser[comp.user_id]) supplementCompletionsByUser[comp.user_id] = [];
+          supplementCompletionsByUser[comp.user_id].push(comp);
+        });
+        // Calculate compliance for each client
+        let totalOverallCompliance = 0;
+        let countedClients = 0;
+        for (const clientId of activeClientIds) {
+          // Expected workouts (only actual workout days, not rest days)
+          let expectedWorkoutDays = 0;
+          const plan = workoutPlanByUser[clientId];
+          if (plan && workoutDaysByPlan[plan.id]) {
+            const workoutDays = workoutDaysByPlan[plan.id] || [];
+            expectedWorkoutDays = workoutDays.filter((day: any) => !day.is_rest).length;
           }
-          
-          if (shouldShowWorkout) {
-            const workoutPlanId = workoutPlan.id;
-            const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-            const todayName = daysOfWeek[today.day()];
-            // Fetch today's workout day using string day name
-            const { data: daysRaw } = await supabase
-              .from("workout_days")
-              .select("id, workout_plan_id, day_of_week, is_rest, workout_name, workout_type")
-              .eq("workout_plan_id", workoutPlanId)
-              .eq("day_of_week", todayName)
-              .limit(1);
-            if (daysRaw && daysRaw.length > 0) {
-              const day = daysRaw[0];
-              planName = day.workout_name || null;
-              isRestDay = day.is_rest;
-              if (!day.is_rest) {
-                // Fetch all exercises for this day
-                const { data: exercisesRaw } = await supabase
-                  .from("workout_exercises")
-                  .select("id, workout_day_id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
-                  .eq("workout_day_id", day.id)
-                  .order("sequence_order", { ascending: true });
-                // Group exercises by group_type
-                const groupsMap: Record<string, any[]> = {};
-                (exercisesRaw || []).forEach((ex) => {
-                  if (!groupsMap[ex.group_type]) groupsMap[ex.group_type] = [];
-                  groupsMap[ex.group_type].push({
-                    id: ex.id,
-                    name: ex.exercise_name,
-                    description: ex.exercise_description,
-                    type: ex.group_type,
-                    videoUrl: ex.video_url,
-                    sets: ex.sets_data || [],
-                    notes: ex.group_notes,
-                  });
-                });
-                const groups = Object.entries(groupsMap).map(([type, exercises]) => ({
-                  type: type as WorkoutType,
-                  exercises,
-                }));
-                const exercisesFlat = groups.flatMap((g) => g.exercises);
-                workouts = [{
-                id: day.id,
-                name: day.workout_name,
-                exercises: exercisesFlat,
-                date: today.toISOString().slice(0, 10),
-                completed: false,
-                groups,
-              }];
-            } else {
-              workouts = [];
-            }
+          // Expected meals (7 days worth)
+          let expectedMeals = 0;
+          const mealPlan = mealPlanByUser[clientId];
+          if (mealPlan && mealsByPlan[mealPlan.id]) {
+            expectedMeals = (mealsByPlan[mealPlan.id] || []).length * 7;
+          }
+          // Expected supplements (7 days worth)
+          const supplements = supplementsByUser[clientId] || [];
+          const expectedSupplements = supplements.length * 7;
+          // Completions
+          const completedWorkouts = (workoutCompletionsByUser[clientId] || []).length;
+          const completedMeals = (mealCompletionsByUser[clientId] || []).length;
+          const completedSupplements = (supplementCompletionsByUser[clientId] || []).length;
+          // Calculate compliance without counting rest days as completed
+          const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
+          const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
+          const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
+          if (totalExpected > 0) {
+            totalOverallCompliance += overallCompliance;
+            countedClients++;
           }
         }
-        }
-
-        // Build supplements
-        const supplements = (supplementsResult.data || []).map((s) => ({
-          name: s.name,
-        }));
-
-        // Compliance calculations
-        const workoutCompliance = workoutCompletionsResult.data && activePlansResult.data && activePlansResult.data.length > 0
-          ? Math.round((workoutCompletionsResult.data.length / 7) * 100)
-          : 0;
-        const mealCompliance = workoutCompletionsResult.data && todaysMeals.length > 0
-          ? Math.round((workoutCompletionsResult.data.length / todaysMeals.length) * 100)
-          : 0;
-        const supplementCompliance = supplementCompletionsResult.data && supplements.length > 0
-          ? Math.round((supplementCompletionsResult.data.length / supplements.length) * 100)
-          : 0;
-
-        const clientData: ClientDashboardData = {
-          updates,
-          meals: todaysMeals,
-          workouts,
-          supplements,
-          workoutCompliance,
-          mealCompliance,
-          supplementCompliance,
-          weightChange,
-          planName,
-          isRestDay,
-          completedMealIds,
-        };
-        dashboardCache[authId] = { data: { clientData }, expires: Date.now() + 30_000 };
-        return json({ clientData });
-      } else if (user.role === "coach") {
-        // Fetch all clients for this coach
-        const { data: clientsRaw } = await supabase
-          .from("users")
-          .select("id, name, updated_at, created_at, role, status")
-          .eq("coach_id", user.id)
-          .eq("role", "client");
-        const clients = clientsRaw || [];
-        // Count totals
-        const totalClients = clients.length;
-        const activeClients = clients.filter(c => c.status === "active").length;
-        const inactiveClients = clients.filter(c => c.status === "inactive").length;
-        // --- Compliance Calculation ---
-        const activeClientIds = clients.filter(c => c.status === "active").map(c => c.id);
-        let compliance = 0;
-        if (activeClientIds.length > 0) {
-          const weekAgo = getCurrentDate().subtract(7, "day");
-          const weekAgoISO = weekAgo.toISOString();
-          const nowISO = getCurrentTimestampISO();
-          // First, fetch workoutPlansRaw and mealPlansRaw
-          const [workoutPlansRaw, mealPlansRaw] = await Promise.all([
-            supabase
-              .from("workout_plans")
-              .select("id, user_id, is_active")
-              .in("user_id", activeClientIds)
-              .eq("is_active", true),
-            supabase
-              .from("meal_plans")
-              .select("id, user_id, is_active")
-              .in("user_id", activeClientIds)
-              .eq("is_active", true)
-          ]);
-          // Now fetch all completions, workout days, meals, and supplements
-          const [
-            workoutCompletionsRaw,
-            mealCompletionsRaw,
-            supplementCompletionsRaw,
-            workoutDaysRaw,
-            mealsRaw,
-            supplementsRaw
-          ] = await Promise.all([
-            supabase
-              .from("workout_completions")
-              .select("id, completed_at, user_id")
-              .in("user_id", activeClientIds)
-              .gte("completed_at", weekAgoISO)
-              .lt("completed_at", nowISO),
-            supabase
-              .from("meal_completions")
-              .select("id, completed_at, user_id")
-              .in("user_id", activeClientIds)
-              .gte("completed_at", weekAgoISO)
-              .lt("completed_at", nowISO),
-            supabase
-              .from("supplement_completions")
-              .select("id, completed_at, user_id")
-              .in("user_id", activeClientIds)
-              .gte("completed_at", weekAgoISO)
-              .lt("completed_at", nowISO),
-            supabase
-              .from("workout_days")
-              .select("workout_plan_id, is_rest")
-              .in("workout_plan_id", (workoutPlansRaw.data ?? []).map((p: any) => p.id)),
-            supabase
-              .from("meals")
-              .select("id, meal_plan_id")
-              .in("meal_plan_id", (mealPlansRaw.data ?? []).map((p: any) => p.id)),
-            supabase
-              .from("supplements")
-              .select("id, user_id")
-              .in("user_id", activeClientIds)
-          ]);
-          // Group plans and data by user
-          const workoutPlanByUser: Record<string, any> = {};
-          (workoutPlansRaw.data ?? []).forEach((plan: any) => {
-            workoutPlanByUser[plan.user_id] = plan;
-          });
-          const mealPlanByUser: Record<string, any> = {};
-          (mealPlansRaw.data ?? []).forEach((plan: any) => {
-            mealPlanByUser[plan.user_id] = plan;
-          });
-          const workoutDaysByPlan: Record<string, any[]> = {};
-          (workoutDaysRaw.data ?? []).forEach((day: any) => {
-            if (!workoutDaysByPlan[day.workout_plan_id]) workoutDaysByPlan[day.workout_plan_id] = [];
-            workoutDaysByPlan[day.workout_plan_id].push(day);
-          });
-          const mealsByPlan: Record<string, any[]> = {};
-          (mealsRaw.data ?? []).forEach((meal: any) => {
-            if (!mealsByPlan[meal.meal_plan_id]) mealsByPlan[meal.meal_plan_id] = [];
-            mealsByPlan[meal.meal_plan_id].push(meal);
-          });
-          const supplementsByUser: Record<string, any[]> = {};
-          (supplementsRaw.data ?? []).forEach((supp: any) => {
-            if (!supplementsByUser[supp.user_id]) supplementsByUser[supp.user_id] = [];
-            supplementsByUser[supp.user_id].push(supp);
-          });
-          // Group completions by user
-          const workoutCompletionsByUser: Record<string, any[]> = {};
-          (workoutCompletionsRaw.data ?? []).forEach((comp: any) => {
-            if (!workoutCompletionsByUser[comp.user_id]) workoutCompletionsByUser[comp.user_id] = [];
-            workoutCompletionsByUser[comp.user_id].push(comp);
-          });
-          const mealCompletionsByUser: Record<string, any[]> = {};
-          (mealCompletionsRaw.data ?? []).forEach((comp: any) => {
-            if (!mealCompletionsByUser[comp.user_id]) mealCompletionsByUser[comp.user_id] = [];
-            mealCompletionsByUser[comp.user_id].push(comp);
-          });
-          const supplementCompletionsByUser: Record<string, any[]> = {};
-          (supplementCompletionsRaw.data ?? []).forEach((comp: any) => {
-            if (!supplementCompletionsByUser[comp.user_id]) supplementCompletionsByUser[comp.user_id] = [];
-            supplementCompletionsByUser[comp.user_id].push(comp);
-          });
-          // Calculate compliance for each client
-          let totalOverallCompliance = 0;
-          let countedClients = 0;
-          for (const clientId of activeClientIds) {
-            // Expected workouts (only actual workout days, not rest days)
-            let expectedWorkoutDays = 0;
-            const plan = workoutPlanByUser[clientId];
-            if (plan && workoutDaysByPlan[plan.id]) {
-              const workoutDays = workoutDaysByPlan[plan.id] || [];
-              expectedWorkoutDays = workoutDays.filter((day: any) => !day.is_rest).length;
-            }
-            // Expected meals (7 days worth)
-            let expectedMeals = 0;
-            const mealPlan = mealPlanByUser[clientId];
-            if (mealPlan && mealsByPlan[mealPlan.id]) {
-              expectedMeals = (mealsByPlan[mealPlan.id] || []).length * 7;
-            }
-            // Expected supplements (7 days worth)
-            const supplements = supplementsByUser[clientId] || [];
-            const expectedSupplements = supplements.length * 7;
-            // Completions
-            const completedWorkouts = (workoutCompletionsByUser[clientId] || []).length;
-            const completedMeals = (mealCompletionsByUser[clientId] || []).length;
-            const completedSupplements = (supplementCompletionsByUser[clientId] || []).length;
-            // Calculate compliance without counting rest days as completed
-            const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
-            const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
-            const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
-            if (totalExpected > 0) {
-              totalOverallCompliance += overallCompliance;
-              countedClients++;
-            }
-          }
-          compliance = countedClients > 0 ? Math.round(totalOverallCompliance / countedClients) : 0;
-        }
-        // --- End Compliance Calculation ---
-        dashboardCache[authId] = {
-          data: {
-            coachId: user.id,
-            totalClients,
-            activeClients,
-            inactiveClients,
-            compliance,
-            percentChange: 0, // Placeholder
-            clients,
-            recentClients: [], // Handled by noncritical fetcher
-            recentActivity: [], // Handled by noncritical fetcher
-          },
-          expires: Date.now() + 30_000,
-        };
-        return json({
+        compliance = countedClients > 0 ? Math.round(totalOverallCompliance / countedClients) : 0;
+      }
+      // --- End Compliance Calculation ---
+      dashboardCache[authId] = {
+        data: {
           coachId: user.id,
           totalClients,
           activeClients,
@@ -607,13 +615,25 @@ export const loader: LoaderFunction = async ({ request }) => {
           clients,
           recentClients: [], // Handled by noncritical fetcher
           recentActivity: [], // Handled by noncritical fetcher
-        });
-      }
+        },
+        expires: Date.now() + 30_000,
+      };
+      return json({
+        coachId: user.id,
+        totalClients,
+        activeClients,
+        inactiveClients,
+        compliance,
+        percentChange: 0, // Placeholder
+        clients,
+        recentClients: [], // Handled by noncritical fetcher
+        recentActivity: [], // Handled by noncritical fetcher
+      });
     }
   }
 
   return json({
-    coachId,
+    coachId: user?.role === "coach" ? user.id : user?.coach_id || null,
     totalClients,
     activeClients,
     inactiveClients,
