@@ -98,16 +98,29 @@ export default function CreateWorkoutModal({
         
         // Initialize workout templates for Flexible Schedule
         if (initialValues.builderMode === 'day' && initialValues.workoutDaysPerWeek) {
-          const templates: DayPlan[] = [];
+          // Extract existing workout templates from the week data
+          const existingTemplates: DayPlan[] = [];
+          const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          
           for (let i = 0; i < initialValues.workoutDaysPerWeek; i++) {
-            templates.push({
-              mode: "workout",
-              type: "Single",
-              groups: [{ type: "Single", exercises: [{ name: "", sets: "", reps: "" }] }],
-              dayLabel: `Workout ${i + 1}`
-            });
+            const dayKey = daysOfWeek[i];
+            const dayPlan = initialValues.week[dayKey];
+            
+            if (dayPlan && dayPlan.mode === "workout") {
+              // Use existing template data
+              existingTemplates.push(dayPlan);
+            } else {
+              // Create new empty template
+              existingTemplates.push({
+                mode: "workout",
+                type: "Single",
+                groups: [{ type: "Single", exercises: [{ name: "", sets: "", reps: "" }] }],
+                dayLabel: `Workout ${i + 1}`
+              });
+            }
           }
-          setWorkoutTemplates(templates);
+          
+          setWorkoutTemplates(existingTemplates);
         }
       } else {
         setPlanName("");

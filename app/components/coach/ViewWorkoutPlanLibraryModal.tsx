@@ -8,6 +8,8 @@ export type WorkoutPlanLibrary = {
   title: string;
   description: string;
   createdAt: string;
+  builderMode?: 'week' | 'day';
+  workoutDaysPerWeek?: number;
   days: Array<{
     day: string;
     isRest: boolean;
@@ -16,9 +18,14 @@ export type WorkoutPlanLibrary = {
       title: string;
       createdAt: string;
       exercises: Array<{
-        name: string;
-        sets: string;
-        reps: string;
+        type: string;
+        notes?: string;
+        exercises: Array<{
+          name: string;
+          sets: string;
+          reps: string;
+          notes?: string;
+        }>;
       }>;
     } | null;
   }>;
@@ -173,7 +180,10 @@ export default function ViewWorkoutPlanLibraryModal({
                   </div>
                   <div className="mt-3">
                     <div className="text-sm text-gray-dark dark:text-gray-light">
-                      {plan.days.filter((d) => !d.isRest).length} workout day{plan.days.filter((d) => !d.isRest).length !== 1 ? "s" : ""}
+                      {plan.builderMode === 'day' 
+                        ? `${plan.workoutDaysPerWeek || plan.days.filter((d) => !d.isRest).length} workout template${(plan.workoutDaysPerWeek || plan.days.filter((d) => !d.isRest).length) !== 1 ? 's' : ''}`
+                        : `${plan.days.filter((d) => !d.isRest).length} workout day${plan.days.filter((d) => !d.isRest).length !== 1 ? "s" : ""}`
+                      }
                     </div>
                   </div>
                 </div>

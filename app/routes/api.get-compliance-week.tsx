@@ -76,5 +76,5 @@ export const loader = async ({ request }: { request: Request }) => {
     complianceData.push(hasCompletion ? 1 : 0);
   }
 
-  return json({ complianceData });
+  return json({ complianceData, completions });
 }; 

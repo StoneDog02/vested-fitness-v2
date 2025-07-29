@@ -926,28 +926,59 @@ function formatDateMMDDYYYY(dateString: string) {
 
 // Helper to build week object from plan.days
 function buildWeekFromPlan(plan: WorkoutPlan) {
-  const week: { [day: string]: DayPlan } = {};
-  for (const dayObj of plan.days) {
-    if (dayObj.isRest) {
-      week[dayObj.day] = { mode: "rest" };
-    } else if (dayObj.workout) {
-      // Now, exercises is actually Group[]
-      const groups = dayObj.workout.exercises || [];
-      
-
-      
-      const dayPlan = {
-        mode: "workout" as const,
-        type:
-          (groups.length > 0 && groups[0].type) || ("Single" as WorkoutType),
-        groups,
-      };
-      week[dayObj.day] = dayPlan;
-    } else {
-      week[dayObj.day] = { mode: "rest" };
+  // For flexible schedule plans, we need to extract workout templates
+  if (plan.builderMode === 'day') {
+    const week: { [day: string]: DayPlan } = {};
+    
+    // Extract workout templates from the plan's days
+    const workoutTemplates: DayPlan[] = [];
+    for (const dayObj of plan.days) {
+      if (!dayObj.isRest && dayObj.workout) {
+        const groups = dayObj.workout.exercises || [];
+        workoutTemplates.push({
+          mode: "workout" as const,
+          type: (groups.length > 0 && groups[0].type) || ("Single" as WorkoutType),
+          groups,
+          dayLabel: dayObj.workout.title || `Workout ${workoutTemplates.length + 1}`
+        });
+      }
     }
+    
+    // For flexible schedule, we store the templates in a special format
+    // We'll use the first few days to store the templates
+    const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    
+    // Store templates in the first N days (where N is the number of templates)
+    for (let i = 0; i < workoutTemplates.length; i++) {
+      week[daysOfWeek[i]] = workoutTemplates[i];
+    }
+    
+    // Fill remaining days with rest
+    for (let i = workoutTemplates.length; i < 7; i++) {
+      week[daysOfWeek[i]] = { mode: "rest" };
+    }
+    
+    return week;
+  } else {
+    // For fixed schedule plans, use the original logic
+    const week: { [day: string]: DayPlan } = {};
+    for (const dayObj of plan.days) {
+      if (dayObj.isRest) {
+        week[dayObj.day] = { mode: "rest" };
+      } else if (dayObj.workout) {
+        const groups = dayObj.workout.exercises || [];
+        const dayPlan = {
+          mode: "workout" as const,
+          type: (groups.length > 0 && groups[0].type) || ("Single" as WorkoutType),
+          groups,
+        };
+        week[dayObj.day] = dayPlan;
+      } else {
+        week[dayObj.day] = { mode: "rest" };
+      }
+    }
+    return week;
   }
-  return week;
 }
 
 export default function ClientWorkouts() {
@@ -961,7 +992,7 @@ export default function ClientWorkouts() {
   }>();
   const { workoutPlans, libraryPlans: initialLibraryPlans, client, complianceData: initialComplianceData, weekStart, workoutPlansHasMore: loaderWorkoutPlansHasMore } = loaderData;
   const fetcher = useFetcher();
-  const complianceFetcher = useFetcher<{ complianceData: number[] }>();
+  const complianceFetcher = useFetcher<{ complianceData: number[]; completions: any[] }>();
   const revalidator = useRevalidator();
   
   // State for library plans
@@ -1500,13 +1531,26 @@ export default function ClientWorkouts() {
                   
 
                   
-                  // --- NEW: Check if this is a rest day in the active plan ---
+                  // --- Check if this is a rest day in the active plan ---
                   const activePlan = sortedPlans.find((p) => p.isActive);
                   let isRestDay = false;
+                  
                   if (activePlan && Array.isArray(activePlan.days) && activePlan.days[i]) {
-                    isRestDay = !!activePlan.days[i].isRest;
+                    if (activePlan.builderMode === 'day') {
+                      // For flexible schedule plans, check if client has chosen rest for this day
+                      // A rest day completion is indicated by a completion record with empty completed_groups
+                      const dayStr = thisDate.format("YYYY-MM-DD");
+                      const hasRestCompletion = complianceFetcher.data?.completions?.some((c: any) => 
+                        c.completed_at === dayStr && 
+                        (!c.completed_groups || c.completed_groups.length === 0)
+                      );
+                      isRestDay = hasRestCompletion || false;
+                    } else {
+                      // For fixed schedule plans, use the predetermined rest days
+                      isRestDay = !!activePlan.days[i].isRest;
+                    }
                   }
-                  // --- END NEW ---
+                  // --- END ---
                   
                   // Determine percentage for display
                   let percentage = Math.round((complianceData[i] || 0) * 100);
@@ -1674,24 +1718,7 @@ export default function ClientWorkouts() {
         <ViewWorkoutPlanLibraryModal
           isOpen={isLibraryModalOpen}
           onClose={() => setIsLibraryModalOpen(false)}
-          libraryPlans={libraryPlans.map((plan) => ({
-            ...plan,
-            days: plan.days.map((day) => ({
-              ...day,
-              workout: day.workout
-                ? {
-                    ...day.workout,
-                    exercises: (day.workout.exercises || []).flatMap((group: any) =>
-                      (group.exercises || []).map((ex: any) => ({
-                        name: ex.name,
-                        sets: ex.sets,
-                        reps: ex.reps,
-                      }))
-                    ),
-                  }
-                : null,
-            })),
-          }))}
+          libraryPlans={libraryPlans}
           onTemplateDeleted={(templateId) => {
             // Update the local library plans state
             setLibraryPlans(prev => prev.filter(plan => plan.id !== templateId));
