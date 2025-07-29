@@ -5,18 +5,12 @@ interface PhotoCaptureProps {
   onPhotoCaptured: (blob: Blob, notes?: string) => void;
   onCancel: () => void;
   clientName?: string;
-  allowMultiple?: boolean;
-  onFinish?: () => void;
-  photosUploaded?: number;
 }
 
 export default function PhotoCapture({ 
   onPhotoCaptured, 
   onCancel, 
-  clientName, 
-  allowMultiple = false,
-  onFinish,
-  photosUploaded = 0
+  clientName
 }: PhotoCaptureProps) {
 
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
@@ -106,20 +100,12 @@ export default function PhotoCapture({
       .then(res => res.blob())
       .then(blob => {
         onPhotoCaptured(blob, notes.trim() || undefined);
-        
-        if (allowMultiple) {
-          // Reset for next photo
-          URL.revokeObjectURL(capturedPhoto);
-          setCapturedPhoto(null);
-          setNotes('');
-          startCamera();
-        }
       })
       .catch(err => {
         console.error('Error saving photo:', err);
         setError('Failed to save photo. Please try again.');
       });
-  }, [capturedPhoto, notes, onPhotoCaptured, allowMultiple, startCamera]);
+  }, [capturedPhoto, notes, onPhotoCaptured]);
 
   const handleCancel = useCallback(() => {
     if (capturedPhoto) {
@@ -128,14 +114,6 @@ export default function PhotoCapture({
     stopCamera();
     onCancel();
   }, [capturedPhoto, stopCamera, onCancel]);
-
-  const handleFinish = useCallback(() => {
-    if (capturedPhoto) {
-      URL.revokeObjectURL(capturedPhoto);
-    }
-    stopCamera();
-    onFinish?.();
-  }, [capturedPhoto, stopCamera, onFinish]);
 
   // Start camera when component mounts
   React.useEffect(() => {
@@ -147,8 +125,6 @@ export default function PhotoCapture({
       }
     };
   }, [startCamera, stopCamera, capturedPhoto]);
-
-
 
   if (error) {
     return (
@@ -176,10 +152,10 @@ export default function PhotoCapture({
       <div className="flex flex-col space-y-4">
         <div className="text-center">
           <h3 className="text-lg font-medium text-secondary dark:text-alabaster mb-2">
-            Photo Preview
+            Review Your Photo
           </h3>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Review your progress photo
+            Make sure you're happy with this progress photo
           </p>
         </div>
         
@@ -209,20 +185,9 @@ export default function PhotoCapture({
           <Button variant="secondary" onClick={retakePhoto} className="flex-1">
             Retake Photo
           </Button>
-          {allowMultiple ? (
-            <>
-              <Button variant="primary" onClick={savePhoto} className="flex-1">
-                Save & Take Another
-              </Button>
-              <Button variant="secondary" onClick={handleFinish} className="flex-1">
-                Finish ({photosUploaded} total)
-              </Button>
-            </>
-          ) : (
-            <Button variant="primary" onClick={savePhoto} className="flex-1">
-              Save Photo
-            </Button>
-          )}
+          <Button variant="primary" onClick={savePhoto} className="flex-1">
+            Save Photo
+          </Button>
         </div>
       </div>
     );
@@ -236,11 +201,6 @@ export default function PhotoCapture({
         </h3>
         <p className="text-sm text-gray-600 dark:text-gray-400">
           {clientName ? `Take a progress photo for ${clientName}` : 'Position yourself and take a photo'}
-          {allowMultiple && photosUploaded > 0 && (
-            <span className="block mt-1 text-primary font-medium">
-              {photosUploaded} photo{photosUploaded !== 1 ? 's' : ''} taken
-            </span>
-          )}
         </p>
       </div>
 

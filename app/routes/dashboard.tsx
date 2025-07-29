@@ -17,12 +17,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const cookies = parse(request.headers.get("cookie") || "");
   const { accessToken, refreshToken } = extractAuthFromCookie(cookies);
   
-  console.log("🔐 [DASHBOARD] Auth check:", {
-    hasAccessToken: !!accessToken,
-    hasRefreshToken: !!refreshToken,
-    cookieKeys: Object.keys(cookies).filter(key => key.startsWith("sb-"))
-  });
-  
   let authId: string | undefined;
   let needsTokenRefresh = false;
   let newTokens: { accessToken: string; refreshToken: string } | null = null;
@@ -30,12 +24,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (accessToken && refreshToken) {
     // Validate and potentially refresh the token
     const validation = await validateAndRefreshToken(accessToken, refreshToken);
-    
-    console.log("🔐 [DASHBOARD] Token validation result:", {
-      valid: validation.valid,
-      reason: validation.reason,
-      needsRefresh: !!validation.newAccessToken
-    });
     
     if (validation.valid) {
       if (validation.newAccessToken && validation.newRefreshToken) {
@@ -71,14 +59,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
   
-  console.log("🔐 [DASHBOARD] Final auth result:", {
-    authId: authId ? `${authId.substring(0, 8)}...` : null,
-    needsTokenRefresh
-  });
-  
   // If no valid auth, redirect to login
   if (!authId) {
-    console.log("🔐 [DASHBOARD] No valid auth, redirecting to login");
     return redirect("/auth/login");
   }
   

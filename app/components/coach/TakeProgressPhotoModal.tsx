@@ -8,13 +8,6 @@ interface TakeProgressPhotoModalProps {
   onPhotoUploaded: () => void;
   clientId: string;
   clientName?: string;
-  allowMultiple?: boolean;
-}
-
-interface CapturedPhoto {
-  blob: Blob;
-  notes?: string;
-  timestamp: number;
 }
 
 export default function TakeProgressPhotoModal({
@@ -23,32 +16,14 @@ export default function TakeProgressPhotoModal({
   onPhotoUploaded,
   clientId,
   clientName,
-  allowMultiple = false,
 }: TakeProgressPhotoModalProps) {
   const [isUploading, setIsUploading] = useState(false);
-  const [photosUploaded, setPhotosUploaded] = useState(0);
-  const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
 
   const handlePhotoCaptured = async (blob: Blob, notes?: string) => {
-    console.log('handlePhotoCaptured called', { allowMultiple, blobSize: blob.size, notes });
+    console.log('handlePhotoCaptured called', { blobSize: blob.size, notes });
     
-    if (allowMultiple) {
-      // Store photo locally for multiple photo mode
-      const capturedPhoto: CapturedPhoto = {
-        blob,
-        notes,
-        timestamp: Date.now()
-      };
-      console.log('Adding photo to capturedPhotos', capturedPhoto);
-      setCapturedPhotos(prev => {
-        const newPhotos = [...prev, capturedPhoto];
-        console.log('Updated capturedPhotos', newPhotos.length);
-        return newPhotos;
-      });
-    } else {
-      // Upload immediately for single photo mode
-      await uploadPhoto(blob, notes);
-    }
+    // Upload immediately for single photo mode
+    await uploadPhoto(blob, notes);
   };
 
   const uploadPhoto = async (blob: Blob, notes?: string) => {
@@ -81,12 +56,8 @@ export default function TakeProgressPhotoModal({
       const result = await response.json();
       console.log('Progress photo uploaded successfully:', result);
       
-      setPhotosUploaded(prev => prev + 1);
       onPhotoUploaded();
-      
-      if (!allowMultiple) {
-        onClose();
-      }
+      onClose();
     } catch (error) {
       console.error('Error uploading progress photo:', error);
       alert('Failed to upload progress photo. Please try again.');
@@ -97,32 +68,6 @@ export default function TakeProgressPhotoModal({
 
   const handleCancel = () => {
     if (!isUploading) {
-      // Clear any captured photos when canceling
-      setCapturedPhotos([]);
-      onClose();
-    }
-  };
-
-  const handleFinish = async () => {
-    if (capturedPhotos.length > 0) {
-      setIsUploading(true);
-      
-      try {
-        // Upload all captured photos
-        for (const photo of capturedPhotos) {
-          await uploadPhoto(photo.blob, photo.notes);
-        }
-        
-        // Clear captured photos after successful upload
-        setCapturedPhotos([]);
-        onClose();
-      } catch (error) {
-        console.error('Error uploading photos:', error);
-        alert('Failed to upload some photos. Please try again.');
-      } finally {
-        setIsUploading(false);
-      }
-    } else {
       onClose();
     }
   };
@@ -131,10 +76,7 @@ export default function TakeProgressPhotoModal({
     <Modal
       isOpen={isOpen}
       onClose={handleCancel}
-      title={allowMultiple && photosUploaded > 0 
-        ? `Take Progress Photo (${photosUploaded} uploaded)` 
-        : "Take Progress Photo"
-      }
+      title="Take Progress Photo"
       size="lg"
     >
       {isUploading ? (
@@ -146,10 +88,7 @@ export default function TakeProgressPhotoModal({
         <PhotoCapture
           onPhotoCaptured={handlePhotoCaptured}
           onCancel={handleCancel}
-          onFinish={handleFinish}
           clientName={clientName}
-          allowMultiple={allowMultiple}
-          photosUploaded={capturedPhotos.length}
         />
       )}
     </Modal>

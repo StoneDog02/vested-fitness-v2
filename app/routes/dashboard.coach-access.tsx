@@ -131,7 +131,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Get the client's user record
   const { data: clientUser } = await supabase
     .from("users")
-    .select("id, goal")
+    .select("id, goal, name")
     .eq("auth_id", authId)
     .single();
   if (!clientUser) {
@@ -275,6 +275,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     paginatedMealLogs,
     hasMorePaginatedMealLogs,
     clientId: clientUser.id,
+    clientName: clientUser.name,
   };
   // Cache result (reduced to 5 seconds for more responsive updates)
   coachAccessCache[authId] = { data: result, expires: Date.now() + 5_000 };
@@ -283,7 +284,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function CoachAccess() {
   const toast = useToast();
-  const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [], paginatedCheckIns = [], hasMorePaginatedCheckIns = false, paginatedUpdates = [], hasMorePaginatedUpdates = false, mealLogs = [], paginatedMealLogs = [], hasMorePaginatedMealLogs = false, clientId } = useLoaderData<typeof loader>();
+  const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [], paginatedCheckIns = [], hasMorePaginatedCheckIns = false, paginatedUpdates = [], hasMorePaginatedUpdates = false, mealLogs = [], paginatedMealLogs = [], hasMorePaginatedMealLogs = false, clientId, clientName } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
   const [showUpdateHistory, setShowUpdateHistory] = useState(false);
   const [showCheckInHistory, setShowCheckInHistory] = useState(false);
@@ -856,7 +857,7 @@ export default function CoachAccess() {
           window.location.reload();
         }}
         clientId={clientId || ''}
-        allowMultiple={true}
+        clientName={clientName}
       />
 
       <ProgressPhotosModal
