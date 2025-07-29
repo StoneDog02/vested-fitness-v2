@@ -3,7 +3,7 @@ import Modal from "~/components/ui/Modal";
 import Button from "~/components/ui/Button";
 import DatePicker from "~/components/ui/DatePicker";
 import TimePicker from "~/components/ui/TimePicker";
-import { formatDateLocal, getTodayString, getTomorrowString } from "~/lib/dateUtils";
+import { getTodayString, getTomorrowString } from "~/lib/dateUtils";
 import dayjs from "dayjs";
 import { USER_TIMEZONE } from "~/lib/timezone";
 
@@ -66,10 +66,11 @@ export default function ActivationDateModal({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label htmlFor="activation-date" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Activation Date
             </label>
             <DatePicker
+              id="activation-date"
               value={activationDate}
               onChange={setActivationDate}
               minDate={today}
@@ -77,10 +78,11 @@ export default function ActivationDateModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label htmlFor="activation-time" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Activation Time
             </label>
             <TimePicker
+              id="activation-time"
               value={activationTime}
               onChange={setActivationTime}
             />

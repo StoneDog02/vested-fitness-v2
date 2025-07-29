@@ -7,9 +7,10 @@ interface DatePickerProps {
   onChange: (date: string) => void;
   minDate?: string;
   className?: string;
+  id?: string;
 }
 
-export default function DatePicker({ value, onChange, minDate, className = "" }: DatePickerProps) {
+export default function DatePicker({ value, onChange, minDate, className = "", id }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(() => {
     const date = value ? new Date(value) : new Date();
@@ -131,6 +132,7 @@ export default function DatePicker({ value, onChange, minDate, className = "" }:
     <div className={`relative ${className}`} ref={pickerRef}>
       <button
         type="button"
+        id={id}
         onClick={() => setIsOpen(!isOpen)}
         className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-left text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
       >

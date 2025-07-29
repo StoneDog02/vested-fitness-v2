@@ -568,12 +568,13 @@ export default function CreateWorkoutModal({
 
           {/* Builder Mode Selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label htmlFor="builder-mode-week" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Builder Mode
             </label>
             <div className="flex gap-6">
               <label className="flex items-center gap-2">
                 <input
+                  id="builder-mode-week"
                   type="radio"
                   name="builderMode"
                   checked={builderMode === "week"}
@@ -584,6 +585,7 @@ export default function CreateWorkoutModal({
               </label>
               <label className="flex items-center gap-2">
                 <input
+                  id="builder-mode-day"
                   type="radio"
                   name="builderMode"
                   checked={builderMode === "day"}

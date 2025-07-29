@@ -4,9 +4,10 @@ interface TimePickerProps {
   value: string;
   onChange: (time: string) => void;
   className?: string;
+  id?: string;
 }
 
-export default function TimePicker({ value, onChange, className = "" }: TimePickerProps) {
+export default function TimePicker({ value, onChange, className = "", id }: TimePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [hour, setHour] = useState(() => {
     return value ? parseInt(value.split(':')[0]) : 6;
@@ -123,6 +124,7 @@ export default function TimePicker({ value, onChange, className = "" }: TimePick
     <div className={`relative ${className}`} ref={pickerRef}>
       <button
         type="button"
+        id={id}
         onClick={() => setIsOpen(!isOpen)}
         className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-left text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
       >
