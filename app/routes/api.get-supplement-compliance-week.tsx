@@ -154,7 +154,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
     
     // If supplements were created on this day AND no supplements are active yet, show -1
-    // Otherwise, track compliance for active supplements even if new ones were created
+    // This indicates "supplements added today - compliance starts tomorrow"
     if (supplementsCreatedOnThisDay.length > 0 && activeSupplementsForDay.length === 0) {
       complianceData.push(-1);
       continue;

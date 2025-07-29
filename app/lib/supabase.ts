@@ -280,6 +280,143 @@ export interface Database {
           active_from?: string;
         };
       };
+      workout_plans: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          description?: string;
+          is_active: boolean;
+          is_template: boolean;
+          template_id?: string;
+          created_at: string;
+          updated_at?: string;
+          activated_at?: string;
+          deactivated_at?: string;
+          builder_mode: 'week' | 'day';
+          workout_days_per_week: number;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title: string;
+          description?: string;
+          is_active?: boolean;
+          is_template?: boolean;
+          template_id?: string;
+          created_at?: string;
+          updated_at?: string;
+          activated_at?: string;
+          deactivated_at?: string;
+          builder_mode?: 'week' | 'day';
+          workout_days_per_week?: number;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          title?: string;
+          description?: string;
+          is_active?: boolean;
+          is_template?: boolean;
+          template_id?: string;
+          created_at?: string;
+          updated_at?: string;
+          activated_at?: string;
+          deactivated_at?: string;
+          builder_mode?: 'week' | 'day';
+          workout_days_per_week?: number;
+        };
+      };
+      workout_days: {
+        Row: {
+          id: string;
+          workout_plan_id: string;
+          day_of_week: string;
+          is_rest: boolean;
+          workout_name?: string;
+          workout_type?: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          workout_plan_id: string;
+          day_of_week: string;
+          is_rest: boolean;
+          workout_name?: string;
+          workout_type?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          workout_plan_id?: string;
+          day_of_week?: string;
+          is_rest?: boolean;
+          workout_name?: string;
+          workout_type?: string;
+          created_at?: string;
+        };
+      };
+      workout_exercises: {
+        Row: {
+          id: string;
+          workout_day_id: string;
+          group_type: string;
+          sequence_order: number;
+          exercise_name: string;
+          exercise_description?: string;
+          video_url?: string;
+          sets_data: any;
+          group_notes?: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          workout_day_id: string;
+          group_type: string;
+          sequence_order: number;
+          exercise_name: string;
+          exercise_description?: string;
+          video_url?: string;
+          sets_data: any;
+          group_notes?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          workout_day_id?: string;
+          group_type?: string;
+          sequence_order?: number;
+          exercise_name?: string;
+          exercise_description?: string;
+          video_url?: string;
+          sets_data?: any;
+          group_notes?: string;
+          created_at?: string;
+        };
+      };
+      workout_completions: {
+        Row: {
+          id: string;
+          user_id: string;
+          workout_day_id: string;
+          completed_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          workout_day_id: string;
+          completed_at: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          workout_day_id?: string;
+          completed_at?: string;
+          created_at?: string;
+        };
+      };
     };
   };
 }

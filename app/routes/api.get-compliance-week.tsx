@@ -19,7 +19,8 @@ export const loader = async ({ request }: { request: Request }) => {
   );
 
   // Parse the date string as if it's in the user's timezone, not UTC
-  const weekStart = dayjs.tz(weekStartParam, USER_TIMEZONE).startOf("day");
+  // The weekStartParam is in YYYY-MM-DD format, so we need to parse it as local date
+  const weekStart = dayjs.tz(weekStartParam + "T00:00:00", USER_TIMEZONE).startOf("day");
   const weekEnd = weekStart.add(7, "day");
   
 
@@ -27,7 +28,7 @@ export const loader = async ({ request }: { request: Request }) => {
   // Fetch workout plans for the client to check activation dates
   const { data: workoutPlans } = await supabase
     .from("workout_plans")
-    .select("id, activated_at, created_at")
+    .select("id, activated_at, created_at, is_active")
     .eq("user_id", clientId)
     .eq("is_template", false);
 
@@ -45,10 +46,12 @@ export const loader = async ({ request }: { request: Request }) => {
     const day = weekStart.add(i, "day");
     const dayStr = day.format("YYYY-MM-DD");
     
-    // Check if this is the activation day for any workout plan
+    // Check if this is the activation day for the currently active workout plan
     const activePlan = workoutPlans?.find(plan => {
-      if (!plan.activated_at) return false;
-      const activatedStr = plan.activated_at.slice(0, 10);
+      if (!plan.activated_at || !plan.is_active) return false;
+      // Convert activation date to user timezone for comparison
+      const activatedDate = toUserTimezone(plan.activated_at);
+      const activatedStr = activatedDate.format("YYYY-MM-DD");
       return activatedStr === dayStr;
     });
     
@@ -63,7 +66,7 @@ export const loader = async ({ request }: { request: Request }) => {
     // Check if plan was created today (for immediate activation)
     const isCreatedToday = activePlan && toUserTimezone(activePlan.created_at).format("YYYY-MM-DD") === dayStr;
     
-    if (activePlan && (isFirstPlan || activePlan.activated_at?.slice(0, 10) === dayStr || isCreatedToday)) {
+    if (activePlan && (isFirstPlan || toUserTimezone(activePlan.activated_at).format("YYYY-MM-DD") === dayStr || isCreatedToday)) {
       // Return -1 to indicate N/A for activation/creation day
       complianceData.push(-1);
       continue;

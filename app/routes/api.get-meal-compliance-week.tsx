@@ -103,6 +103,9 @@ export const loader = async ({ request }: { request: Request }) => {
     
     // Find the plan active on this day
     const plan = mealPlans.find((p) => {
+      // Only consider plans that are currently active
+      if (!p.isActive) return false;
+      
       const activated = p.activatedAt ? dayjs(p.activatedAt).tz(USER_TIMEZONE) : null;
       const deactivated = p.deactivatedAt ? dayjs(p.deactivatedAt).tz(USER_TIMEZONE) : null;
       const activatedStr = activated ? activated.format("YYYY-MM-DD") : null;

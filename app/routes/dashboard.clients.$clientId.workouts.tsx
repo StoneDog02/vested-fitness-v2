@@ -6,6 +6,7 @@ import CreateWorkoutModal from "~/components/coach/CreateWorkoutModal";
 import { useState, useEffect, useCallback, useRef } from "react";
 import Modal from "~/components/ui/Modal";
 import { TrashIcon, PencilIcon } from "@heroicons/react/24/outline";
+import ActivationDateModal from "~/components/coach/ActivationDateModal";
 import { json, redirect } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
@@ -38,7 +39,19 @@ const getActivationStatus = (plan: { isActive: boolean; activatedAt: string | nu
   if (activatedDateStr <= todayStr) {
     return "Active"; // Activated before today or today (immediate activation)
   } else {
-    return "Will Activate Tomorrow"; // Activated in the future
+    // Format the activation date and time for display
+    const activationDate = new Date(plan.activatedAt);
+    const formattedDate = activationDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+    const formattedTime = activationDate.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+    return `Will Activate ${formattedDate} at ${formattedTime}`;
   }
 };
 
@@ -73,6 +86,8 @@ interface WorkoutPlan {
   createdAt: string;
   activatedAt: string | null;
   deactivatedAt: string | null;
+  builderMode?: 'week' | 'day';
+  workoutDaysPerWeek?: number;
   days: WorkoutPlanDay[];
 }
 
@@ -198,14 +213,14 @@ export const loader = async ({
   const [plansRaw, libraryPlansRaw, plansCountRaw, libraryPlansCountRaw, completionsRaw] = await Promise.all([
     supabase
       .from("workout_plans")
-      .select("id, title, description, is_active, created_at, activated_at, deactivated_at", { count: "exact" })
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at, builder_mode, workout_days_per_week", { count: "exact" })
       .eq("user_id", client.id)
       .eq("is_template", false)
       .order("created_at", { ascending: false })
       .range(workoutPlansOffset, workoutPlansOffset + workoutPlansPageSize - 1),
     supabase
       .from("workout_plans")
-      .select("id, title, description, is_active, created_at, activated_at, deactivated_at", { count: "exact" })
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at, builder_mode, workout_days_per_week", { count: "exact" })
       .eq("is_template", true)
       .eq("user_id", coachId)
       .order("created_at", { ascending: false })
@@ -322,6 +337,8 @@ export const loader = async ({
     isActive: plan.is_active,
     activatedAt: plan.activated_at,
     deactivatedAt: plan.deactivated_at,
+    builderMode: plan.builder_mode,
+    workoutDaysPerWeek: plan.workout_days_per_week,
     days: buildDays(plan.id, plan.title, plan.created_at),
   }));
   const libraryPlans = (libraryPlansRaw?.data || []).map((plan: any) => ({
@@ -332,6 +349,8 @@ export const loader = async ({
     isActive: plan.is_active,
     activatedAt: plan.activated_at,
     deactivatedAt: plan.deactivated_at,
+    builderMode: plan.builder_mode,
+    workoutDaysPerWeek: plan.workout_days_per_week,
     days: buildDays(plan.id, plan.title, plan.created_at),
   }));
 
@@ -447,6 +466,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const weekJson = formData.get("week") as string;
   const week = weekJson ? JSON.parse(weekJson) : null;
   const planId = formData.get("workoutPlanId") as string | null;
+  const builderMode = formData.get("builderMode") as 'week' | 'day' || 'week';
+  const workoutDaysPerWeek = formData.get("workoutDaysPerWeek") ? Number(formData.get("workoutDaysPerWeek")) : 4;
   const daysOfWeek = [
     "Sunday",
     "Monday",
@@ -491,17 +512,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "setActive") {
     const planId = formData.get("workoutPlanId") as string;
-    const now = new Date().toISOString();
-    
-    // Check if this is the first workout plan for this client
-    const { data: existingPlans } = await supabase
-      .from("workout_plans")
-      .select("id, activated_at")
-      .eq("user_id", client.id)
-      .eq("is_template", false);
-    
-    const hasActivePlan = existingPlans?.some(plan => plan.activated_at !== null);
-    const isFirstPlan = !hasActivePlan;
+    const activationDate = formData.get("activationDate") as string;
     
     // Set all other plans inactive
     await supabase
@@ -510,24 +521,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       .eq("user_id", client.id)
       .neq("id", planId);
     
-    // Set selected plan active
-    if (isFirstPlan) {
-      // For first plan, set it active immediately
-      await supabase
-        .from("workout_plans")
-        .update({ is_active: true, activated_at: now })
-        .eq("id", planId);
-    } else {
-      // For subsequent plans, set activated_at to tomorrow
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0);
-      
-      await supabase
-        .from("workout_plans")
-        .update({ is_active: true, activated_at: tomorrow.toISOString() })
-        .eq("id", planId);
-    }
+    // Set selected plan active with the chosen activation date
+    await supabase
+      .from("workout_plans")
+      .update({ is_active: true, activated_at: activationDate })
+      .eq("id", planId);
     
     // Clear cache to force refresh of compliance data
     if (params.clientId && clientWorkoutsCache[params.clientId]) {
@@ -674,6 +672,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         description: description || null,
         is_active: false,
         is_template: true,
+        builder_mode: builderMode,
+        workout_days_per_week: workoutDaysPerWeek,
       })
       .select()
       .single();
@@ -690,6 +690,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         is_active: false,
         is_template: false,
         template_id: newTemplate.id,
+        builder_mode: builderMode,
+        workout_days_per_week: workoutDaysPerWeek,
       })
       .select()
       .single();
@@ -803,6 +805,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       .update({
         title: planName,
         description: description || null,
+        builder_mode: builderMode,
+        workout_days_per_week: workoutDaysPerWeek,
         updated_at: new Date().toISOString(),
       })
       .eq("id", planId);
@@ -983,6 +987,8 @@ export default function ClientWorkouts() {
   );
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
+  const [isActivationModalOpen, setIsActivationModalOpen] = useState(false);
+  const [planToActivate, setPlanToActivate] = useState<WorkoutPlan | null>(null);
   const [, setSearchParams] = useSearchParams();
   const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
   const [currentWeekStart, setCurrentWeekStart] = useState(weekStart);
@@ -1070,8 +1076,28 @@ export default function ClientWorkouts() {
     setIsEditModalOpen(true);
   };
 
+  const handleSetActive = (plan: WorkoutPlan) => {
+    setPlanToActivate(plan);
+    setIsActivationModalOpen(true);
+  };
+
+  const handleActivationConfirm = (activationDate: string) => {
+    if (!planToActivate) return;
+    
+    const formData = new FormData();
+    formData.append("intent", "setActive");
+    formData.append("workoutPlanId", planToActivate.id);
+    formData.append("activationDate", activationDate);
+    
+    fetcher.submit(formData, { method: "post" });
+    setIsActivationModalOpen(false);
+    setPlanToActivate(null);
+  };
+
   const handleUpdateWorkout = (updated: {
     planName: string;
+    builderMode: 'week' | 'day';
+    workoutDaysPerWeek?: number;
     week: { [day: string]: DayPlan };
   }) => {
     if (!selectedWorkout) return;
@@ -1079,6 +1105,10 @@ export default function ClientWorkouts() {
     form.append("intent", "edit");
     form.append("workoutPlanId", selectedWorkout.id);
     form.append("planName", updated.planName);
+    form.append("builderMode", updated.builderMode);
+    if (updated.workoutDaysPerWeek) {
+      form.append("workoutDaysPerWeek", updated.workoutDaysPerWeek.toString());
+    }
     form.append("week", JSON.stringify(updated.week));
     fetcher.submit(form, { method: "post" });
     // Don't close modal immediately - let the useEffect handle it after successful submission
@@ -1086,11 +1116,17 @@ export default function ClientWorkouts() {
 
   const handleCreateWorkout = (workoutData: {
     planName: string;
+    builderMode: 'week' | 'day';
+    workoutDaysPerWeek?: number;
     week: { [day: string]: DayPlan };
   }) => {
     const form = new FormData();
     form.append("intent", "create");
     form.append("planName", workoutData.planName);
+    form.append("builderMode", workoutData.builderMode);
+    if (workoutData.workoutDaysPerWeek) {
+      form.append("workoutDaysPerWeek", workoutData.workoutDaysPerWeek.toString());
+    }
     form.append("week", JSON.stringify(workoutData.week));
     fetcher.submit(form, { method: "post" });
     // Don't close modal immediately - let the useEffect handle it after successful submission
@@ -1233,25 +1269,14 @@ export default function ClientWorkouts() {
                               {getActivationStatus(workout)}
                             </span>
                           ) : (
-                            <fetcher.Form method="post">
-                              <input
-                                type="hidden"
-                                name="intent"
-                                value="setActive"
-                              />
-                              <input
-                                type="hidden"
-                                name="workoutPlanId"
-                                value={workout.id}
-                              />
-                              <button
-                                type="submit"
-                                className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
-                                title="Set Active"
-                              >
-                                Set Active
-                              </button>
-                            </fetcher.Form>
+                            <button
+                              type="button"
+                              onClick={() => handleSetActive(workout)}
+                              className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
+                              title="Set Active"
+                            >
+                              Set Active
+                            </button>
                           )}
                         </div>
                         <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
@@ -1326,25 +1351,14 @@ export default function ClientWorkouts() {
                               {getActivationStatus(workout)}
                             </span>
                           ) : (
-                            <fetcher.Form method="post">
-                              <input
-                                type="hidden"
-                                name="intent"
-                                value="setActive"
-                              />
-                              <input
-                                type="hidden"
-                                name="workoutPlanId"
-                                value={workout.id}
-                              />
-                              <button
-                                type="submit"
-                                className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
-                                title="Set Active"
-                              >
-                                Set Active
-                              </button>
-                            </fetcher.Form>
+                            <button
+                              type="button"
+                              onClick={() => handleSetActive(workout)}
+                              className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
+                              title="Set Active"
+                            >
+                              Set Active
+                            </button>
                           )}
                         </div>
                         <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
@@ -1617,6 +1631,8 @@ export default function ClientWorkouts() {
           isLoading={fetcher.state !== "idle"}
           initialValues={{
             planName: "",
+            builderMode: 'week',
+            workoutDaysPerWeek: 4,
             week: [
               "Sunday",
               "Monday",
@@ -1646,6 +1662,8 @@ export default function ClientWorkouts() {
             isLoading={fetcher.state !== "idle"}
             initialValues={{
               planName: selectedWorkout.title,
+              builderMode: selectedWorkout.builderMode || 'week',
+              workoutDaysPerWeek: selectedWorkout.workoutDaysPerWeek || 4,
               week: buildWeekFromPlan(selectedWorkout),
             }}
             title="Edit Workout Plan"
@@ -1678,6 +1696,17 @@ export default function ClientWorkouts() {
             // Update the local library plans state
             setLibraryPlans(prev => prev.filter(plan => plan.id !== templateId));
           }}
+        />
+
+        <ActivationDateModal
+          isOpen={isActivationModalOpen}
+          onClose={() => {
+            setIsActivationModalOpen(false);
+            setPlanToActivate(null);
+          }}
+          onConfirm={handleActivationConfirm}
+          planName={planToActivate?.title || ""}
+          isLoading={fetcher.state !== "idle"}
         />
       </div>
     </ClientDetailLayout>

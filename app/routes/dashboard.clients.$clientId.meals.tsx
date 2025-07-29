@@ -20,6 +20,7 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import NABadge from "../components/ui/NABadge";
+import ActivationDateModal from "~/components/coach/ActivationDateModal";
 
 // Helper function to truncate meal plan descriptions
 const truncateDescription = (description: string, maxLength: number = 50) => {
@@ -43,7 +44,19 @@ const getActivationStatus = (plan: { isActive: boolean; activatedAt?: string }) 
   if (activatedDateStr <= todayStr) {
     return "Active"; // Activated before today or today (immediate activation)
   } else {
-    return "Will Activate Tomorrow"; // Activated in the future
+    // Format the activation date and time for display
+    const activationDate = new Date(plan.activatedAt);
+    const formattedDate = activationDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+    const formattedTime = activationDate.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+    return `Will Activate ${formattedDate} at ${formattedTime}`;
   }
 };
 
@@ -404,44 +417,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "setActive") {
     const planId = formData.get("planId") as string;
-    const now = new Date().toISOString();
-    
-    // Check if this is the first meal plan for this client
-    const { data: existingPlans } = await supabase
-      .from("meal_plans")
-      .select("id, activated_at")
-      .eq("user_id", client.id)
-      .eq("is_template", false);
-    
-    const hasActivePlan = existingPlans?.some(plan => plan.activated_at !== null);
-    const isFirstPlan = !hasActivePlan;
+    const activationDate = formData.get("activationDate") as string;
     
     // Set deactivated_at for all other active plans
     await supabase
       .from("meal_plans")
-      .update({ is_active: false, deactivated_at: now })
+      .update({ is_active: false, deactivated_at: new Date().toISOString() })
       .eq("user_id", client.id)
       .eq("is_active", true)
       .neq("id", planId);
     
-    // Set selected plan active
-    if (isFirstPlan) {
-      // For first plan, set it active immediately
-      await supabase
-        .from("meal_plans")
-        .update({ is_active: true, activated_at: now, deactivated_at: null })
-        .eq("id", planId);
-    } else {
-      // For subsequent plans, set activated_at to tomorrow
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0);
-      
-      await supabase
-        .from("meal_plans")
-        .update({ is_active: true, activated_at: tomorrow.toISOString(), deactivated_at: null })
-        .eq("id", planId);
-    }
+    // Set selected plan active with the chosen activation date
+    await supabase
+      .from("meal_plans")
+      .update({ is_active: true, activated_at: activationDate, deactivated_at: null })
+      .eq("id", planId);
     
     // Clear cache to force refresh of compliance data
     if (params.clientId && clientMealsCache[params.clientId]) {
@@ -840,10 +830,30 @@ export default function ClientMeals() {
   const [isCreateModalOpen, setIsCreateModalOpen] = React.useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = React.useState(false);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = React.useState(false);
+  const [isActivationModalOpen, setIsActivationModalOpen] = React.useState(false);
+  const [planToActivate, setPlanToActivate] = React.useState<MealPlanType | null>(null);
   type MealPlanType = typeof mealPlans extends (infer U)[] ? U : never;
   const [selectedPlan, setSelectedPlan] = React.useState<MealPlanType | null>(
     null
   );
+
+  const handleSetActive = (plan: MealPlanType) => {
+    setPlanToActivate(plan);
+    setIsActivationModalOpen(true);
+  };
+
+  const handleActivationConfirm = (activationDate: string) => {
+    if (!planToActivate) return;
+    
+    const formData = new FormData();
+    formData.append("intent", "setActive");
+    formData.append("planId", planToActivate.id);
+    formData.append("activationDate", activationDate);
+    
+    fetcher.submit(formData, { method: "post" });
+    setIsActivationModalOpen(false);
+    setPlanToActivate(null);
+  };
 
   // Compliance calendar state
   const [calendarStart, setCalendarStart] = React.useState(() => {
@@ -1022,25 +1032,14 @@ export default function ClientMeals() {
                               {getActivationStatus(plan)}
                             </span>
                           ) : (
-                            <fetcher.Form method="post">
-                              <input
-                                type="hidden"
-                                name="intent"
-                                value="setActive"
-                              />
-                              <input
-                                type="hidden"
-                                name="planId"
-                                value={plan.id}
-                              />
-                              <button
-                                type="submit"
-                                className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
-                                title="Set Active"
-                              >
-                                Set Active
-                              </button>
-                            </fetcher.Form>
+                            <button
+                              type="button"
+                              onClick={() => handleSetActive(plan)}
+                              className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
+                              title="Set Active"
+                            >
+                              Set Active
+                            </button>
                           )}
                         </div>
                         <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
@@ -1366,25 +1365,14 @@ export default function ClientMeals() {
                               {getActivationStatus(plan)}
                             </span>
                           ) : (
-                            <fetcher.Form method="post">
-                              <input
-                                type="hidden"
-                                name="intent"
-                                value="setActive"
-                              />
-                              <input
-                                type="hidden"
-                                name="planId"
-                                value={plan.id}
-                              />
-                              <button
-                                type="submit"
-                                className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
-                                title="Set Active"
-                              >
-                                Set Active
-                              </button>
-                            </fetcher.Form>
+                            <button
+                              type="button"
+                              onClick={() => handleSetActive(plan)}
+                              className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
+                              title="Set Active"
+                            >
+                              Set Active
+                            </button>
                           )}
                         </div>
                         <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
@@ -1452,6 +1440,17 @@ export default function ClientMeals() {
             // Update the local library plans state
             setLibraryPlans(prev => prev.filter(plan => plan.id !== templateId));
           }}
+        />
+
+        <ActivationDateModal
+          isOpen={isActivationModalOpen}
+          onClose={() => {
+            setIsActivationModalOpen(false);
+            setPlanToActivate(null);
+          }}
+          onConfirm={handleActivationConfirm}
+          planName={planToActivate?.title || ""}
+          isLoading={fetcher.state !== "idle"}
         />
       </div>
     </ClientDetailLayout>
