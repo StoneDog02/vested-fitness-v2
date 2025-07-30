@@ -92,7 +92,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const lastSeenAt = lastSeenRow?.last_seen_at;
 
   // Count unread messages (sent by the other party after last_seen_at)
-  let senderToCheck = isCoach ? "client" : "coach";
+  const senderToCheck = isCoach ? "client" : "coach";
   let query = supabase
     .from("chats")
     .select("id", { count: "exact", head: true })

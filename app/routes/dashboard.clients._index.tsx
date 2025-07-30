@@ -1,4 +1,4 @@
-import type { MetaFunction } from "@remix-run/node";
+import type { MetaFunction , LoaderFunction } from "@remix-run/node";
 import Button from "~/components/ui/Button";
 import ClientInviteModal from "~/components/coach/ClientInviteModal";
 import { useState, useEffect } from "react";
@@ -7,11 +7,9 @@ import { createClient } from "@supabase/supabase-js";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
-import type { LoaderFunction } from "@remix-run/node";
 import type { Database } from "~/lib/supabase";
-import { useLoaderData, useSearchParams, useNavigate, useFetcher } from "@remix-run/react";
+import { useLoaderData, useSearchParams, useNavigate, useFetcher , Link } from "@remix-run/react";
 import ClientProfile from "~/components/coach/ClientProfile";
-import { Link } from "@remix-run/react";
 import { calculateMacros } from "~/lib/utils";
 import { URL } from "url";
 import { useUser } from "~/context/UserContext";

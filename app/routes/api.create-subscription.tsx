@@ -3,8 +3,7 @@ import type { ActionFunctionArgs } from '@remix-run/node';
 import { parse } from 'cookie';
 import jwt from 'jsonwebtoken';
 import { Buffer } from 'buffer';
-import { getOrCreateStripeCustomer, createStripeSubscription } from '~/utils/stripe.server';
-import { stripe } from '~/utils/stripe.server';
+import { getOrCreateStripeCustomer, createStripeSubscription , stripe } from '~/utils/stripe.server';
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '~/lib/supabase';
 
@@ -104,7 +103,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.log('[API] Created subscription:', subscription && subscription.id, 'for customer:', customerId);
       // Get client_secret for payment intent (if present)
       let clientSecret = null;
-      let invoice = subscription.latest_invoice;
+      const invoice = subscription.latest_invoice;
       if (
         invoice &&
         typeof invoice === 'object' &&

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect , useRef } from "react";
 import type { MetaFunction, LoaderFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
@@ -10,7 +10,6 @@ import { Buffer } from "buffer";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import Modal from "~/components/ui/Modal";
-import { useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { stripe, getBillingHistory } from "~/utils/stripe.server";
 import type { Database } from "~/lib/supabase";

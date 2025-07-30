@@ -1,17 +1,15 @@
-import { json, redirect } from "@remix-run/node";
+import { json, redirect , createCookie } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import DashboardLayout from "~/components/layout/DashboardLayout";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "~/lib/supabase";
+import type { Database , UserRole } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import type { UserRole } from "~/lib/supabase";
 import React from "react";
 import { UserContext } from "~/context/UserContext";
 import { extractAuthFromCookie, validateAndRefreshToken } from "~/lib/supabase";
-import { createCookie } from "@remix-run/node";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const cookies = parse(request.headers.get("cookie") || "");

@@ -1,4 +1,4 @@
-import { json, redirect } from "@remix-run/node";
+import { json, redirect , createCookie } from "@remix-run/node";
 import { useLoaderData, useMatches, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
@@ -6,7 +6,7 @@ import type { DailyWorkout, WorkoutType, Exercise } from "~/types/workout";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import ClientInviteModal from "~/components/coach/ClientInviteModal";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { parse } from "cookie";
 import type { LoaderFunction } from "@remix-run/node";
 import jwt from "jsonwebtoken";
@@ -22,9 +22,7 @@ import {
   isFuture,
   USER_TIMEZONE 
 } from "~/lib/timezone";
-import React from "react";
 import { extractAuthFromCookie, validateAndRefreshToken } from "~/lib/supabase";
-import { createCookie } from "@remix-run/node";
 
 type LoaderData = {
   clientData?: ClientDashboardData;
@@ -171,13 +169,13 @@ export const loader: LoaderFunction = async ({ request }) => {
     }
   }
 
-  let totalClients = 0;
-  let activeClients = 0;
-  let inactiveClients = 0;
-  let compliance = 0;
-  let percentChange = 0;
-  let clients: Client[] = [];
-  let recentClients: Client[] = [];
+  const totalClients = 0;
+  const activeClients = 0;
+  const inactiveClients = 0;
+  const compliance = 0;
+  const percentChange = 0;
+  const clients: Client[] = [];
+  const recentClients: Client[] = [];
   const recentActivity: Activity[] = [];
 
   const supabase = createClient<Database>(
@@ -817,7 +815,7 @@ export default function Dashboard() {
     }
   };
   if (parentUser && parentUser.access_status === 'payment_required') {
-    let nextBillingDate = (parentCurrentInvoice && parentCurrentInvoice.period_end)
+    const nextBillingDate = (parentCurrentInvoice && parentCurrentInvoice.period_end)
       ? new Date(parentCurrentInvoice.period_end * 1000).toLocaleDateString()
       : 'N/A';
     return (

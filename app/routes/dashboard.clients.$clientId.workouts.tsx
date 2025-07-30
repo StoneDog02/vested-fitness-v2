@@ -7,11 +7,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Modal from "~/components/ui/Modal";
 import { TrashIcon, PencilIcon } from "@heroicons/react/24/outline";
 import ActivationDateModal from "~/components/coach/ActivationDateModal";
-import { json, redirect } from "@remix-run/node";
+import { json, redirect , ActionFunctionArgs } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { useLoaderData, useFetcher, useSearchParams, useRevalidator } from "@remix-run/react";
-import { ActionFunctionArgs } from "@remix-run/node";
 import type {
   DayPlan,
   WorkoutType,
@@ -709,7 +708,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           workout_plan_id: newTemplate.id,
           day_of_week: day,
           is_rest: !dayPlan || dayPlan.mode === "rest",
-          workout_name: dayPlan && dayPlan.mode === "workout" ? `${planName} - ${day}` : null,
+          workout_name: dayPlan && dayPlan.mode === "workout" ? (dayPlan.dayLabel || `${planName} - ${day}`) : null,
           workout_type: dayPlan && dayPlan.mode === "workout" ? (dayPlan.type || "Single") : null,
         })
         .select()
@@ -755,7 +754,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           workout_plan_id: newPlan.id,
           day_of_week: day,
           is_rest: !dayPlan || dayPlan.mode === "rest",
-          workout_name: dayPlan && dayPlan.mode === "workout" ? `${planName} - ${day}` : null,
+          workout_name: dayPlan && dayPlan.mode === "workout" ? (dayPlan.dayLabel || `${planName} - ${day}`) : null,
           workout_type: dayPlan && dayPlan.mode === "workout" ? (dayPlan.type || "Single") : null,
         })
         .select()
@@ -844,7 +843,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           workout_plan_id: planId,
           day_of_week: day,
           is_rest: !dayPlan || dayPlan.mode === "rest",
-          workout_name: dayPlan && dayPlan.mode === "workout" ? `${planName} - ${day}` : null,
+          workout_name: dayPlan && dayPlan.mode === "workout" ? (dayPlan.dayLabel || `${planName} - ${day}`) : null,
           workout_type: dayPlan && dayPlan.mode === "workout" ? (dayPlan.type || "Single") : null,
         })
         .select()
@@ -1553,7 +1552,7 @@ export default function ClientWorkouts() {
                   // --- END ---
                   
                   // Determine percentage for display
-                  let percentage = Math.round((complianceData[i] || 0) * 100);
+                  const percentage = Math.round((complianceData[i] || 0) * 100);
                   let displayPercentage = percentage;
                   let displayText = `${percentage}%`;
                   let barColor = getBarColor(complianceData[i] || 0);

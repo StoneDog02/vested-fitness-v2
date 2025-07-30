@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { MetaFunction } from "@remix-run/node";
+import type { MetaFunction , LoaderFunction } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import NABadge from "~/components/ui/NABadge";
@@ -12,7 +12,6 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
-import type { LoaderFunction } from "@remix-run/node";
 import dayjs from "dayjs";
 import { 
   getCurrentDate, 
@@ -275,7 +274,28 @@ export default function Workouts() {
   const [isActivationDay, setIsActivationDay] = useState(false);
   const [currentDayWorkout, setCurrentDayWorkout] = useState(todaysWorkout);
   const [isLoadingWorkout, setIsLoadingWorkout] = useState(false);
-  const weekFetcher = useFetcher<{ workouts: Record<string, any>, completions: Record<string, string[]> }>();
+  
+  // Flexible schedule state
+  const [isFlexibleSchedule, setIsFlexibleSchedule] = useState(false);
+  const [workoutTemplates, setWorkoutTemplates] = useState<any[]>([]);
+  const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
+  const [restDaysAllowed, setRestDaysAllowed] = useState(0);
+  const [restDaysUsed, setRestDaysUsed] = useState(0);
+  const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
+  const [isRestDay, setIsRestDay] = useState(false);
+  const [previewTemplate, setPreviewTemplate] = useState<any>(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  
+  const weekFetcher = useFetcher<{ 
+    workouts: Record<string, any>, 
+    completions: Record<string, string[]>,
+    isFlexibleSchedule?: boolean,
+    workoutTemplates?: any[],
+    availableTemplates?: any[],
+    restDaysAllowed?: number,
+    restDaysUsed?: number,
+    workoutDaysPerWeek?: number
+  }>();
   const submitFetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[] }>();
   
@@ -340,8 +360,6 @@ export default function Workouts() {
       // Check if this is the activation day (plan was activated today)
       const isActivationDay = dayOffset === 0 && isTodayActivationDay;
       
-
-      
       setCurrentDayWorkout(workoutData);
       // Store activation day status for UI
       if (isActivationDay) {
@@ -376,8 +394,6 @@ export default function Workouts() {
       const dayOfWeek = weekStart.getDay();
       weekStart.setDate(weekStart.getDate() - dayOfWeek);
       weekStart.setHours(0, 0, 0, 0);
-      
-
       
       if (weekStart.getTime() !== currentWeekStart.getTime()) {
         setCurrentWeekStart(weekStart);
@@ -418,10 +434,34 @@ export default function Workouts() {
 
   // Handle week fetcher data updates
   useEffect(() => {
-    if (weekFetcher.data?.workouts && weekFetcher.data?.completions) {
-
-      setWeekWorkouts(prev => ({ ...prev, ...weekFetcher.data!.workouts }));
-      setWeekCompletions(prev => ({ ...prev, ...weekFetcher.data!.completions }));
+    if (weekFetcher.data) {
+      // Handle flexible schedule data
+      if (weekFetcher.data.isFlexibleSchedule) {
+        setIsFlexibleSchedule(true);
+        setWorkoutTemplates(weekFetcher.data.workoutTemplates || []);
+        setAvailableTemplates(weekFetcher.data.availableTemplates || []);
+        setRestDaysAllowed(weekFetcher.data.restDaysAllowed || 0);
+        setRestDaysUsed(weekFetcher.data.restDaysUsed || 0);
+        
+        // Reset current day workout for flexible schedules
+        setCurrentDayWorkout(null);
+        setCompletedGroups({});
+        setIsWorkoutSubmitted(false);
+      } else {
+        // Handle fixed schedule data (original logic)
+        setIsFlexibleSchedule(false);
+        setWorkoutTemplates([]);
+        setAvailableTemplates([]);
+        setRestDaysAllowed(0);
+        setRestDaysUsed(0);
+        setSelectedTemplate(null);
+        setIsRestDay(false);
+        
+        if (weekFetcher.data.workouts && weekFetcher.data.completions) {
+          setWeekWorkouts(prev => ({ ...prev, ...weekFetcher.data!.workouts }));
+          setWeekCompletions(prev => ({ ...prev, ...weekFetcher.data!.completions }));
+        }
+      }
       setIsLoadingWorkout(false);
     }
   }, [weekFetcher.data]);
@@ -467,6 +507,38 @@ export default function Workouts() {
     }));
   };
 
+  // Handle template selection for flexible schedules
+  const handleTemplateSelection = (template: any) => {
+    // Toggle selection - if clicking the same template, deselect it
+    if (selectedTemplate?.id === template.id) {
+      setSelectedTemplate(null);
+    } else {
+      setSelectedTemplate(template);
+    }
+    setIsRestDay(false);
+    setCompletedGroups({});
+    setIsWorkoutSubmitted(false);
+  };
+
+  // Handle rest day selection for flexible schedules
+  const handleRestDaySelection = () => {
+    // Toggle rest day selection - if already selected, deselect it
+    if (isRestDay) {
+      setIsRestDay(false);
+    } else {
+      setSelectedTemplate(null);
+      setIsRestDay(true);
+    }
+    setCompletedGroups({});
+    setIsWorkoutSubmitted(false);
+  };
+
+  // Handle workout preview for flexible schedules
+  const handleViewWorkout = (template: any) => {
+    setPreviewTemplate(template);
+    setShowPreviewModal(true);
+  };
+
   // Function to refresh compliance data
   const refreshComplianceData = async () => {
     try {
@@ -490,46 +562,155 @@ export default function Workouts() {
     }
   };
 
-  // Handle workout submission - OPTIMISTIC UI with fetcher
+  // Handle workout submission
   const handleSubmitWorkout = async () => {
+    if (isFlexibleSchedule) {
+      // Handle flexible schedule submission
+      if (isRestDay) {
+        // Submit rest day
+        await handleSubmitRestDay();
+      } else if (selectedTemplate) {
+        // Submit selected template
+        await handleSubmitTemplate();
+      }
+    } else {
+      // Handle fixed schedule submission (original logic)
+      await handleSubmitFixedWorkout();
+    }
+  };
+
+  // Submit rest day for flexible schedules
+  const handleSubmitRestDay = async () => {
     setIsSubmitting(true);
     setSubmitError(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append("completedAt", currentDateApi);
+      formData.append("completedGroups", JSON.stringify([])); // Empty array for rest day
+      
+      const response = await fetch("/api/submit-workout-completion", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (response.ok) {
+        setShowSuccess(true);
+        setIsWorkoutSubmitted(true);
+        setIsRestDay(false);
+        setSelectedTemplate(null);
+        
+        // Refresh week data to update available templates
+        fetchWorkoutWeek(currentWeekStart);
+        
+        setTimeout(() => setShowSuccess(false), 3000);
+      } else {
+        const errorData = await response.json();
+        setSubmitError(errorData.error || "Failed to submit rest day");
+      }
+    } catch (error) {
+      setSubmitError("Network error occurred");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-    const today = getCurrentDate();
-    const dateStr = today.format("YYYY-MM-DD");
-    const completedGroupIds = Object.entries(completedGroups)
-      .filter(([_, completed]) => completed)
-      .map(([groupId]) => groupId);
+  // Submit selected template for flexible schedules
+  const handleSubmitTemplate = async () => {
+    if (!selectedTemplate) return;
+    
+    setIsSubmitting(true);
+    setSubmitError(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append("completedAt", currentDateApi);
+      formData.append("completedGroups", JSON.stringify(Object.keys(completedGroups).filter(id => completedGroups[id])));
+      
+      const response = await fetch("/api/submit-workout-completion", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (response.ok) {
+        setShowSuccess(true);
+        setIsWorkoutSubmitted(true);
+        setSelectedTemplate(null);
+        
+        // Refresh week data to update available templates
+        fetchWorkoutWeek(currentWeekStart);
+        
+        setTimeout(() => setShowSuccess(false), 3000);
+      } else {
+        const errorData = await response.json();
+        setSubmitError(errorData.error || "Failed to submit workout");
+      }
+    } catch (error) {
+      setSubmitError("Network error occurred");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-    // Optimistically update UI
-    setShowSuccess(true);
-    setIsWorkoutSubmitted(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    setTimeout(() => setShowSuccess(false), 3000);
-
-    // Optionally, update complianceData optimistically for today
-    const todayIdx = (today.day() + 7 - currentWeekStart.getDay()) % 7;
-    setComplianceData(prev => {
-      const newData = [...prev];
-      newData[todayIdx] = 1;
-      return newData;
-    });
-
-    // Submit to backend using fetcher
-    submitFetcher.submit(
-      { completedGroups: completedGroupIds, completedAt: dateStr },
-      { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
-    );
-    setIsSubmitting(false);
-
-    // Dispatch custom event to trigger dashboard revalidation
-    window.dispatchEvent(new Event("workouts:completed"));
+  // Submit fixed schedule workout (original logic)
+  const handleSubmitFixedWorkout = async () => {
+    if (!currentDayWorkout || currentDayWorkout.isRest) return;
+    
+    setIsSubmitting(true);
+    setSubmitError(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append("completedAt", currentDateApi);
+      formData.append("completedGroups", JSON.stringify(Object.keys(completedGroups).filter(id => completedGroups[id])));
+      
+      const response = await fetch("/api/submit-workout-completion", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (response.ok) {
+        setShowSuccess(true);
+        setIsWorkoutSubmitted(true);
+        setTimeout(() => setShowSuccess(false), 3000);
+      } else {
+        const errorData = await response.json();
+        setSubmitError(errorData.error || "Failed to submit workout");
+      }
+    } catch (error) {
+      setSubmitError("Network error occurred");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Calculate daily progress
-  const totalGroups = currentDayWorkout?.groups?.length || 0;
-  const completedGroupCount = Object.values(completedGroups).filter(Boolean).length;
-  const progressPercentage = totalGroups > 0 ? (completedGroupCount / totalGroups) * 100 : 100;
+  let totalGroups = 0;
+  let completedGroupCount = 0;
+  let progressPercentage = 100;
+
+  if (isFlexibleSchedule) {
+    if (selectedTemplate) {
+      totalGroups = selectedTemplate?.groups?.length || 0;
+      completedGroupCount = Object.values(completedGroups).filter(Boolean).length;
+      progressPercentage = totalGroups > 0 ? (completedGroupCount / totalGroups) * 100 : 100;
+    } else if (isRestDay) {
+      // Rest day - no progress bar needed
+      totalGroups = 0;
+      completedGroupCount = 0;
+      progressPercentage = 100;
+    } else {
+      // No selection yet
+      totalGroups = 0;
+      completedGroupCount = 0;
+      progressPercentage = 0;
+    }
+  } else {
+    // Fixed schedule
+    totalGroups = currentDayWorkout?.groups?.length || 0;
+    completedGroupCount = Object.values(completedGroups).filter(Boolean).length;
+    progressPercentage = totalGroups > 0 ? (completedGroupCount / totalGroups) * 100 : 100;
+  }
 
   // Compliance calendar helpers
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -659,144 +840,427 @@ export default function Workouts() {
               <h2 className="text-xl sm:text-2xl font-semibold text-secondary dark:text-alabaster mb-2">
                 {isLoadingWorkout
                   ? "Loading..."
-                  : currentDayWorkout
-                    ? currentDayWorkout.isRest
-                      ? "Rest Day"
-                      : currentDayWorkout.name
-                    : isActivationDay
-                      ? "No Workouts"
-                      : "No Workouts"}
+                  : isFlexibleSchedule
+                    ? "Choose Your Workout"
+                    : currentDayWorkout
+                      ? currentDayWorkout.isRest
+                        ? "Rest Day"
+                        : currentDayWorkout.name
+                      : isActivationDay
+                        ? "No Workouts"
+                        : "No Workouts"}
               </h2>
             </div>
-            <div className="space-y-4 sm:space-y-6">
-              {isLoadingWorkout ? (
-                <div className="flex items-center justify-center py-8">
-                  <svg
-                    className="animate-spin h-8 w-8 text-primary"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    ></circle>
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
-                  </svg>
-                  <span className="ml-2 text-secondary dark:text-alabaster">Loading workout...</span>
-                </div>
-              ) : !currentDayWorkout || currentDayWorkout.isRest || !currentDayWorkout.groups ? (
-                <p className="text-secondary dark:text-alabaster">
-                  {currentDayWorkout?.isRest
-                    ? "Rest day - take time to recover!"
-                    : isActivationDay
-                    ? "Workout plan activated today - workouts will take effect tomorrow."
-                    : "No workout scheduled for this day."}
-                </p>
-              ) : (
-                (Array.isArray(currentDayWorkout?.groups) ? currentDayWorkout.groups : []).map((group: any, idx: number) => (
-                  <div
-                    key={group.id}
-                    className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
-                        {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
-                      </h3>
-                      <div className="flex items-center gap-2">
-                        <label
-                          htmlFor={`group-${group.id}`}
-                          className={`text-sm select-none ${
-                            isWorkoutSubmitted || dayOffset !== 0 || isActivationDay
-                              ? "text-gray-500 dark:text-gray-400 cursor-not-allowed" 
-                              : "text-gray-dark dark:text-gray-light cursor-pointer"
-                          }`}
-                        >
-                          {dayOffset !== 0 
-                            ? completedGroups[group.id] 
-                              ? "Completed" 
-                              : "Not completed"
-                            : isActivationDay
-                            ? "Activation Day"
-                            : isWorkoutSubmitted && completedGroups[group.id] 
-                            ? "Completed & Submitted" 
-                            : completedGroups[group.id] 
-                            ? "Completed" 
-                            : "Mark as complete"}
-                        </label>
-                        <input
-                          type="checkbox"
-                          id={`group-${group.id}`}
-                          checked={completedGroups[group.id] || false}
-                          onChange={() => toggleGroupCompletion(group.id)}
-                          disabled={isWorkoutSubmitted || dayOffset !== 0 || isActivationDay}
-                          className={`w-5 h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
-                            isWorkoutSubmitted || dayOffset !== 0 || isActivationDay
-                              ? "cursor-not-allowed opacity-50" 
-                              : "cursor-pointer"
-                          }`}
-                        />
+            
+            {/* Flexible Schedule UI */}
+            {isFlexibleSchedule && dayOffset === 0 && !isLoadingWorkout && (
+              <div className="space-y-4 sm:space-y-6">
+                {/* Show Selection View or Workout View */}
+                {!selectedTemplate && !isRestDay ? (
+                  // Selection View
+                  <>
+                    {/* Rest Day Option */}
+                    {restDaysUsed < restDaysAllowed && (
+                      <div
+                        className={`bg-white dark:bg-secondary-light/5 rounded-xl border-2 transition-all duration-200 p-4 sm:p-6 cursor-pointer ${
+                          isRestDay
+                            ? "border-primary bg-primary/5"
+                            : "border-gray-200 dark:border-gray-700 hover:border-primary/50"
+                        }`}
+                        onClick={handleRestDaySelection}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleRestDaySelection();
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                              Rest Day
+                            </h3>
+                            <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                              Take time to recover and recharge
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-dark dark:text-gray-light">
+                              {restDaysUsed} of {restDaysAllowed} used
+                            </span>
+                            <div className={`w-5 h-5 rounded-full border-2 ${
+                              isRestDay
+                                ? "border-primary bg-primary"
+                                : "border-gray-300 dark:border-gray-600"
+                            }`}>
+                              {isRestDay && (
+                                <svg className="w-full h-full text-white" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
+                    )}
+
+                    {/* Available Workout Templates */}
+                    {availableTemplates.length > 0 && (
+                      <div className="space-y-3">
+                        <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                          Available Workouts ({availableTemplates.length} remaining)
+                        </h3>
+                        {availableTemplates.map((template) => (
+                          <div
+                            key={template.id}
+                            className={`bg-white dark:bg-secondary-light/5 rounded-xl border-2 transition-all duration-200 p-4 sm:p-6 cursor-pointer ${
+                              selectedTemplate?.id === template.id
+                                ? "border-primary bg-primary/5"
+                                : "border-gray-200 dark:border-gray-700 hover:border-primary/50"
+                            }`}
+                            onClick={() => handleTemplateSelection(template)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleTemplateSelection(template);
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h4 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                                    {template.name}
+                                  </h4>
+                                  {template.dayLabel && (
+                                    <span className="px-2 py-1 text-xs font-medium bg-primary/10 text-primary rounded-full">
+                                      {template.dayLabel}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-gray-dark dark:text-gray-light">
+                                  {template.allExercises?.length || 0} exercises • {template.uniqueTypes?.join(", ") || "Single"}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleViewWorkout(template);
+                                  }}
+                                  className="px-3 py-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors duration-200"
+                                >
+                                  View
+                                </button>
+                                <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 ${
+                                  selectedTemplate?.id === template.id
+                                    ? "border-primary bg-primary"
+                                    : "border-gray-300 dark:border-gray-600"
+                                }`}>
+                                  {selectedTemplate?.id === template.id && (
+                                    <svg className="w-full h-full text-white" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* No Available Options */}
+                    {availableTemplates.length === 0 && restDaysUsed >= restDaysAllowed && (
+                      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-6 text-center">
+                        <h3 className="text-lg font-semibold text-secondary dark:text-alabaster mb-2">
+                          All Workouts Completed!
+                        </h3>
+                        <p className="text-sm text-gray-dark dark:text-gray-light">
+                          You've completed all your workouts and used all your rest days for this week. Great job!
+                        </p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  // Workout View (either selected template or rest day)
+                  <>
+                    {/* Back Button */}
+                    <div className="flex items-center mb-4">
+                      <button
+                        onClick={() => {
+                          setSelectedTemplate(null);
+                          setIsRestDay(false);
+                          setCompletedGroups({});
+                        }}
+                        className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors duration-200"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                        <span className="text-sm font-medium">Back to Selection</span>
+                      </button>
                     </div>
-                    <WorkoutCard
-                      exercises={group.exercises || []}
-                      type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
-                      dayOffset={0}
-                    />
+
+                    {/* Selected Template Workout */}
+                    {selectedTemplate && (
+                      <div className="space-y-4 sm:space-y-6">
+                        <div className="bg-primary/10 rounded-xl p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                              {selectedTemplate.name}
+                            </h3>
+                            {selectedTemplate.dayLabel && (
+                              <span className="px-2 py-1 text-xs font-medium bg-primary/20 text-primary rounded-full">
+                                {selectedTemplate.dayLabel}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-dark dark:text-gray-light">
+                            Complete the exercises below and submit your workout
+                          </p>
+                        </div>
+                        
+                        {(Array.isArray(selectedTemplate?.groups) ? selectedTemplate.groups : []).map((group: any, idx: number) => (
+                          <div
+                            key={group.id}
+                            className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
+                          >
+                            <div className="flex items-center justify-between mb-4">
+                              <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                                {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
+                              </h3>
+                              <div className="flex items-center gap-2">
+                                <label
+                                  htmlFor={`group-${group.id}`}
+                                  className="text-sm select-none text-gray-dark dark:text-gray-light cursor-pointer"
+                                >
+                                  {completedGroups[group.id] ? "Completed" : "Mark as complete"}
+                                </label>
+                                <input
+                                  type="checkbox"
+                                  id={`group-${group.id}`}
+                                  checked={completedGroups[group.id] || false}
+                                  onChange={() => toggleGroupCompletion(group.id)}
+                                  className="w-5 h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary cursor-pointer"
+                                />
+                              </div>
+                            </div>
+                            <WorkoutCard
+                              exercises={group.exercises || []}
+                              type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
+                              dayOffset={0}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Rest Day Display */}
+                    {isRestDay && (
+                      <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-6 text-center">
+                        <div className="flex items-center justify-center mb-3">
+                          <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                          </svg>
+                        </div>
+                        <h3 className="text-lg font-semibold text-secondary dark:text-alabaster mb-2">
+                          Rest Day Selected
+                        </h3>
+                        <p className="text-sm text-gray-dark dark:text-gray-light">
+                          Take time to recover and recharge. Your body needs rest to grow stronger!
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Fixed Schedule UI */}
+            {!isFlexibleSchedule && (
+              <div className="space-y-4 sm:space-y-6">
+                {isLoadingWorkout ? (
+                  <div className="flex items-center justify-center py-8">
+                    <svg
+                      className="animate-spin h-8 w-8 text-primary"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    <span className="ml-2 text-secondary dark:text-alabaster">Loading workout...</span>
                   </div>
-                ))
-              )}
-            </div>
+                ) : !currentDayWorkout || currentDayWorkout.isRest || !currentDayWorkout.groups ? (
+                  <p className="text-secondary dark:text-alabaster">
+                    {currentDayWorkout?.isRest
+                      ? "Rest day - take time to recover!"
+                      : isActivationDay
+                      ? "Workout plan activated today - workouts will take effect tomorrow."
+                      : "No workout scheduled for this day."}
+                  </p>
+                ) : (
+                  (Array.isArray(currentDayWorkout?.groups) ? currentDayWorkout.groups : []).map((group: any, idx: number) => (
+                    <div
+                      key={group.id}
+                      className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
+                    >
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                          {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          <label
+                            htmlFor={`group-${group.id}`}
+                            className={`text-sm select-none ${
+                              isWorkoutSubmitted || dayOffset !== 0 || isActivationDay
+                                ? "text-gray-500 dark:text-gray-400 cursor-not-allowed" 
+                                : "text-gray-dark dark:text-gray-light cursor-pointer"
+                            }`}
+                          >
+                            {dayOffset !== 0 
+                              ? completedGroups[group.id] 
+                                ? "Completed" 
+                                : "Not completed"
+                              : isActivationDay
+                              ? "Activation Day"
+                              : isWorkoutSubmitted && completedGroups[group.id] 
+                              ? "Completed & Submitted" 
+                              : completedGroups[group.id] 
+                              ? "Completed" 
+                              : "Mark as complete"}
+                          </label>
+                          <input
+                            type="checkbox"
+                            id={`group-${group.id}`}
+                            checked={completedGroups[group.id] || false}
+                            onChange={() => toggleGroupCompletion(group.id)}
+                            disabled={isWorkoutSubmitted || dayOffset !== 0 || isActivationDay}
+                            className={`w-5 h-5 rounded border-gray-light dark:border-davyGray text-primary focus:ring-primary ${
+                              isWorkoutSubmitted || dayOffset !== 0 || isActivationDay
+                                ? "cursor-not-allowed opacity-50" 
+                                : "cursor-pointer"
+                            }`}
+                          />
+                        </div>
+                      </div>
+                      <WorkoutCard
+                        exercises={group.exercises || []}
+                        type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
+                        dayOffset={0}
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
 
             {/* Submit Button - Only show for today's workout */}
-            {dayOffset === 0 && currentDayWorkout && !currentDayWorkout.isRest && (
-              <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
-                <Button
-                  variant="primary"
-                  disabled={isSubmitting || isWorkoutSubmitted || isActivationDay}
-                  onClick={handleSubmitWorkout}
-                >
-                  <span className="flex items-center gap-2">
-                    {isSubmitting ? (
-                      <>
-                        <svg
-                          className="animate-spin h-5 w-5"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          ></circle>
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          ></path>
-                        </svg>
-                        <span>Submitting...</span>
-                      </>
-                    ) : isWorkoutSubmitted ? (
-                      "Workout Submitted"
-                    ) : (
-                      "Submit Workout"
-                    )}
-                  </span>
-                </Button>
-              </div>
+            {dayOffset === 0 && (
+              <>
+                {/* Flexible Schedule Submit Button */}
+                {isFlexibleSchedule && (selectedTemplate || isRestDay) && (
+                  <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                    <Button
+                      variant="primary"
+                      disabled={isSubmitting || isWorkoutSubmitted}
+                      onClick={handleSubmitWorkout}
+                    >
+                      <span className="flex items-center gap-2">
+                        {isSubmitting ? (
+                          <>
+                            <svg
+                              className="animate-spin h-5 w-5"
+                              xmlns="http://www.w3.org/2000/svg"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              ></circle>
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              ></path>
+                            </svg>
+                            <span>Submitting...</span>
+                          </>
+                        ) : isWorkoutSubmitted ? (
+                          isRestDay ? "Rest Day Submitted" : "Workout Submitted"
+                        ) : (
+                          isRestDay ? "Submit Rest Day" : "Submit Workout"
+                        )}
+                      </span>
+                    </Button>
+                  </div>
+                )}
+
+                {/* Fixed Schedule Submit Button */}
+                {!isFlexibleSchedule && currentDayWorkout && !currentDayWorkout.isRest && (
+                  <div className="flex justify-end mt-6 pt-6 border-t border-gray-light dark:border-davyGray">
+                    <Button
+                      variant="primary"
+                      disabled={isSubmitting || isWorkoutSubmitted || isActivationDay}
+                      onClick={handleSubmitWorkout}
+                    >
+                      <span className="flex items-center gap-2">
+                        {isSubmitting ? (
+                          <>
+                            <svg
+                              className="animate-spin h-5 w-5"
+                              xmlns="http://www.w3.org/2000/svg"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              ></circle>
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              ></path>
+                            </svg>
+                            <span>Submitting...</span>
+                          </>
+                        ) : isWorkoutSubmitted ? (
+                          "Workout Submitted"
+                        ) : (
+                          "Submit Workout"
+                        )}
+                      </span>
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Activation Day Message */}
@@ -838,23 +1302,44 @@ export default function Workouts() {
             <div className="mb-4 bg-gray-lightest dark:bg-secondary-light/20 rounded-xl p-4">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="text-sm font-semibold text-secondary dark:text-alabaster">
-                  Workout Progress
+                  {isFlexibleSchedule ? "Today's Progress" : "Workout Progress"}
                 </h3>
                 <span className="text-sm text-gray-dark dark:text-gray-light">
-                  {completedGroupCount} of {totalGroups} workouts completed
+                  {isFlexibleSchedule && isRestDay 
+                    ? "Rest Day Selected"
+                    : isFlexibleSchedule && !selectedTemplate && !isRestDay
+                    ? "Choose a workout or rest day"
+                    : `${completedGroupCount} of ${totalGroups} exercises completed`
+                  }
                 </span>
               </div>
-              <div className="w-full bg-gray-300 dark:bg-davyGray rounded-full h-3 mb-2">
-                <div
-                  className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
-                  style={{
-                    width: `${progressPercentage}%`,
-                  }}
-                ></div>
-              </div>
-              <div className="text-xs text-gray-dark dark:text-gray-light text-right">
-                {Math.round(progressPercentage)}% complete
-              </div>
+              
+              {/* Progress Bar - Hide for rest days in flexible schedules */}
+              {!(isFlexibleSchedule && isRestDay) && (
+                <>
+                  <div className="w-full bg-gray-300 dark:bg-davyGray rounded-full h-3 mb-2">
+                    <div
+                      className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
+                      style={{
+                        width: `${progressPercentage}%`,
+                      }}
+                    ></div>
+                  </div>
+                  <div className="text-xs text-gray-dark dark:text-gray-light text-right">
+                    {Math.round(progressPercentage)}% complete
+                  </div>
+                </>
+              )}
+              
+              {/* Flexible Schedule Info */}
+              {isFlexibleSchedule && (
+                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex justify-between items-center text-xs text-gray-dark dark:text-gray-light">
+                    <span>Available Workouts: {availableTemplates.length}</span>
+                    <span>Rest Days: {restDaysUsed}/{restDaysAllowed}</span>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
 
@@ -980,6 +1465,91 @@ export default function Workouts() {
           </Card>
         </div>
       </div>
+
+      {/* Workout Preview Modal */}
+      {showPreviewModal && previewTemplate && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-secondary-light rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-semibold text-secondary dark:text-alabaster">
+                  Preview: {previewTemplate.name}
+                </h2>
+                {previewTemplate.dayLabel && (
+                  <span className="px-2 py-1 text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full">
+                    {previewTemplate.dayLabel}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  setShowPreviewModal(false);
+                  setPreviewTemplate(null);
+                }}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors duration-200"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4">
+                <p className="text-sm text-gray-dark dark:text-gray-light">
+                  This is a preview of the workout. Click "Select This Workout" below to choose it for today.
+                </p>
+              </div>
+
+              {/* Workout Groups */}
+              <div className="space-y-4">
+                {(Array.isArray(previewTemplate?.groups) ? previewTemplate.groups : []).map((group: any, idx: number) => (
+                  <div
+                    key={group.id}
+                    className="bg-gray-50 dark:bg-secondary-light/10 rounded-xl border border-gray-200 dark:border-gray-700 p-4"
+                  >
+                    <div className="mb-4">
+                      <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                        {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
+                      </h3>
+                    </div>
+                    <WorkoutCard
+                      exercises={group.exercises || []}
+                      type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
+                      dayOffset={0}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={() => {
+                    setShowPreviewModal(false);
+                    setPreviewTemplate(null);
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors duration-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedTemplate(previewTemplate);
+                    setShowPreviewModal(false);
+                    setPreviewTemplate(null);
+                  }}
+                  className="px-4 py-2 text-sm font-medium bg-primary hover:bg-primary/90 text-white rounded-lg transition-colors duration-200"
+                >
+                  Select This Workout
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

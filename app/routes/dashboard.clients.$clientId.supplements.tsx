@@ -68,7 +68,7 @@ export const loader = async ({
       .eq("id", clientIdParam)
       .single(),
   ]);
-  let client = initialClientResult.data || clientByIdResult.data;
+  const client = initialClientResult.data || clientByIdResult.data;
   if (!client) {
     return json({
       supplements: [],

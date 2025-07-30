@@ -1,15 +1,13 @@
-import { useLoaderData, useRevalidator } from "@remix-run/react";
+import { useLoaderData, useRevalidator , useFetcher } from "@remix-run/react";
 import type { MetaFunction } from "@remix-run/node";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
-import { json } from "@remix-run/node";
+import { json , ActionFunctionArgs, redirect } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import React, { useEffect, useState, useRef } from "react";
 import Card from "~/components/ui/Card";
 import CreateMealPlanModal from "~/components/coach/CreateMealPlanModal";
 import ViewMealPlanLibraryModal from "~/components/coach/ViewMealPlanLibraryModal";
-import { ActionFunctionArgs, redirect } from "@remix-run/node";
-import { useFetcher } from "@remix-run/react";
 import {
   PencilIcon,
   TrashIcon,

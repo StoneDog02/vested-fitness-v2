@@ -1,17 +1,17 @@
-import type { LinksFunction } from "@remix-run/node";
+import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import {
   Links,
   Meta,
   Outlet,
   Scripts,
   ScrollRestoration,
+  useLoaderData
 } from "@remix-run/react";
 import { ThemeProvider } from "./context/ThemeContext";
 import { MealCompletionProvider } from "./context/MealCompletionContext";
 import { ToastProvider } from "./context/ToastContext";
 import { UserContext } from "./context/UserContext";
-import { useLoaderData } from "@remix-run/react";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";

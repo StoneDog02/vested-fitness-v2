@@ -140,7 +140,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const question = questions?.find((q: any) => q.id === questionId);
       if (!question) return null;
 
-      let responseData: any = {
+      const responseData: any = {
         instance_id: instanceId,
         question_id: questionId,
       };

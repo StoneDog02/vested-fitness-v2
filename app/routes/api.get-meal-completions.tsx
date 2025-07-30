@@ -8,7 +8,7 @@ import { getCurrentDateISO } from "~/lib/timezone";
 
 function getDatesInRange(start: string, end: string): string[] {
   const dates = [];
-  let current = new Date(start);
+  const current = new Date(start);
   const last = new Date(end);
   while (current <= last) {
     dates.push(current.toISOString().slice(0, 10));
