@@ -32,6 +32,9 @@ export const loader = async ({ request }: { request: Request }) => {
     .eq("user_id", clientId)
     .eq("is_template", false);
 
+  // Check if there's an active workout plan
+  const hasActivePlan = workoutPlans?.some(plan => plan.is_active);
+
   // Fetch workout completions for this client for the week
   const { data: completions } = await supabase
     .from("workout_completions")
@@ -46,6 +49,12 @@ export const loader = async ({ request }: { request: Request }) => {
     const day = weekStart.add(i, "day");
     const dayStr = day.format("YYYY-MM-DD");
     
+    // If there's no active plan, return -1 for all days
+    if (!hasActivePlan) {
+      complianceData.push(-1);
+      continue;
+    }
+    
     // Check if this is the activation day for the currently active workout plan
     const activePlan = workoutPlans?.find(plan => {
       if (!plan.activated_at || !plan.is_active) return false;
@@ -55,19 +64,9 @@ export const loader = async ({ request }: { request: Request }) => {
       return activatedStr === dayStr;
     });
     
-    // Check if this is the first plan for this client (to handle immediate activation)
-    // A plan is considered the first if it's the only plan or if it's the earliest created plan
-    const isFirstPlan = workoutPlans && activePlan && (
-      workoutPlans.length === 1 || 
-      workoutPlans.every(p => p.id === activePlan.id || p.activated_at === null) ||
-      workoutPlans.every(p => p.id === activePlan.id || toUserTimezone(p.created_at).isAfter(toUserTimezone(activePlan.created_at)))
-    );
-    
-    // Check if plan was created today (for immediate activation)
-    const isCreatedToday = activePlan && toUserTimezone(activePlan.created_at).format("YYYY-MM-DD") === dayStr;
-    
-    if (activePlan && (isFirstPlan || toUserTimezone(activePlan.activated_at).format("YYYY-MM-DD") === dayStr || isCreatedToday)) {
-      // Return -1 to indicate N/A for activation/creation day
+    // Only show NABadge if this is the currently active plan's activation day
+    if (activePlan && activePlan.is_active) {
+      // Return -1 to indicate N/A for activation day of currently active plan
       complianceData.push(-1);
       continue;
     }

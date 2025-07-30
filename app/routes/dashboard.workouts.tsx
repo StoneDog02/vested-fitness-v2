@@ -91,10 +91,13 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Get ALL workout plans for this user (both active and recently deactivated)
   const { data: allPlans, error: plansError } = await supabase
     .from("workout_plans")
-    .select("id, title, description, created_at, is_active, activated_at, deactivated_at")
+    .select("id, title, description, created_at, is_active, activated_at, deactivated_at, builder_mode")
     .eq("user_id", user.id)
     .eq("is_template", false)
     .order("activated_at", { ascending: false, nullsFirst: false });
+
+  // Check if there's an active workout plan
+  const hasActivePlan = allPlans?.some(plan => plan.is_active);
 
   // Determine which plan to show to the client:
   // 1. Show active plans activated before today (normal case)
@@ -102,7 +105,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   let activeWorkoutPlan = null;
   
   if (allPlans && allPlans.length > 0) {
-    // First try to find an active plan activated before today (not on activation day)
+    // First try to find an active plan that was active for the current week
     let planToShow = allPlans.find(plan => {
       if (!plan.is_active) {
         return false;
@@ -111,8 +114,11 @@ export const loader: LoaderFunction = async ({ request }) => {
         return true; // Legacy plans without activation date
       }
       const activatedDate = plan.activated_at.slice(0, 10);
-      const shouldShow = activatedDate < currentDateStr;
-      return shouldShow; // Only show plans activated before today (not on activation day)
+      const currentDateStr = getCurrentDate().format("YYYY-MM-DD");
+      
+      // Plan should be active if it was activated before or on today
+      const shouldShow = activatedDate <= currentDateStr;
+      return shouldShow;
     });
     
     // If no active plan found, look for plan deactivated today (was active until today)
@@ -122,6 +128,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           return false;
         }
         const deactivatedDate = plan.deactivated_at.slice(0, 10);
+        const currentDateStr = getCurrentDate().format("YYYY-MM-DD");
         const shouldShow = deactivatedDate === currentDateStr;
         return shouldShow; // Deactivated today, so show until end of day
       });
@@ -174,6 +181,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         name: planToShow.title,
         description: planToShow.description || "",
         days: workoutDays,
+        builderMode: planToShow.builder_mode || 'week', // Add builder mode to the plan
       };
     }
   }
@@ -186,7 +194,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Fetch workout completions for this week
   const { data: completions } = await supabase
     .from("workout_completions")
-    .select("completed_at")
+    .select("completed_at, completed_groups")
     .eq("user_id", user.id)
     .gte("completed_at", startOfWeek.format("YYYY-MM-DD"))
     .lt("completed_at", endOfWeek.add(1, "day").format("YYYY-MM-DD"));
@@ -196,6 +204,21 @@ export const loader: LoaderFunction = async ({ request }) => {
   for (let i = 0; i < 7; i++) {
     const day = startOfWeek.add(i, "day");
     const dayStr = day.format("YYYY-MM-DD");
+    
+    // Check if there's an active plan for this specific day
+    const hasActivePlanForThisDay = allPlans?.some(plan => {
+      if (!plan.is_active) return false;
+      if (!plan.activated_at) return true; // Legacy plans without activation date
+      
+      const activatedDate = plan.activated_at.slice(0, 10);
+      return activatedDate <= dayStr; // Plan was activated on or before this day
+    });
+    
+    // If there's no active plan for this day, return -3 for NABadge (no plan)
+    if (!hasActivePlanForThisDay) {
+      complianceData.push(-3);
+      continue;
+    }
     
     // Check if this day is before the user signed up
     if (user.created_at) {
@@ -207,31 +230,60 @@ export const loader: LoaderFunction = async ({ request }) => {
       }
     }
     
-    // Check if this is the activation day for any workout plan
+    // Check if this is the activation day for the currently active workout plan
     const activePlan = allPlans?.find(plan => {
-      if (!plan.activated_at) return false;
+      if (!plan.activated_at || !plan.is_active) return false;
       const activatedStr = plan.activated_at.slice(0, 10);
       return activatedStr === dayStr;
     });
     
-    // Check if this is the first plan for this user (to handle immediate activation)
-    const isFirstPlan = allPlans && activePlan && (
-      allPlans.length === 1 || 
-      allPlans.every(p => p.id === activePlan.id || p.activated_at === null) ||
-      allPlans.every(p => p.id === activePlan.id || new Date(p.created_at) > new Date(activePlan.created_at))
-    );
-    
-    // Check if plan was created today (for immediate activation)
-    const isCreatedToday = activePlan && new Date(activePlan.created_at).toISOString().slice(0, 10) === dayStr;
-    
-    if (activePlan && (isFirstPlan || activePlan.activated_at?.slice(0, 10) === dayStr || isCreatedToday)) {
-      // Return -1 to indicate N/A for activation/creation day
+    // Only show NABadge if this is the currently active plan's activation day
+    if (activePlan && activePlan.is_active) {
+      // Return -1 to indicate N/A for activation day of currently active plan
       complianceData.push(-1);
       continue;
     }
     
     const hasCompletion = (completions || []).some((c: any) => c.completed_at === dayStr);
-    complianceData.push(hasCompletion ? 1 : 0);
+    const completion = (completions || []).find((c: any) => c.completed_at === dayStr);
+    const isRestDayCompletion = completion && (!completion.completed_groups || completion.completed_groups.length === 0);
+    
+    // For flexible schedules, return -2 for days without completion (to show "Pending")
+    // For fixed schedules, return 0 for days without completion (to show "0%")
+    if (activeWorkoutPlan && activeWorkoutPlan.builderMode === 'day') {
+      // Flexible schedule
+      if (hasCompletion) {
+        if (isRestDayCompletion) {
+          // Rest day completion
+          complianceData.push(2);
+        } else {
+          // Workout completion
+          complianceData.push(1);
+        }
+      } else if (day.isSame(today, "day")) {
+        // Today without completion = pending
+        complianceData.push(-2);
+      } else if (day.isAfter(today, "day")) {
+        // Future day = pending
+        complianceData.push(-2);
+      } else {
+        // Past day without completion = 0%
+        complianceData.push(0);
+      }
+    } else {
+      // Fixed schedule
+      if (hasCompletion) {
+        if (isRestDayCompletion) {
+          // Rest day completion
+          complianceData.push(2);
+        } else {
+          // Workout completion
+          complianceData.push(1);
+        }
+      } else {
+        complianceData.push(0);
+      }
+    }
   }
 
   return json({
@@ -246,12 +298,14 @@ export const loader: LoaderFunction = async ({ request }) => {
     complianceData,
     todaysWorkout: null, // This will be calculated in the component
     todaysCompletedGroups: [], // This will be calculated in the component
+    timestamp: Date.now(), // Force fresh data
   });
 };
 
 export default function Workouts() {
-  const { user, todaysWorkout, complianceData: initialComplianceData, todaysCompletedGroups } = useLoaderData<{ 
+  const { user, workoutPlan, todaysWorkout, complianceData: initialComplianceData, todaysCompletedGroups } = useLoaderData<{ 
     user: any;
+    workoutPlan: any;
     todaysWorkout: null | {
       id: string;
       name: string;
@@ -276,7 +330,6 @@ export default function Workouts() {
   const [isLoadingWorkout, setIsLoadingWorkout] = useState(false);
   
   // Flexible schedule state
-  const [isFlexibleSchedule, setIsFlexibleSchedule] = useState(false);
   const [workoutTemplates, setWorkoutTemplates] = useState<any[]>([]);
   const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
   const [restDaysAllowed, setRestDaysAllowed] = useState(0);
@@ -285,6 +338,7 @@ export default function Workouts() {
   const [isRestDay, setIsRestDay] = useState(false);
   const [previewTemplate, setPreviewTemplate] = useState<any>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [isFlexibleSchedule, setIsFlexibleSchedule] = useState(false);
   
   const weekFetcher = useFetcher<{ 
     workouts: Record<string, any>, 
@@ -312,6 +366,22 @@ export default function Workouts() {
   useEffect(() => {
     setComplianceData(initialComplianceData);
   }, [initialComplianceData]);
+
+  // Determine if this is a flexible schedule based on workout plan
+  useEffect(() => {
+    if (workoutPlan) {
+      // Check if the plan has a builder_mode field or if it's structured as a flexible schedule
+      const isFlexible = workoutPlan.builderMode === 'day' || 
+                        (workoutPlan.days && workoutPlan.days.length > 0 && 
+                         workoutPlan.days.some((day: any) => day.dayLabel || day.workoutName)) ||
+                        // Additional check: if plan has workout templates (flexible schedule indicator)
+                        (workoutPlan.days && workoutPlan.days.length > 0 &&
+                         workoutPlan.days.filter((day: any) => !day.isRest).length > 0);
+      setIsFlexibleSchedule(isFlexible);
+    } else {
+      setIsFlexibleSchedule(false);
+    }
+  }, [workoutPlan]);
 
   // Calculate the current date with offset
   const today = getCurrentDate();
@@ -443,10 +513,50 @@ export default function Workouts() {
         setRestDaysAllowed(weekFetcher.data.restDaysAllowed || 0);
         setRestDaysUsed(weekFetcher.data.restDaysUsed || 0);
         
+        // Check if there's already a completion for today
+        const today = getCurrentDate();
+        const todayStr = today.format("YYYY-MM-DD");
+        
+        // Check if there's a completion for today in the completions data
+        if (weekFetcher.data.completions && weekFetcher.data.completions[todayStr]) {
+          const todayCompletion = weekFetcher.data.completions[todayStr];
+          
+          if (todayCompletion.length === 0) {
+            // Empty completed_groups means it's a rest day
+            setIsRestDay(true);
+            setSelectedTemplate(null);
+            setIsWorkoutSubmitted(true);
+          } else {
+            // Has completed groups - find the matching template
+            const completedTemplate = weekFetcher.data.workoutTemplates?.find((template: any) => {
+              // Check if this template's groups match the completed groups
+              const templateGroupIds = template.groups?.map((group: any) => group.id) || [];
+              return todayCompletion.every((groupId: string) => templateGroupIds.includes(groupId));
+            });
+            
+            if (completedTemplate) {
+              setSelectedTemplate(completedTemplate);
+              setIsRestDay(false);
+              setIsWorkoutSubmitted(true);
+              
+              // Set completed groups for the selected template
+              const completedGroupsMap: Record<string, boolean> = {};
+              todayCompletion.forEach((groupId: string) => {
+                completedGroupsMap[groupId] = true;
+              });
+              setCompletedGroups(completedGroupsMap);
+            }
+          }
+        } else {
+          // No completion for today - reset to selection view
+          setSelectedTemplate(null);
+          setIsRestDay(false);
+          setIsWorkoutSubmitted(false);
+          setCompletedGroups({});
+        }
+        
         // Reset current day workout for flexible schedules
         setCurrentDayWorkout(null);
-        setCompletedGroups({});
-        setIsWorkoutSubmitted(false);
       } else {
         // Handle fixed schedule data (original logic)
         setIsFlexibleSchedule(false);
@@ -585,23 +695,29 @@ export default function Workouts() {
     setSubmitError(null);
     
     try {
-      const formData = new FormData();
-      formData.append("completedAt", currentDateApi);
-      formData.append("completedGroups", JSON.stringify([])); // Empty array for rest day
-      
       const response = await fetch("/api/submit-workout-completion", {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          completedAt: currentDateApi,
+          completedGroups: [], // Empty array for rest day
+        }),
       });
       
       if (response.ok) {
         setShowSuccess(true);
         setIsWorkoutSubmitted(true);
-        setIsRestDay(false);
-        setSelectedTemplate(null);
+        // Keep rest day view active - don't reset isRestDay or selectedTemplate
+        // setIsRestDay(false);
+        // setSelectedTemplate(null);
         
         // Refresh week data to update available templates
         fetchWorkoutWeek(currentWeekStart);
+        
+        // Dispatch event to refresh dashboard
+        window.dispatchEvent(new CustomEvent("workouts:completed"));
         
         setTimeout(() => setShowSuccess(false), 3000);
       } else {
@@ -623,22 +739,28 @@ export default function Workouts() {
     setSubmitError(null);
     
     try {
-      const formData = new FormData();
-      formData.append("completedAt", currentDateApi);
-      formData.append("completedGroups", JSON.stringify(Object.keys(completedGroups).filter(id => completedGroups[id])));
-      
       const response = await fetch("/api/submit-workout-completion", {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          completedAt: currentDateApi,
+          completedGroups: Object.keys(completedGroups).filter(id => completedGroups[id]),
+        }),
       });
       
       if (response.ok) {
         setShowSuccess(true);
         setIsWorkoutSubmitted(true);
-        setSelectedTemplate(null);
+        // Keep workout view active - don't reset selectedTemplate
+        // setSelectedTemplate(null);
         
         // Refresh week data to update available templates
         fetchWorkoutWeek(currentWeekStart);
+        
+        // Dispatch event to refresh dashboard
+        window.dispatchEvent(new CustomEvent("workouts:completed"));
         
         setTimeout(() => setShowSuccess(false), 3000);
       } else {
@@ -660,18 +782,24 @@ export default function Workouts() {
     setSubmitError(null);
     
     try {
-      const formData = new FormData();
-      formData.append("completedAt", currentDateApi);
-      formData.append("completedGroups", JSON.stringify(Object.keys(completedGroups).filter(id => completedGroups[id])));
-      
       const response = await fetch("/api/submit-workout-completion", {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          completedAt: currentDateApi,
+          completedGroups: Object.keys(completedGroups).filter(id => completedGroups[id]),
+        }),
       });
       
       if (response.ok) {
         setShowSuccess(true);
         setIsWorkoutSubmitted(true);
+        
+        // Dispatch event to refresh dashboard
+        window.dispatchEvent(new CustomEvent("workouts:completed"));
+        
         setTimeout(() => setShowSuccess(false), 3000);
       } else {
         const errorData = await response.json();
@@ -1364,6 +1492,9 @@ export default function Workouts() {
                 const dayWorkout = weekWorkouts[dateStr];
                 const hasWorkoutsAssigned = dayWorkout && !dayWorkout.isRest && dayWorkout.groups && dayWorkout.groups.length > 0;
                 
+                // For flexible schedules, check if there are any completions for this day
+                const hasCompletionForDay = safeComplianceData[i] > 0;
+                
                 // Determine status and display
                 let status: string;
                 let displayText: string;
@@ -1385,34 +1516,107 @@ export default function Workouts() {
                   naReason = "Workout plan added today - compliance starts tomorrow";
                   status = "na";
                   displayText = "";
-                } else if (isFuture) {
+                } else if (safeComplianceData[i] === -3) {
+                  showNABadge = true;
+                  naReason = "No plan added by coach";
+                  status = "na";
+                  displayText = "";
+                } else if (safeComplianceData[i] === -2) {
+                  // Flexible schedule: pending selection
                   status = "pending";
                   displayText = "Pending";
-                } else if (isToday) {
-                  if (safeComplianceData[i] > 0) {
-                    status = "completed";
-                    displayText = `${percentage}%`;
-                  } else if (!hasWorkoutsAssigned) {
-                    // No workouts assigned for today = 100% complete
-                    status = "completed";
-                    displayText = "100%";
-                  } else {
+                } else if (safeComplianceData[i] === 2) {
+                  // Rest day completion
+                  status = "completed";
+                  displayText = "Rest";
+                } else if (!workoutPlan) {
+                  // No active workout plan
+                  showNABadge = true;
+                  naReason = "No plan added by coach";
+                  status = "na";
+                  displayText = "";
+                } else if (!workoutPlan.days || workoutPlan.days.length === 0) {
+                  // Plan exists but has no workout days
+                  showNABadge = true;
+                  naReason = "No plan added by coach";
+                  status = "na";
+                  displayText = "";
+                } else {
+                  // Check if there are any actual workouts assigned for this week
+                  const hasAnyWorkoutsThisWeek = workoutPlan.days.some((day: any) => {
+                    if (day.isRest) return false;
+                    // Check if this day of week falls within the current week
+                    const dayOfWeek = day.dayOfWeek;
+                    const currentWeekDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const dayIndex = currentWeekDays.indexOf(dayOfWeek);
+                    if (dayIndex === -1) return false;
+                    
+                    // Check if this day has exercises
+                    return day.exercises && day.exercises.length > 0;
+                  });
+                  
+                  if (!hasAnyWorkoutsThisWeek) {
+                    // Plan exists but no workouts assigned for this week
+                    showNABadge = true;
+                    naReason = "No plan added by coach";
+                    status = "na";
+                    displayText = "";
+                  } else if (isFlexibleSchedule) {
+                    // FLEXIBLE SCHEDULE: Compliance based on client selections, not pre-assigned days
+                    if (hasCompletionForDay) {
+                      // Client selected and completed a workout for this day
+                      status = "completed";
+                      displayText = `${percentage}%`;
+                    } else if (isToday) {
+                      // Today - client hasn't selected anything yet
+                      status = "pending";
+                      displayText = "Pending";
+                    } else if (isFuture) {
+                      // Future day - pending selection
+                      status = "pending";
+                      displayText = "Pending";
+                    } else {
+                      // Past day - client didn't select anything = 0%
+                      status = "completed";
+                      displayText = "0%";
+                    }
+                  } else if (isFuture) {
                     status = "pending";
                     displayText = "Pending";
-                  }
-                } else {
-                  // Past day
-                  if (safeComplianceData[i] > 0) {
-                    status = "completed";
-                    displayText = `${percentage}%`;
-                  } else if (!hasWorkoutsAssigned) {
-                    // No workouts assigned for past day = 100% complete
-                    status = "completed";
-                    displayText = "100%";
+                  } else if (isToday) {
+                    if (hasCompletionForDay) {
+                      status = "completed";
+                      displayText = `${percentage}%`;
+                    } else if (isFlexibleSchedule) {
+                      // For flexible schedules, no completion today means pending selection
+                      status = "pending";
+                      displayText = "Pending";
+                    } else if (!hasWorkoutsAssigned) {
+                      // For fixed schedules, no workouts assigned means rest day = 100% complete
+                      status = "completed";
+                      displayText = "100%";
+                    } else {
+                      status = "pending";
+                      displayText = "Pending";
+                    }
                   } else {
-                    // Past day with workouts assigned but not completed = 0%
-                    status = "completed";
-                    displayText = "0%";
+                    // Past day
+                    if (hasCompletionForDay) {
+                      status = "completed";
+                      displayText = `${percentage}%`;
+                    } else if (isFlexibleSchedule) {
+                      // For flexible schedules, no completion on past day means 0%
+                      status = "completed";
+                      displayText = "0%";
+                    } else if (!hasWorkoutsAssigned) {
+                      // For fixed schedules, no workouts assigned means rest day = 100% complete
+                      status = "completed";
+                      displayText = "100%";
+                    } else {
+                      // Past day with workouts assigned but not completed = 0%
+                      status = "completed";
+                      displayText = "0%";
+                    }
                   }
                 }
                 

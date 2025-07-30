@@ -86,6 +86,12 @@ type ClientDashboardData = {
   planName?: string | null;
   isRestDay?: boolean | null;
   completedMealIds?: string[];
+  isFlexibleSchedule?: boolean;
+  todaysWorkoutCompletion?: {
+    isRestDay: boolean;
+    workoutName?: string;
+    completedGroups?: string[];
+  } | null;
 };
 
 type Client = {
@@ -323,7 +329,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       ] = await Promise.all([
         supabase
           .from("workout_completions")
-          .select("completed_at")
+          .select("completed_at, completed_groups")
           .eq("user_id", user.id)
           .gte("completed_at", todayStr)
           .lt("completed_at", tomorrowStr),
@@ -335,7 +341,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           .limit(1),
         supabase
           .from("workout_plans")
-          .select("id, title, is_active, activated_at")
+          .select("id, title, is_active, activated_at, builder_mode")
           .eq("user_id", user.id)
           .eq("is_active", true)
           .limit(1),
@@ -355,10 +361,14 @@ export const loader: LoaderFunction = async ({ request }) => {
       let workouts: DailyWorkout[] = [];
       let planName: string | null = null;
       let isRestDay: boolean | null = null;
+      let isFlexibleSchedule: boolean = false;
       
       // Check if there's an active workout plan that was activated before today
       if (workoutPlansResult.data && workoutPlansResult.data.length > 0) {
         const workoutPlan = workoutPlansResult.data[0];
+        
+        // Detect if this is a flexible schedule
+        isFlexibleSchedule = workoutPlan.builder_mode === 'day';
         
         // Only show workout if plan was activated before today (not on activation day)
         let shouldShowWorkout = true;
@@ -367,7 +377,8 @@ export const loader: LoaderFunction = async ({ request }) => {
           shouldShowWorkout = activatedDate < todayStr; // Only show if activated before today
         }
         
-        if (shouldShowWorkout) {
+        if (shouldShowWorkout && !isFlexibleSchedule) {
+          // Only fetch fixed schedule workouts - flexible schedules are handled in the workouts page
           const workoutPlanId = workoutPlan.id;
           const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
           const todayName = daysOfWeek[today.day()];
@@ -423,6 +434,34 @@ export const loader: LoaderFunction = async ({ request }) => {
       }
       }
 
+      // Process today's workout completion
+      let todaysWorkoutCompletion = null;
+      if (workoutCompletionsResult.data && workoutCompletionsResult.data.length > 0) {
+        const todayCompletion = workoutCompletionsResult.data[0];
+        const isRestDayCompletion = !todayCompletion.completed_groups || todayCompletion.completed_groups.length === 0;
+        
+        if (isFlexibleSchedule) {
+          // For flexible schedules, we need to determine the workout name from the completed groups
+          let workoutName = "Rest Day";
+          if (!isRestDayCompletion) {
+            workoutName = "Workout Completed";
+          }
+          
+          todaysWorkoutCompletion = {
+            isRestDay: isRestDayCompletion,
+            workoutName: isRestDayCompletion ? "Rest Day" : workoutName,
+            completedGroups: todayCompletion.completed_groups || []
+          };
+        } else {
+          // For fixed schedules, use the plan name
+          todaysWorkoutCompletion = {
+            isRestDay: isRestDayCompletion,
+            workoutName: planName || (isRestDayCompletion ? "Rest Day" : "Workout"),
+            completedGroups: todayCompletion.completed_groups || []
+          };
+        }
+      }
+
       // Build supplements
       const supplements = (supplementsResult.data || []).map((s) => ({
         name: s.name,
@@ -451,6 +490,8 @@ export const loader: LoaderFunction = async ({ request }) => {
         planName,
         isRestDay,
         completedMealIds,
+        isFlexibleSchedule,
+        todaysWorkoutCompletion,
       };
       dashboardCache[authId] = { data: { clientData }, expires: Date.now() + 30_000 };
       return json({ clientData });
@@ -1167,7 +1208,33 @@ export default function Dashboard() {
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Today's Workouts</h3>
               <div className="rounded-xl bg-white shadow p-6 space-y-6 max-h-96 overflow-y-auto">
-                {clientData?.workouts?.length === 0 && clientData?.planName && clientData?.isRestDay ? (
+                {clientData?.todaysWorkoutCompletion ? (
+                  // Show today's completed workout/rest day
+                  <div className="text-center py-6">
+                    <div className="text-green-600 mb-4">
+                      <div className="font-semibold text-lg mb-2">✅ Completed Today</div>
+                      <div className="text-xl font-bold">
+                        {clientData.todaysWorkoutCompletion.isRestDay ? "Rest Day" : clientData.todaysWorkoutCompletion.workoutName}
+                      </div>
+                      {clientData.todaysWorkoutCompletion.isRestDay && (
+                        <div className="text-sm text-gray-600 mt-2">Take time to recover and recharge</div>
+                      )}
+                    </div>
+                  </div>
+                ) : clientData?.isFlexibleSchedule ? (
+                  <div className="text-center py-8">
+                    <div className="text-gray-600 mb-4">
+                      <div className="font-semibold text-lg mb-2">Flexible Schedule Active</div>
+                      <div className="text-sm">Head to Workouts and pick your workout for today!</div>
+                    </div>
+                    <Link 
+                      to="/dashboard/workouts" 
+                      className="inline-block px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors"
+                    >
+                      Choose Today's Workout
+                    </Link>
+                  </div>
+                ) : clientData?.workouts?.length === 0 && clientData?.planName && clientData?.isRestDay ? (
                   <div className="text-gray-500 text-center">
                     <div className="font-semibold mb-1">Workout - {dayjs().tz('America/Denver').format('dddd')}</div>
                     <div>Today is a Rest Day</div>

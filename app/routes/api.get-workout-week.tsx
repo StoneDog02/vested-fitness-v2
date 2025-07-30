@@ -211,9 +211,15 @@ export const loader: LoaderFunction = async ({ request }) => {
       !completedTemplateIds.has(template.id)
     );
 
+    // Process completions into a map by date for flexible schedules
+    const completionsByDate: Record<string, string[]> = {};
+    (completionsRaw || []).forEach(completion => {
+      completionsByDate[completion.completed_at] = completion.completed_groups || [];
+    });
+
     return json({
       workouts: {}, // Empty for flexible schedules - client handles day assignment
-      completions: {},
+      completions: completionsByDate, // Include completions data for flexible schedules
       isFlexibleSchedule: true,
       workoutTemplates,
       availableTemplates,
