@@ -18,7 +18,7 @@ module.exports = {
   },
   // Expose environment variables to the client
   publicPath: "/build/",
-  serverBuildPath: "build/index.js",
-  assetsBuildDirectory: "public/build",
+  serverBuildPath: "build/server/index.js",
+  assetsBuildDirectory: "build/client",
   ignoredRouteFiles: ["**/.*"],
 };

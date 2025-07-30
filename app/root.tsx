@@ -21,6 +21,8 @@ import type { UserContextType } from "./context/UserContext";
 
 import styles from "./tailwind.css?url";
 
+// Initialize environment variables
+
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: styles },
   // Traditional favicon for broad compatibility

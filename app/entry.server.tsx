@@ -11,6 +11,10 @@ import { createReadableStreamFromReadable } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { init as initEnv } from "./config/env.server";
+
+// Initialize environment variables on server startup
+initEnv();
 
 const ABORT_DELAY = 5_000;
 
