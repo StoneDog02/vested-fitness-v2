@@ -51,19 +51,10 @@ export async function createStripeSubscription({ customerId, priceId, paymentMet
   const lastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
   const lastDayTimestamp = Math.floor(lastDay.getTime() / 1000);
   
-  // Calculate prorated amount for remaining days of current month
-  // Note: In a real implementation, you'd pass the actual signup date from the registration flow
-  const signupDate = now; // For new registrations, use current time as signup time
-  const daysRemaining = Math.ceil((lastDay.getTime() - signupDate.getTime()) / (1000 * 60 * 60 * 24));
-  const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getDate();
   const monthlyAmount = price.unit_amount || 0;
-  const proratedAmount = Math.round((monthlyAmount * daysRemaining) / daysInMonth);
   
-  console.log(`[SUBSCRIPTION] Creating subscription with immediate billing:`);
+  console.log(`[SUBSCRIPTION] Creating subscription with full price (no proration):`);
   console.log(`  Monthly amount: $${(monthlyAmount / 100).toFixed(2)}`);
-  console.log(`  Days remaining: ${daysRemaining}`);
-  console.log(`  Days in month: ${daysInMonth}`);
-  console.log(`  Prorated amount: $${(proratedAmount / 100).toFixed(2)}`);
   console.log(`  Billing cycle anchor: ${new Date(lastDayTimestamp * 1000).toISOString()}`);
   
   // Create subscription with immediate payment
@@ -74,7 +65,7 @@ export async function createStripeSubscription({ customerId, priceId, paymentMet
     payment_settings: { save_default_payment_method: 'on_subscription' },
     expand: ['latest_invoice', 'latest_invoice.payment_intent'],
     billing_cycle_anchor: lastDayTimestamp,
-    proration_behavior: 'create_prorations',
+    proration_behavior: 'none', // No proration - charge full monthly amount
     ...(paymentMethodId ? { default_payment_method: paymentMethodId } : {}),
   });
   
@@ -231,4 +222,120 @@ export async function setAccessStatus(stripeCustomerId: string, status: string) 
 export async function getCurrentOpenInvoice(customerId: string) {
   const invoices = await stripe.invoices.list({ customer: customerId, status: 'open', limit: 1 });
   return invoices.data[0] || null;
+}
+
+// Helper function to handle existing clients who were charged prorated amounts
+export async function addProratedBalanceToNextInvoice(customerId: string, subscriptionId: string) {
+  try {
+    // Get the subscription to find the price and billing cycle
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    const price = await stripe.prices.retrieve(subscription.items.data[0].price.id);
+    
+    // Calculate what the full monthly amount should have been
+    const fullMonthlyAmount = price.unit_amount || 0;
+    
+    // Get the latest invoice to see what was actually charged
+    const invoices = await stripe.invoices.list({ 
+      customer: customerId, 
+      subscription: subscriptionId,
+      limit: 1 
+    });
+    
+    if (invoices.data.length === 0) {
+      console.log(`[PRORATION_FIX] No invoices found for subscription ${subscriptionId}`);
+      return;
+    }
+    
+    const latestInvoice = invoices.data[0];
+    const actualAmountCharged = latestInvoice.amount_paid;
+    
+    // Calculate the difference (what should have been charged vs what was charged)
+    const proratedDifference = fullMonthlyAmount - actualAmountCharged;
+    
+    if (proratedDifference <= 0) {
+      console.log(`[PRORATION_FIX] No prorated difference found for subscription ${subscriptionId}`);
+      return;
+    }
+    
+    console.log(`[PRORATION_FIX] Adding prorated balance to next invoice:`);
+    console.log(`  Full monthly amount: $${(fullMonthlyAmount / 100).toFixed(2)}`);
+    console.log(`  Actual amount charged: $${(actualAmountCharged / 100).toFixed(2)}`);
+    console.log(`  Prorated difference: $${(proratedDifference / 100).toFixed(2)}`);
+    
+    // Add the prorated difference to the next billing cycle
+    await stripe.invoiceItems.create({
+      customer: customerId,
+      amount: proratedDifference,
+      currency: price.currency,
+      description: 'Adjustment for prorated first month',
+      // This will be charged on the next billing cycle
+      period: {
+        start: (subscription as any).current_period_end,
+        end: (subscription as any).current_period_end + (30 * 24 * 60 * 60), // 30 days from current period end
+      },
+    });
+    
+    console.log(`[PRORATION_FIX] Successfully added prorated balance to next invoice for subscription ${subscriptionId}`);
+    
+  } catch (error) {
+    console.error(`[PRORATION_FIX] Failed to add prorated balance:`, error);
+    throw error;
+  }
+}
+
+// Function to find and fix all prorated subscriptions
+export async function fixAllProratedSubscriptions() {
+  try {
+    console.log('[PRORATION_FIX] Starting to fix all prorated subscriptions...');
+    
+    // Get all active subscriptions
+    const subscriptions = await stripe.subscriptions.list({ 
+      status: 'active',
+      limit: 100 
+    });
+    
+    let fixedCount = 0;
+    
+    for (const subscription of subscriptions.data) {
+      try {
+        // Check if this subscription was created before the proration fix
+        const createdAt = subscription.created;
+        const prorationFixDate = new Date('2025-01-27').getTime() / 1000; // Today's date
+        
+        if (createdAt < prorationFixDate) {
+          console.log(`[PRORATION_FIX] Checking subscription ${subscription.id} created at ${new Date(createdAt * 1000).toISOString()}`);
+          
+          // Get the latest invoice to check if it was prorated
+          const invoices = await stripe.invoices.list({ 
+            customer: subscription.customer as string, 
+            subscription: subscription.id,
+            limit: 1 
+          });
+          
+          if (invoices.data.length > 0) {
+            const latestInvoice = invoices.data[0];
+            const price = await stripe.prices.retrieve(subscription.items.data[0].price.id);
+            const fullMonthlyAmount = price.unit_amount || 0;
+            const actualAmountCharged = latestInvoice.amount_paid;
+            
+            // If the amount charged is less than the full monthly amount, it was prorated
+            if (actualAmountCharged < fullMonthlyAmount) {
+              console.log(`[PRORATION_FIX] Found prorated subscription: ${subscription.id}`);
+              await addProratedBalanceToNextInvoice(subscription.customer as string, subscription.id);
+              fixedCount++;
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`[PRORATION_FIX] Error processing subscription ${subscription.id}:`, error);
+      }
+    }
+    
+    console.log(`[PRORATION_FIX] Completed! Fixed ${fixedCount} prorated subscriptions.`);
+    return fixedCount;
+    
+  } catch (error) {
+    console.error('[PRORATION_FIX] Failed to fix prorated subscriptions:', error);
+    throw error;
+  }
 }
