@@ -1,6 +1,7 @@
 import { json } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
 import Card from "~/components/ui/Card";
+import Tooltip from "~/components/ui/Tooltip";
 import { createClient } from "@supabase/supabase-js";
 import type { LoaderFunction } from "@remix-run/node";
 import { parse } from "cookie";
@@ -14,6 +15,7 @@ type ComplianceClient = {
   id: string;
   name: string;
   workoutCompliance: number;
+  restDayCompliance: number;
   mealCompliance: number;
   supplementCompliance: number;
   overallCompliance: number;
@@ -53,10 +55,6 @@ export const loader: LoaderFunction = async ({ request }) => {
       /* ignore */
     }
   }
-  // Check cache (per coach)
-  if (coachId && complianceClientsCache[coachId] && complianceClientsCache[coachId].expires > Date.now()) {
-    return json({ complianceClients: complianceClientsCache[coachId].data });
-  }
   const complianceClients: ComplianceClient[] = [];
   if (authId) {
     const supabase = createClient<Database>(
@@ -72,6 +70,16 @@ export const loader: LoaderFunction = async ({ request }) => {
     if (user) {
       coachId = user.role === "coach" ? user.id : user.coach_id;
     }
+    
+    // Check for cache invalidation parameter
+    const url = new URL(request.url);
+    const invalidateCache = url.searchParams.get('invalidateCache') === '1';
+    
+    // Check cache (per coach) - skip if invalidating
+    if (!invalidateCache && coachId && complianceClientsCache[coachId] && complianceClientsCache[coachId].expires > Date.now()) {
+      return json({ complianceClients: complianceClientsCache[coachId].data });
+    }
+    
     if (coachId) {
       // Get all clients for this coach
       const { data: clients } = await supabase
@@ -129,7 +137,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .lt("completed_at", nowISO),
           supabase
             .from("workout_days")
-            .select("workout_plan_id, is_rest")
+            .select("workout_plan_id, day_of_week, is_rest")
             .in("workout_plan_id", (workoutPlansRaw.data ?? []).map((p: any) => p.id)),
           supabase
             .from("meals")
@@ -183,6 +191,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         complianceClients.push(...clients.map((client) => {
           // Calculate expected activities for this client
           let expectedWorkoutDays = 0;
+          let expectedRestDays = 0;
           let expectedMeals = 0;
           let expectedSupplements = 0;
           // Expected workouts (only actual workout days, not rest days)
@@ -190,6 +199,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           if (plan && workoutDaysByPlan[plan.id]) {
             const workoutDays = workoutDaysByPlan[plan.id] || [];
             expectedWorkoutDays = workoutDays.filter((day: any) => !day.is_rest).length;
+            expectedRestDays = workoutDays.filter((day: any) => day.is_rest).length;
           }
           // Expected meals (7 days worth)
           const mealPlan = mealPlanByUser[client.id];
@@ -213,8 +223,30 @@ export const loader: LoaderFunction = async ({ request }) => {
           // Expected supplements (7 days worth)
           const supplements = supplementsByUser[client.id] || [];
           expectedSupplements = supplements.length * 7;
-          // Completions
-          const completedWorkouts = (workoutCompletionsByUser[client.id] || []).length;
+          // Completions - filter out completions on rest days
+          const clientWorkoutCompletions = workoutCompletionsByUser[client.id] || [];
+          const completedWorkouts = clientWorkoutCompletions.filter((completion: any) => {
+            const completionDate = new Date(completion.completed_at);
+            const dayOfWeek = completionDate.toLocaleDateString('en-US', { weekday: 'long' }); // Get day name like "Wednesday"
+            const plan = workoutPlanByUser[client.id];
+            if (plan && workoutDaysByPlan[plan.id]) {
+              const workoutDay = workoutDaysByPlan[plan.id].find((day: any) => day.day_of_week === dayOfWeek);
+              return workoutDay && !workoutDay.is_rest;
+            }
+            return false;
+          }).length;
+          
+          // Calculate rest day completions
+          const completedRestDays = clientWorkoutCompletions.filter((completion: any) => {
+            const completionDate = new Date(completion.completed_at);
+            const dayOfWeek = completionDate.toLocaleDateString('en-US', { weekday: 'long' }); // Get day name like "Wednesday"
+            const plan = workoutPlanByUser[client.id];
+            if (plan && workoutDaysByPlan[plan.id]) {
+              const workoutDay = workoutDaysByPlan[plan.id].find((day: any) => day.day_of_week === dayOfWeek);
+              return workoutDay && workoutDay.is_rest;
+            }
+            return false;
+          }).length;
           
           // Calculate completed meals by grouping A/B options
           let completedMeals = 0;
@@ -261,16 +293,20 @@ export const loader: LoaderFunction = async ({ request }) => {
           const workoutCompliance = expectedWorkoutDays > 0
             ? Math.round((completedWorkouts / expectedWorkoutDays) * 100)
             : 0;
+          const restDayCompliance = expectedRestDays > 0
+            ? Math.round((completedRestDays / expectedRestDays) * 100)
+            : 0;
           const mealCompliance = expectedMeals > 0 ? Math.round((completedMeals / expectedMeals) * 100) : 0;
           const supplementCompliance = expectedSupplements > 0 ? Math.round((completedSupplements / expectedSupplements) * 100) : 0;
           // Calculate overall compliance
-          const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
-          const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
+          const totalCompleted = completedWorkouts + completedRestDays + completedMeals + completedSupplements;
+          const totalExpected = expectedWorkoutDays + expectedRestDays + expectedMeals + expectedSupplements;
           const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
           return {
             id: client.id,
             name: client.name,
             workoutCompliance,
+            restDayCompliance,
             mealCompliance,
             supplementCompliance,
             overallCompliance,
@@ -314,15 +350,27 @@ function getComplianceColor(percentage: number): string {
 // Component for individual compliance bar
 function ComplianceBar({ 
   label, 
-  percentage
+  percentage,
+  tooltip
 }: { 
   label: string; 
   percentage: number;
+  tooltip?: string;
 }) {
+  const labelElement = (
+    <span className="text-xs text-gray-600 dark:text-gray-400 truncate">{label}</span>
+  );
+  
   return (
     <div className="flex items-center gap-2 min-w-0">
       <div className="flex items-center gap-1 min-w-0">
-        <span className="text-xs text-gray-600 dark:text-gray-400 truncate">{label}</span>
+        {tooltip ? (
+          <Tooltip content={tooltip}>
+            {labelElement}
+          </Tooltip>
+        ) : (
+          labelElement
+        )}
       </div>
       <div className="flex items-center gap-1">
         <div className="w-16 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -397,10 +445,16 @@ export default function ComplianceClients() {
                   </svg>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <ComplianceBar
                     label="Workouts"
                     percentage={client.workoutCompliance}
+                  />
+                  
+                  <ComplianceBar
+                    label="Rest Days"
+                    percentage={client.restDayCompliance}
+                    tooltip="Rest day compliance tracks when clients complete their scheduled rest days. This is separate from workout compliance but contributes to overall adherence."
                   />
                   
                   <ComplianceBar

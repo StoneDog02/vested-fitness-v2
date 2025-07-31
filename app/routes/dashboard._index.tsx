@@ -2,6 +2,7 @@ import { json, redirect , createCookie } from "@remix-run/node";
 import { useLoaderData, useMatches, Link, useRevalidator, useFetcher } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
+import Tooltip from "~/components/ui/Tooltip";
 import type { DailyWorkout, WorkoutType, Exercise } from "~/types/workout";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
@@ -80,6 +81,7 @@ type ClientDashboardData = {
   workouts: DailyWorkout[];
   supplements: Supplement[];
   workoutCompliance: number;
+  restDayCompliance: number;
   mealCompliance: number;
   supplementCompliance: number;
   weightChange: number;
@@ -322,6 +324,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       // Parallelize all independent queries
       const [
         workoutCompletionsResult,
+        weeklyWorkoutCompletionsResult,
         activePlansResult,
         workoutPlansResult,
         supplementsResult,
@@ -332,6 +335,12 @@ export const loader: LoaderFunction = async ({ request }) => {
           .select("completed_at, completed_groups")
           .eq("user_id", user.id)
           .gte("completed_at", todayStr)
+          .lt("completed_at", tomorrowStr),
+        supabase
+          .from("workout_completions")
+          .select("completed_at")
+          .eq("user_id", user.id)
+          .gte("completed_at", today.subtract(7, "day").format("YYYY-MM-DD"))
           .lt("completed_at", tomorrowStr),
         supabase
           .from("workout_plans")
@@ -468,9 +477,58 @@ export const loader: LoaderFunction = async ({ request }) => {
       }));
 
       // Compliance calculations
-      const workoutCompliance = workoutCompletionsResult.data && activePlansResult.data && activePlansResult.data.length > 0
-        ? Math.round((workoutCompletionsResult.data.length / 7) * 100)
-        : 0;
+      let workoutCompliance = 0;
+      if (weeklyWorkoutCompletionsResult.data && activePlansResult.data && activePlansResult.data.length > 0) {
+        // Get the active workout plan to count expected workout days (excluding rest days)
+        const activePlan = activePlansResult.data[0];
+        const { data: workoutDays } = await supabase
+          .from("workout_days")
+          .select("day_of_week, is_rest")
+          .eq("workout_plan_id", activePlan.id);
+        
+        if (workoutDays) {
+          const expectedWorkoutDays = workoutDays.filter(day => !day.is_rest).length;
+          
+          // Filter out completions that occurred on rest days
+          const validCompletions = weeklyWorkoutCompletionsResult.data.filter(completion => {
+            const completionDate = dayjs(completion.completed_at);
+            const dayOfWeek = completionDate.format('dddd'); // Get day name like "Wednesday"
+            const workoutDay = workoutDays.find(day => day.day_of_week === dayOfWeek);
+            return workoutDay && !workoutDay.is_rest;
+          });
+          
+          workoutCompliance = expectedWorkoutDays > 0 
+            ? Math.round((validCompletions.length / expectedWorkoutDays) * 100)
+            : 0;
+        }
+      }
+      
+      // Calculate rest day compliance
+      let restDayCompliance = 0;
+      if (weeklyWorkoutCompletionsResult.data && activePlansResult.data && activePlansResult.data.length > 0) {
+        const activePlan = activePlansResult.data[0];
+        const { data: workoutDays } = await supabase
+          .from("workout_days")
+          .select("day_of_week, is_rest")
+          .eq("workout_plan_id", activePlan.id);
+        
+        if (workoutDays) {
+          const expectedRestDays = workoutDays.filter(day => day.is_rest).length;
+          
+          // Filter completions that occurred on rest days
+          const restDayCompletions = weeklyWorkoutCompletionsResult.data.filter(completion => {
+            const completionDate = dayjs(completion.completed_at);
+            const dayOfWeek = completionDate.format('dddd'); // Get day name like "Wednesday"
+            const workoutDay = workoutDays.find(day => day.day_of_week === dayOfWeek);
+            return workoutDay && workoutDay.is_rest;
+          });
+          
+          restDayCompliance = expectedRestDays > 0 
+            ? Math.round((restDayCompletions.length / expectedRestDays) * 100)
+            : 0;
+        }
+      }
+      
       const mealCompliance = workoutCompletionsResult.data && todaysMeals.length > 0
         ? Math.round((workoutCompletionsResult.data.length / todaysMeals.length) * 100)
         : 0;
@@ -484,6 +542,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         workouts,
         supplements,
         workoutCompliance,
+        restDayCompliance,
         mealCompliance,
         supplementCompliance,
         weightChange,
@@ -556,7 +615,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .lt("completed_at", nowISO),
           supabase
             .from("workout_days")
-            .select("workout_plan_id, is_rest")
+            .select("workout_plan_id, day_of_week, is_rest")
             .in("workout_plan_id", (workoutPlansRaw.data ?? []).map((p: any) => p.id)),
           supabase
             .from("meals")
@@ -627,8 +686,18 @@ export const loader: LoaderFunction = async ({ request }) => {
           // Expected supplements (7 days worth)
           const supplements = supplementsByUser[clientId] || [];
           const expectedSupplements = supplements.length * 7;
-          // Completions
-          const completedWorkouts = (workoutCompletionsByUser[clientId] || []).length;
+          // Completions - filter out completions on rest days
+          const clientWorkoutCompletions = workoutCompletionsByUser[clientId] || [];
+          const completedWorkouts = clientWorkoutCompletions.filter((completion: any) => {
+            const completionDate = new Date(completion.completed_at);
+            const dayOfWeek = completionDate.toLocaleDateString('en-US', { weekday: 'long' }); // Get day name like "Wednesday"
+            const plan = workoutPlanByUser[clientId];
+            if (plan && workoutDaysByPlan[plan.id]) {
+              const workoutDay = workoutDaysByPlan[plan.id].find((day: any) => day.day_of_week === dayOfWeek);
+              return workoutDay && !workoutDay.is_rest;
+            }
+            return false;
+          }).length;
           const completedMeals = (mealCompletionsByUser[clientId] || []).length;
           const completedSupplements = (supplementCompletionsByUser[clientId] || []).length;
           // Calculate compliance without counting rest days as completed
@@ -954,8 +1023,15 @@ export default function Dashboard() {
 
             <Link to="/dashboard/clients/compliance" className="group" prefetch="intent">
               <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
-                <h3 className="font-semibold text-lg mb-2">
-                  Client Compliance
+                <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
+                  <Tooltip content="Overall client compliance shows workout adherence only. Rest day compliance, meals, and supplements are tracked separately. Click to see detailed breakdown of all compliance metrics.">
+                    <span className="flex items-center gap-1">
+                      Client Compliance
+                      <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                      </svg>
+                    </span>
+                  </Tooltip>
                 </h3>
                 <p className="text-4xl font-bold">{compliance}%</p>
                 <p
@@ -1080,12 +1156,22 @@ export default function Dashboard() {
           {/* Commitment banner moved to settings pages */}
 
           {/* Client Metrics Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-2">Workout Compliance</h3>
               <p className="text-4xl font-bold">
                 {typeof clientData?.workoutCompliance === "number" && !isNaN(clientData.workoutCompliance)
                   ? `${clientData.workoutCompliance}%`
+                  : "-%"}
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
+            </Card>
+
+            <Card className="p-6">
+              <h3 className="font-semibold text-lg mb-2">Rest Day Compliance</h3>
+              <p className="text-4xl font-bold text-blue-600">
+                {typeof clientData?.restDayCompliance === "number" && !isNaN(clientData.restDayCompliance)
+                  ? `${clientData.restDayCompliance}%`
                   : "-%"}
               </p>
               <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
