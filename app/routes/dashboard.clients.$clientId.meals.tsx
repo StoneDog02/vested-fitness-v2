@@ -893,6 +893,25 @@ export default function ClientMeals() {
     }
   }, [initialComplianceData]);
 
+  // Listen for meal completion events to refresh compliance data
+  useEffect(() => {
+    const handleMealCompleted = () => {
+      if (client?.id) {
+        const params = new URLSearchParams();
+        const weekStartDate = currentWeekStart ? currentWeekStart.split('T')[0] : '';
+        params.set("weekStart", weekStartDate);
+        params.set("clientId", client.id);
+        params.set("_t", Date.now().toString());
+        complianceFetcher.load(`/api/get-meal-compliance-week?${params.toString()}`);
+      }
+    };
+
+    window.addEventListener("meals:completed", handleMealCompleted);
+    return () => {
+      window.removeEventListener("meals:completed", handleMealCompleted);
+    };
+  }, [client?.id, currentWeekStart, complianceFetcher]);
+
   // Bright color scaling from theme green to red with smooth transitions
   function getBarColor(percent: number) {
     const percentage = percent * 100; // Convert to percentage

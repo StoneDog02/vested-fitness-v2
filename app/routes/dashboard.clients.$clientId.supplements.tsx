@@ -365,6 +365,25 @@ export default function ClientSupplements() {
     setCurrentWeekStart(weekStart);
   }, [initialComplianceData, weekStart]);
 
+  // Listen for supplement completion events to refresh compliance data
+  useEffect(() => {
+    const handleSupplementCompleted = () => {
+      if (client?.id) {
+        const params = new URLSearchParams();
+        const weekStartDate = currentWeekStart ? currentWeekStart.split('T')[0] : '';
+        params.set("weekStart", weekStartDate);
+        params.set("clientId", client.id);
+        params.set("_t", Date.now().toString());
+        complianceFetcher.load(`/api/get-supplement-compliance-week?${params.toString()}`);
+      }
+    };
+
+    window.addEventListener("supplements:completed", handleSupplementCompleted);
+    return () => {
+      window.removeEventListener("supplements:completed", handleSupplementCompleted);
+    };
+  }, [client?.id, currentWeekStart, complianceFetcher]);
+
   // Week navigation state - use consistent week start calculation
   const calendarStart = currentWeekStart
     ? dayjs.tz(currentWeekStart, USER_TIMEZONE).startOf("day").toDate()

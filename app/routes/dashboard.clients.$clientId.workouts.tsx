@@ -1059,6 +1059,25 @@ export default function ClientWorkouts() {
     setCurrentWeekStart(weekStart);
   }, [initialComplianceData, weekStart]);
 
+  // Listen for workout completion events to refresh compliance data
+  useEffect(() => {
+    const handleWorkoutCompleted = () => {
+      if (client?.id) {
+        const params = new URLSearchParams();
+        const weekStartDate = currentWeekStart ? currentWeekStart.split('T')[0] : '';
+        params.set("weekStart", weekStartDate);
+        params.set("clientId", client.id);
+        params.set("_t", Date.now().toString());
+        complianceFetcher.load(`/api/get-compliance-week?${params.toString()}`);
+      }
+    };
+
+    window.addEventListener("workouts:completed", handleWorkoutCompleted);
+    return () => {
+      window.removeEventListener("workouts:completed", handleWorkoutCompleted);
+    };
+  }, [client?.id, currentWeekStart, complianceFetcher]);
+
   // Infinite scroll for history modal
   useEffect(() => {
     if (!isHistoryModalOpen) return;
