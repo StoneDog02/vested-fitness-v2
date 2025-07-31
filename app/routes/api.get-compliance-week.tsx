@@ -38,13 +38,14 @@ export const loader = async ({ request }: { request: Request }) => {
   // Fetch workout completions for this client for the week
   const { data: completions } = await supabase
     .from("workout_completions")
-    .select("completed_at")
+    .select("completed_at, completed_groups")
     .eq("user_id", clientId)
     .gte("completed_at", weekStart.format("YYYY-MM-DD"))
     .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
 
   // Build complianceData: for each day, check if there's a completion
   const complianceData: number[] = [];
+  
   for (let i = 0; i < 7; i++) {
     const day = weekStart.add(i, "day");
     const dayStr = day.format("YYYY-MM-DD");
@@ -71,8 +72,13 @@ export const loader = async ({ request }: { request: Request }) => {
       continue;
     }
     
-    const hasCompletion = (completions || []).some((c: any) => c.completed_at === dayStr);
-    complianceData.push(hasCompletion ? 1 : 0);
+    // Check for workout completion (not rest day)
+    const hasWorkoutCompletion = (completions || []).some((c: any) => 
+      c.completed_at === dayStr && 
+      c.completed_groups && 
+      c.completed_groups.length > 0
+    );
+    complianceData.push(hasWorkoutCompletion ? 1 : 0);
   }
 
   return json({ complianceData, completions });

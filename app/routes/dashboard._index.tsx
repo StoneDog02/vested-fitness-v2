@@ -338,7 +338,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           .lt("completed_at", tomorrowStr),
         supabase
           .from("workout_completions")
-          .select("completed_at")
+          .select("completed_at, completed_groups")
           .eq("user_id", user.id)
           .gte("completed_at", today.subtract(7, "day").format("YYYY-MM-DD"))
           .lt("completed_at", tomorrowStr),
@@ -489,12 +489,9 @@ export const loader: LoaderFunction = async ({ request }) => {
         if (workoutDays) {
           const expectedWorkoutDays = workoutDays.filter(day => !day.is_rest).length;
           
-          // Filter out completions that occurred on rest days
+          // Filter completions that are actually workout completions (non-empty completed_groups)
           const validCompletions = weeklyWorkoutCompletionsResult.data.filter(completion => {
-            const completionDate = dayjs(completion.completed_at);
-            const dayOfWeek = completionDate.format('dddd'); // Get day name like "Wednesday"
-            const workoutDay = workoutDays.find(day => day.day_of_week === dayOfWeek);
-            return workoutDay && !workoutDay.is_rest;
+            return completion.completed_groups && completion.completed_groups.length > 0;
           });
           
           workoutCompliance = expectedWorkoutDays > 0 
@@ -515,12 +512,9 @@ export const loader: LoaderFunction = async ({ request }) => {
         if (workoutDays) {
           const expectedRestDays = workoutDays.filter(day => day.is_rest).length;
           
-          // Filter completions that occurred on rest days
+          // Filter completions that are actually rest day completions (empty completed_groups)
           const restDayCompletions = weeklyWorkoutCompletionsResult.data.filter(completion => {
-            const completionDate = dayjs(completion.completed_at);
-            const dayOfWeek = completionDate.format('dddd'); // Get day name like "Wednesday"
-            const workoutDay = workoutDays.find(day => day.day_of_week === dayOfWeek);
-            return workoutDay && workoutDay.is_rest;
+            return !completion.completed_groups || completion.completed_groups.length === 0;
           });
           
           restDayCompliance = expectedRestDays > 0 
@@ -597,7 +591,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         ] = await Promise.all([
           supabase
             .from("workout_completions")
-            .select("id, completed_at, user_id")
+            .select("id, completed_at, user_id, completed_groups")
             .in("user_id", activeClientIds)
             .gte("completed_at", weekAgoISO)
             .lt("completed_at", nowISO),
@@ -689,14 +683,8 @@ export const loader: LoaderFunction = async ({ request }) => {
           // Completions - filter out completions on rest days
           const clientWorkoutCompletions = workoutCompletionsByUser[clientId] || [];
           const completedWorkouts = clientWorkoutCompletions.filter((completion: any) => {
-            const completionDate = new Date(completion.completed_at);
-            const dayOfWeek = completionDate.toLocaleDateString('en-US', { weekday: 'long' }); // Get day name like "Wednesday"
-            const plan = workoutPlanByUser[clientId];
-            if (plan && workoutDaysByPlan[plan.id]) {
-              const workoutDay = workoutDaysByPlan[plan.id].find((day: any) => day.day_of_week === dayOfWeek);
-              return workoutDay && !workoutDay.is_rest;
-            }
-            return false;
+            // Filter completions that are actually workout completions (non-empty completed_groups)
+            return completion.completed_groups && completion.completed_groups.length > 0;
           }).length;
           const completedMeals = (mealCompletionsByUser[clientId] || []).length;
           const completedSupplements = (supplementCompletionsByUser[clientId] || []).length;

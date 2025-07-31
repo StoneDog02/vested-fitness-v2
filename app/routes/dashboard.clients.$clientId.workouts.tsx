@@ -236,7 +236,7 @@ export const loader = async ({
       .eq("user_id", coachId),
     supabase
       .from("workout_completions")
-      .select("completed_at")
+      .select("completed_at, completed_groups")
       .eq("user_id", client.id)
       .gte("completed_at", weekStart.toISOString().slice(0, 10))
       .lt("completed_at", weekEnd.toISOString().slice(0, 10)),
@@ -359,15 +359,19 @@ export const loader = async ({
   const libraryPlansTotal = libraryPlansCountRaw.count || 0;
   const libraryPlansHasMore = libraryPlansOffset + libraryPlans.length < libraryPlansTotal;
 
-  // Build complianceData: for each day, check if there's a completion
+  // Build complianceData: for each day, check if there's a workout completion (not rest day)
   const completions = completionsRaw?.data || [];
   const complianceData: number[] = [];
   for (let i = 0; i < 7; i++) {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
     const dayStr = day.toISOString().slice(0, 10);
-    const hasCompletion = completions.some((c: any) => c.completed_at === dayStr);
-    complianceData.push(hasCompletion ? 1 : 0);
+    const hasWorkoutCompletion = completions.some((c: any) => 
+      c.completed_at === dayStr && 
+      c.completed_groups && 
+      c.completed_groups.length > 0
+    );
+    complianceData.push(hasWorkoutCompletion ? 1 : 0);
   }
 
   const result = {
@@ -1036,6 +1040,8 @@ export default function ClientWorkouts() {
       const weekStartDate = currentWeekStart ? currentWeekStart.split('T')[0] : '';
       params.set("weekStart", weekStartDate);
       params.set("clientId", client.id);
+      // Add timestamp to force refresh and avoid caching
+      params.set("_t", Date.now().toString());
       complianceFetcher.load(`/api/get-compliance-week?${params.toString()}`);
     }
   }, [client?.id, currentWeekStart]);
@@ -1539,11 +1545,21 @@ export default function ClientWorkouts() {
                       // For flexible schedule plans, check if client has chosen rest for this day
                       // A rest day completion is indicated by a completion record with empty completed_groups
                       const dayStr = thisDate.format("YYYY-MM-DD");
+                      
+                      // First check if there's a workout completion (takes priority)
+                      const hasWorkoutCompletion = complianceFetcher.data?.completions?.some((c: any) => 
+                        c.completed_at === dayStr && 
+                        c.completed_groups && 
+                        c.completed_groups.length > 0
+                      );
+                      
+                      // Only mark as rest day if there's no workout completion and there's a rest day completion
                       const hasRestCompletion = complianceFetcher.data?.completions?.some((c: any) => 
                         c.completed_at === dayStr && 
                         (!c.completed_groups || c.completed_groups.length === 0)
                       );
-                      isRestDay = hasRestCompletion || false;
+                      
+                      isRestDay = !hasWorkoutCompletion && hasRestCompletion;
                     } else {
                       // For fixed schedule plans, use the predetermined rest days
                       isRestDay = !!activePlan.days[i].isRest;
@@ -1621,12 +1637,12 @@ export default function ClientWorkouts() {
                               <NABadge reason="Plan added today - compliance starts tomorrow" />
                           ) : isRestDay ? (
                             <span className="text-gray-600 dark:text-gray-400 font-medium">Rest</span>
-                          ) : isToday ? (
+                          ) : isToday && complianceData[i] === 0 ? (
                             <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                           ) : isFuture ? (
                             <span className="text-gray-500">Pending</span>
                           ) : isNoPlan ? (
-                            <NABadge reason="Plan hasn’t been created for client yet" />
+                            <NABadge reason="Plan hasn't been created for client yet" />
                           ) : (
                             `${percentage}%`
                           )}
@@ -1639,6 +1655,303 @@ export default function ClientWorkouts() {
             </Card>
           </div>
         </div>
+
+        {/* New Workout Templates Container */}
+        {sortedPlans.find((p) => p.isActive) && (
+          <div className="mt-6 space-y-6">
+            {(() => {
+              const activePlan = sortedPlans.find((p) => p.isActive);
+              if (!activePlan) return null;
+
+              // For flexible schedule, show rest day usage and workout templates together
+              if (activePlan.builderMode === 'day') {
+                return (
+                  <Card title="Workout Completions">
+                    <div className="space-y-4">
+                      {/* Rest Day Usage */}
+                      <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                            <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <h3 className="font-medium text-secondary dark:text-alabaster">Rest Day</h3>
+                            <p className="text-sm text-gray-dark dark:text-gray-light">Take time to recover and recharge</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                            {(() => {
+                              // Count rest day completions for this week
+                              const weekStart = dayjs(calendarStart).tz(USER_TIMEZONE).startOf("day");
+                              const weekEnd = weekStart.add(7, "day");
+                                                             const restDaysUsed = complianceFetcher.data?.completions?.filter((c: any) => {
+                                 const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
+                                 return completionDate.isAfter(weekStart) && 
+                                        completionDate.isBefore(weekEnd) && 
+                                        // Rest day detection: no completed groups
+                                        (!c.completed_groups || c.completed_groups.length === 0);
+                               }).length || 0;
+                              
+                              const restDaysAllowed = activePlan.workoutDaysPerWeek ? 7 - activePlan.workoutDaysPerWeek : 3;
+                              return `${restDaysUsed} of ${restDaysAllowed} used`;
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Workout Templates Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {(() => {
+                          // Extract unique workout templates for flexible schedule
+                          const templatesMap = new Map();
+                          activePlan.days.forEach((day, index) => {
+                            if (!day.isRest && day.workout) {
+                              const templateKey = day.workout.title || `Workout ${index + 1}`;
+                              if (!templatesMap.has(templateKey)) {
+                                templatesMap.set(templateKey, {
+                                  id: `template-${index}`,
+                                  name: templateKey,
+                                  dayLabel: day.workout.title.includes(' - ') ? 
+                                    day.workout.title.split(' - ')[1] : undefined,
+                                  groups: day.workout.exercises || [],
+                                });
+                              }
+                            }
+                          });
+                          const workoutTemplates = Array.from(templatesMap.values());
+
+                          // Check completion status for each template
+                          const weekStart = dayjs(calendarStart).tz(USER_TIMEZONE).startOf("day");
+                          const weekEnd = weekStart.add(7, "day");
+                          
+                          return workoutTemplates.map((template) => {
+                            // Check if this template was completed this week
+                            // For now, we'll show completion if any workout was completed this week
+                            // TODO: In the future, we could match specific template groups to completion groups
+                            const isCompleted = complianceFetcher.data?.completions?.some((c: any) => {
+                              const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
+                              return completionDate.isAfter(weekStart) && 
+                                     completionDate.isBefore(weekEnd) && 
+                                     c.completed_groups && 
+                                     c.completed_groups.length > 0;
+                            }) || false;
+                            
+                            // For debugging: only show completion for the first template to avoid confusion
+                            const isFirstTemplate = workoutTemplates.indexOf(template) === 0;
+                            const shouldShowCompleted = isCompleted && isFirstTemplate;
+
+                            return (
+                              <div
+                                key={template.id}
+                                className={`bg-white dark:bg-secondary-light/5 rounded-xl border-2 transition-all duration-200 p-4 ${
+                                  shouldShowCompleted
+                                    ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                    : "border-gray-200 dark:border-gray-700"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <h4 className="font-semibold text-secondary dark:text-alabaster">
+                                        {template.name}
+                                      </h4>
+                                      {template.dayLabel && (
+                                        <span className="px-2 py-1 text-xs font-medium bg-primary/10 text-primary rounded-full">
+                                          {template.dayLabel}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-sm text-gray-dark dark:text-gray-light">
+                                      {template.groups.reduce((total, group) => total + (group.exercises?.length || 0), 0)} exercises • {template.groups.length} groups
+                                    </p>
+                                  </div>
+                                  {shouldShowCompleted && (
+                                    <div className="flex-shrink-0">
+                                      <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                        </svg>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-dark dark:text-gray-light">
+                                  {shouldShowCompleted ? (
+                                    <span className="text-green-600 font-medium">Completed this week</span>
+                                  ) : (
+                                    <span className="text-gray-500">Not completed yet</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+
+                      {/* No templates message */}
+                      {(() => {
+                        const hasTemplates = activePlan.days.some(day => !day.isRest && day.workout);
+                        if (!hasTemplates) {
+                          return (
+                            <div className="text-center py-8 text-gray-dark dark:text-gray-light">
+                              <p>No workout templates found in the active plan.</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  </Card>
+                );
+              } else {
+                // For fixed schedule, show rest days and workout days as separate containers
+                const restDays = activePlan.days.filter(day => day.isRest);
+                const workoutDays = activePlan.days.filter(day => !day.isRest && day.workout);
+                const weekStart = dayjs(calendarStart).tz(USER_TIMEZONE).startOf("day");
+                const weekEnd = weekStart.add(7, "day");
+
+                return (
+                  <>
+                    {/* Rest Days Container */}
+                    {restDays.length > 0 && (
+                      <Card title="Rest Days">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {restDays.map((day, index) => {
+                                                         // Check if this rest day was completed this week
+                             const isCompleted = complianceFetcher.data?.completions?.some((c: any) => {
+                               const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
+                               return completionDate.isAfter(weekStart) && 
+                                      completionDate.isBefore(weekEnd) && 
+                                      // Rest day detection: no completed groups
+                                      (!c.completed_groups || c.completed_groups.length === 0);
+                             }) || false;
+
+                            return (
+                              <div
+                                key={`rest-${index}`}
+                                className={`bg-white dark:bg-secondary-light/5 rounded-xl border-2 transition-all duration-200 p-4 ${
+                                  isCompleted
+                                    ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                    : "border-gray-200 dark:border-gray-700"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <h4 className="font-semibold text-secondary dark:text-alabaster">
+                                        Rest Day
+                                      </h4>
+                                      <span className="px-2 py-1 text-xs font-medium bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 rounded-full">
+                                        {day.day}
+                                      </span>
+                                    </div>
+                                    <p className="text-sm text-gray-dark dark:text-gray-light">
+                                      Take time to recover and recharge
+                                    </p>
+                                  </div>
+                                  {isCompleted && (
+                                    <div className="flex-shrink-0">
+                                      <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                        </svg>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-dark dark:text-gray-light">
+                                  {isCompleted ? (
+                                    <span className="text-green-600 font-medium">Completed this week</span>
+                                  ) : (
+                                    <span className="text-gray-500">Not completed yet</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Workout Days Container */}
+                    {workoutDays.length > 0 && (
+                      <Card title="Workout Days">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {workoutDays.map((day, index) => {
+                                                         // Check if this workout was completed this week
+                             const isCompleted = complianceFetcher.data?.completions?.some((c: any) => {
+                               const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
+                               return completionDate.isAfter(weekStart) && 
+                                      completionDate.isBefore(weekEnd) && 
+                                      c.completed_groups && 
+                                      c.completed_groups.length > 0;
+                             }) || false;
+
+                            return (
+                              <div
+                                key={`workout-${index}`}
+                                className={`bg-white dark:bg-secondary-light/5 rounded-xl border-2 transition-all duration-200 p-4 ${
+                                  isCompleted
+                                    ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                    : "border-gray-200 dark:border-gray-700"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <h4 className="font-semibold text-secondary dark:text-alabaster">
+                                        {day.workout?.title || `${activePlan.title} - ${day.day}`}
+                                      </h4>
+                                      <span className="px-2 py-1 text-xs font-medium bg-primary/10 text-primary rounded-full">
+                                        {day.day}
+                                      </span>
+                                    </div>
+                                    <p className="text-sm text-gray-dark dark:text-gray-light">
+                                      {day.workout?.exercises?.reduce((total: number, group: any) => total + (group.exercises?.length || 0), 0) || 0} exercises • {day.workout?.exercises?.length || 0} groups
+                                    </p>
+                                  </div>
+                                  {isCompleted && (
+                                    <div className="flex-shrink-0">
+                                      <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                        </svg>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-dark dark:text-gray-light">
+                                  {isCompleted ? (
+                                    <span className="text-green-600 font-medium">Completed this week</span>
+                                  ) : (
+                                    <span className="text-gray-500">Not completed yet</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* No content message */}
+                    {restDays.length === 0 && workoutDays.length === 0 && (
+                      <Card title="Plan Overview">
+                        <div className="text-center py-8 text-gray-dark dark:text-gray-light">
+                          <p>No workout or rest days found in the active plan.</p>
+                        </div>
+                      </Card>
+                    )}
+                  </>
+                );
+              }
+            })()}
+          </div>
+        )}
+
         {viewWorkoutPlan && (
           <ViewWorkoutPlanModal
             isOpen={!!viewWorkoutPlan}
