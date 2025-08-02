@@ -54,7 +54,7 @@ export default function ViewMealPlanModal({
                   {meal.name}
                 </h3>
                 <span className="text-sm text-gray-dark dark:text-gray-light">
-                  {meal.time}
+                  {meal.time.includes(':') ? meal.time.slice(0, 5) : meal.time}
                 </span>
               </div>
 

@@ -544,7 +544,14 @@ export default function CreateMealPlanForm({
               <input
                 type="text"
                 id={`meal-time-${activeMealIndex}`}
-                value={formData.meals[activeMealIndex]?.time || ""}
+                value={(() => {
+                  const timeValue = formData.meals[activeMealIndex]?.time || "";
+                  // Format time to HH:mm if it's in HH:mm:ss format
+                  if (timeValue && timeValue.includes(':') && timeValue.split(':').length === 3) {
+                    return timeValue.slice(0, 5);
+                  }
+                  return timeValue;
+                })()}
                 onChange={(e) =>
                   updateMeal(activeMealIndex, "time", e.target.value)
                 }

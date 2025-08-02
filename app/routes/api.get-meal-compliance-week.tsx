@@ -83,8 +83,6 @@ export const loader = async ({ request }: { request: Request }) => {
     .gte("completed_at", weekStart.format("YYYY-MM-DD"))
     .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
 
-
-
   // For each day in the week, find the plan that was active on that day
   const complianceData: number[] = [];
   for (let i = 0; i < 7; i++) {
@@ -168,7 +166,9 @@ export const loader = async ({ request }: { request: Request }) => {
       const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
       const groupCompletions = (completionsRaw || []).filter((c: any) => {
         const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
-        return completedDateStr === dayStr && groupMealIds.has(c.meal_id);
+        const matches = completedDateStr === dayStr && groupMealIds.has(c.meal_id);
+        
+        return matches;
       });
       
       return groupCompletions.length > 0; // If any meal in the group was completed, the group is complete
@@ -179,5 +179,5 @@ export const loader = async ({ request }: { request: Request }) => {
     complianceData.push(percent);
   }
 
-  return json({ complianceData });
+  return json({ complianceData, completions: completionsRaw || [] });
 }; 

@@ -4,7 +4,13 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
-import { getCurrentTimestampISO } from "~/lib/timezone";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+import { USER_TIMEZONE } from "~/lib/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 export const action = async ({ request }: { request: Request }) => {
   if (request.method !== "POST") {
@@ -92,10 +98,13 @@ export const action = async ({ request }: { request: Request }) => {
       }
       
       if (!existing) {
+        // Convert the date parameter to the user's timezone and set to noon
+        const completionDate = dayjs(date).tz(USER_TIMEZONE).hour(12).minute(0).second(0).millisecond(0);
+        
         const { error: insertError } = await supabase.from("meal_completions").insert({
           user_id: user.id,
           meal_id: mealId,
-          completed_at: getCurrentTimestampISO(), // Use current timestamp instead of just date
+          completed_at: completionDate.toISOString(),
         });
         
         if (insertError) {

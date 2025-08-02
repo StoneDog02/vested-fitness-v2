@@ -666,6 +666,16 @@ export default function Meals() {
     window.dispatchEvent(new Event("meals:completed"));
   }, [isSubmitting, isDaySubmitted, checkedMeals, currentDateApi, getMealIdFromKey, currentDayMealPlan]);
 
+  // Re-fetch completion data after successful submission to ensure UI reflects server state
+  useEffect(() => {
+    if (submitFetcher.state === 'idle' && submitFetcher.data) {
+      // Submission was successful, re-fetch completion data for today
+      if (dayOffset === 0) {
+        fetchCompletedMealsForToday();
+      }
+    }
+  }, [submitFetcher.state, submitFetcher.data, dayOffset, fetchCompletedMealsForToday]);
+
   // Calculate the macros based on the food items - need to convert keys back to check against meal IDs with deduplication
   const completedMealIds = [...new Set(checkedMeals.map(getMealIdFromKey).filter(Boolean))] as string[];
   
@@ -950,7 +960,7 @@ export default function Meals() {
                         <span>Submitting...</span>
                       </>
                     ) : isDaySubmitted ? (
-                      "Already Submitted"
+                      "Meals Submitted"
                     ) : (
                       "Submit Completed Meals"
                     )}

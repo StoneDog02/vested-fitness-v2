@@ -831,7 +831,7 @@ export default function ClientMeals() {
   }>();
   const { mealPlans, libraryPlans: initialLibraryPlans, client, complianceData: initialComplianceData, mealPlansHasMore: loaderMealPlansHasMore } = loaderData;
   const fetcher = useFetcher();
-  const complianceFetcher = useFetcher<{ complianceData: number[] }>();
+  const complianceFetcher = useFetcher<{ complianceData: number[]; completions: any[] }>();
   const revalidator = useRevalidator();
   
   // State for library plans
@@ -1301,12 +1301,14 @@ export default function ClientMeals() {
                               <NABadge reason="Client was not signed up yet" />
                             ) : complianceValue === -1 ? (
                               <NABadge reason="Plan added today - compliance starts tomorrow" />
+                            ) : isToday && percentage > 0 ? (
+                              `${percentage}%`
                             ) : isToday ? (
                               <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                             ) : isFuture ? (
                               <span className="text-gray-500">Pending</span>
                             ) : isNoPlan ? (
-                              <NABadge reason="Plan hasn’t been created for client yet" />
+                              <NABadge reason="Plan hasn't been created for client yet" />
                             ) : (
                               `${percentage}%`
                             )}
@@ -1320,6 +1322,347 @@ export default function ClientMeals() {
             </div>
           </div>
         </div>
+
+        {/* Meals Completed Container */}
+        {sortedMealPlans.find((p) => p.isActive) && (
+          <div className="mt-6 space-y-6">
+            <Card title="Meals Completed">
+              <div className="space-y-4">
+                {/* Daily Meals Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {(() => {
+                    const activePlan = sortedMealPlans.find((p) => p.isActive);
+                    if (!activePlan) return null;
+
+                    // Get the current week's dates
+                    const weekStart = new Date(calendarStart);
+                    const weekEnd = new Date(weekStart);
+                    weekEnd.setDate(weekStart.getDate() + 7);
+
+                    // Get meal completions for this week
+                    const weekStartStr = weekStart.toISOString().split('T')[0];
+                    const weekEndStr = weekEnd.toISOString().split('T')[0];
+                    
+                    // Use the compliance fetcher data to get meal completions
+                    const mealCompletions = complianceFetcher.data?.completions || [];
+
+                    // Create a map of completed meals by date
+                    const completedMealsByDate: Record<string, string[]> = {};
+                    mealCompletions.forEach((completion: any) => {
+                      const dateKey = completion.completed_at.slice(0, 10); // Extract just the date part
+                      if (!completedMealsByDate[dateKey]) {
+                        completedMealsByDate[dateKey] = [];
+                      }
+                      if (completion.meal_id) {
+                        completedMealsByDate[dateKey].push(completion.meal_id);
+                      }
+                    });
+
+                    // Generate meals for each day of the week
+                    const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+                    
+                    return daysOfWeek.map((day, dayIndex) => {
+                      const currentDate = new Date(weekStart);
+                      currentDate.setDate(weekStart.getDate() + dayIndex);
+                      const dateStr = currentDate.toISOString().split('T')[0];
+                      
+                      // Get meals for this day from the active plan
+                      const dayMeals = activePlan.meals || [];
+                      
+                      // Check if this date is before signup
+                      const signupDate = client?.created_at ? new Date(client.created_at) : null;
+                      if (signupDate) signupDate.setHours(0, 0, 0, 0);
+                      const isBeforeSignup = signupDate && currentDate < signupDate;
+                      
+                      // Check if this date is in the future
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const isFuture = currentDate > today;
+                      
+                      // Check if there's a plan for this day
+                      const planForDay = mealPlans.find((p) => {
+                        const activated = p.activatedAt ? new Date(p.activatedAt) : null;
+                        const deactivated = p.deactivatedAt ? new Date(p.deactivatedAt) : null;
+                        const activatedStr = activated ? activated.toISOString().slice(0, 10) : null;
+                        return (
+                          activated && activatedStr && activatedStr <= dateStr && (!deactivated || deactivated > currentDate)
+                        );
+                      });
+                      const isNoPlan = !planForDay;
+
+                      // If no plan or before signup, show N/A
+                      if (isNoPlan || isBeforeSignup) {
+                        return (
+                          <div
+                            key={`${day}-${dayIndex}`}
+                            className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border-2 border-gray-200 dark:border-gray-700 p-4"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h4 className="font-semibold text-secondary dark:text-alabaster">
+                                    {day}
+                                  </h4>
+                                  <span className="px-2 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-full">
+                                    {currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-gray-dark dark:text-gray-light">
+                                  {isBeforeSignup ? "Client was not signed up yet" : "No meal plan for this day"}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-xs text-gray-dark dark:text-gray-light">
+                              <NABadge reason={isBeforeSignup ? "Client was not signed up yet" : "Plan hasn't been created for client yet"} />
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // If future date, show pending
+                      if (isFuture) {
+                        return (
+                          <div
+                            key={`${day}-${dayIndex}`}
+                            className="bg-white dark:bg-secondary-light/5 rounded-xl border-2 border-gray-200 dark:border-gray-700 p-4"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h4 className="font-semibold text-secondary dark:text-alabaster">
+                                    {day}
+                                  </h4>
+                                  <span className="px-2 py-1 text-xs font-medium bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-full">
+                                    {currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-gray-dark dark:text-gray-light">
+                                  {dayMeals.length} meals planned
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-xs text-gray-dark dark:text-gray-light">
+                              <span className="text-gray-500">Pending</span>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Show meals for this day
+                      const completedMeals = completedMealsByDate[dateStr] || [];
+                      
+                      // Group meals by name and time to handle A/B options
+                      const mealGroups = dayMeals.reduce((groups: Record<string, any[]>, meal: any) => {
+                        const key = `${meal.name}-${meal.time}`;
+                        if (!groups[key]) {
+                          groups[key] = [];
+                        }
+                        groups[key].push(meal);
+                        return groups;
+                      }, {});
+                      
+                      const totalMealGroups = Object.keys(mealGroups).length;
+                      const completedMealGroups = Object.values(mealGroups).filter(group => {
+                        const groupMealIds = group.map(m => m.id.toString());
+                        return groupMealIds.some(id => completedMeals.includes(id));
+                      }).length;
+                      
+                      const isCompleted = completedMealGroups === totalMealGroups && totalMealGroups > 0;
+
+                      return (
+                        <div
+                          key={`${day}-${dayIndex}`}
+                          className={`bg-white dark:bg-secondary-light/5 rounded-xl border-2 transition-all duration-200 p-4 ${
+                            isCompleted
+                              ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                              : "border-gray-200 dark:border-gray-700"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h4 className="font-semibold text-secondary dark:text-alabaster">
+                                  {day}
+                                </h4>
+                                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                  isCompleted 
+                                    ? "bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300"
+                                    : "bg-primary/10 text-primary"
+                                }`}>
+                                  {currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                </span>
+                              </div>
+                              <p className="text-sm text-gray-dark dark:text-gray-light">
+                                {totalMealGroups} meals planned
+                              </p>
+                            </div>
+                            {isCompleted && (
+                              <div className="flex-shrink-0">
+                                <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                  <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Meal Details */}
+                          <div className="space-y-2">
+                            {(() => {
+                              // Group meals by name and time to handle A/B options
+                              const mealGroups = dayMeals.reduce((groups: Record<string, any[]>, meal: any) => {
+                                const key = `${meal.name}-${meal.time}`;
+                                if (!groups[key]) {
+                                  groups[key] = [];
+                                }
+                                groups[key].push(meal);
+                                return groups;
+                              }, {});
+
+                              return Object.entries(mealGroups).map(([key, meals], groupIndex) => {
+                                const [mealName, mealTime] = key.split('-');
+                                
+                                // Format time to HH:mm
+                                const formatTime = (timeStr: string) => {
+                                  if (!timeStr) return '';
+                                  // If it's already in HH:mm format, return as is
+                                  if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+                                    return timeStr;
+                                  }
+                                  // If it's in HH:mm:ss format, remove seconds
+                                  if (/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) {
+                                    return timeStr.substring(0, 5);
+                                  }
+                                  // If it's a full timestamp, extract time
+                                  if (timeStr.includes('T') || timeStr.includes(' ')) {
+                                    const timeMatch = timeStr.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+                                    if (timeMatch) {
+                                      return `${timeMatch[1]}:${timeMatch[2]}`;
+                                    }
+                                  }
+                                  return timeStr;
+                                };
+
+                                const formattedTime = formatTime(mealTime);
+                                
+                                // Check completion status for each meal in the group
+                                const groupMealIds = meals.map(m => m.id.toString());
+                                const completedMealIds: string[] = groupMealIds.filter(id => completedMeals.includes(id));
+                                const isGroupCompleted = completedMealIds.length > 0;
+                                
+                                // If it's a single meal (no A/B), show simple completion
+                                if (meals.length === 1) {
+                                  const isCompleted = completedMealIds.includes(meals[0].id.toString());
+                                  return (
+                                    <div
+                                      key={`${key}-${groupIndex}`}
+                                      className={`flex items-center justify-between p-2 rounded-lg text-xs ${
+                                        isCompleted
+                                          ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200"
+                                          : "bg-gray-100 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300"
+                                      }`}
+                                    >
+                                      <div className="flex-1">
+                                        <div className="font-medium">{mealName}</div>
+                                        <div className="text-xs opacity-75">{formattedTime}</div>
+                                      </div>
+                                      <div className="flex-shrink-0">
+                                        {isCompleted ? (
+                                          <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                            </svg>
+                                          </div>
+                                        ) : (
+                                          <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                                
+                                // For A/B meals, show detailed completion information
+                                const completedMealsInGroup: any[] = meals.filter(meal => 
+                                  completedMealIds.includes(meal.id.toString())
+                                );
+                                
+                                return (
+                                  <div
+                                    key={`${key}-${groupIndex}`}
+                                    className={`flex items-center justify-between p-2 rounded-lg text-xs ${
+                                      isGroupCompleted
+                                        ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200"
+                                        : "bg-gray-100 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300"
+                                    }`}
+                                  >
+                                    <div className="flex-1">
+                                      <div className="font-medium">{mealName}</div>
+                                      <div className="text-xs opacity-75">
+                                        {formattedTime}
+                                        <span className="ml-1 text-xs bg-white/20 dark:bg-black/20 px-1.5 py-0.5 rounded">
+                                          A/B
+                                        </span>
+                                      </div>
+                                      {isGroupCompleted && completedMealsInGroup.length > 0 && (
+                                        <div className="text-xs mt-1 font-medium">
+                                          {completedMealsInGroup.length === 1 ? (
+                                            <span className="text-green-700 dark:text-green-300">
+                                              Completed: Option {completedMealsInGroup[0].mealOption}
+                                            </span>
+                                          ) : (
+                                            <span className="text-green-700 dark:text-green-300">
+                                              Completed: {completedMealsInGroup.length} options
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex-shrink-0 flex items-center gap-1">
+                                      {isGroupCompleted ? (
+                                        <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                                          <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                          </svg>
+                                        </div>
+                                      ) : (
+                                        <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              });
+                            })()}
+                          </div>
+                          
+                          <div className="text-xs text-gray-dark dark:text-gray-light mt-3">
+                            {isCompleted ? (
+                              <span className="text-green-600 font-medium">All meals completed</span>
+                            ) : totalMealGroups > 0 ? (
+                              <span className="text-gray-500">
+                                {completedMealGroups} of {totalMealGroups} meals completed
+                              </span>
+                            ) : (
+                              <span className="text-gray-500">No meals planned</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+
+                {/* No active plan message */}
+                {(!sortedMealPlans.find((p) => p.isActive)) && (
+                  <div className="text-center py-8 text-gray-dark dark:text-gray-light">
+                    <p>No active meal plan found.</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
+
         {/* Placeholder modals */}
         <CreateMealPlanModal
           isOpen={isCreateModalOpen}

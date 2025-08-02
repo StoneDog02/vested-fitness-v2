@@ -159,7 +159,7 @@ export default function MealOptionsCard({
                       d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
-                  {currentMeal.time}
+                  {currentMeal.time.includes(':') ? currentMeal.time.slice(0, 5) : currentMeal.time}
                 </div>
               </div>
               <div className="flex items-center gap-2 sm:gap-3">
