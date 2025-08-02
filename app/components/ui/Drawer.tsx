@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 interface DrawerProps {
@@ -15,6 +15,12 @@ export default function Drawer({
   children,
 }: DrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Ensure we're on the client side
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Handle ESC key press
   useEffect(() => {
@@ -34,6 +40,11 @@ export default function Drawer({
       document.body.style.overflow = ""; // Re-enable scrolling when drawer is closed
     };
   }, [isOpen, onClose]);
+
+  // Don't render anything on the server
+  if (!mounted) {
+    return null;
+  }
 
   return createPortal(
     <>
