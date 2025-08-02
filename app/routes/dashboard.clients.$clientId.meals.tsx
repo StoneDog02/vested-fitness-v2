@@ -19,6 +19,7 @@ import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import NABadge from "../components/ui/NABadge";
 import ActivationDateModal from "~/components/coach/ActivationDateModal";
+import { extractAuthFromCookie, validateAndRefreshToken } from "~/lib/supabase";
 
 // Helper function to truncate meal plan descriptions
 const truncateDescription = (description: string, maxLength: number = 50) => {
@@ -104,35 +105,51 @@ export const loader = async ({
 
   // Get coachId from auth cookie
   const cookies = parse(request.headers.get("cookie") || "");
-  const supabaseAuthCookieKey = Object.keys(cookies).find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-  let accessToken;
-  if (supabaseAuthCookieKey) {
-    try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
-    } catch (e) {
-      accessToken = undefined;
-    }
-  }
-  let coachId = null;
+  const { accessToken, refreshToken } = extractAuthFromCookie(cookies);
+  
   let authId: string | undefined;
-  if (accessToken) {
-    try {
-      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      authId =
-        decoded && typeof decoded === "object" && "sub" in decoded
-          ? (decoded.sub as string)
-          : undefined;
-    } catch (e) {
-      /* ignore */
+  let needsTokenRefresh = false;
+  let newTokens: { accessToken: string; refreshToken: string } | null = null;
+  
+  if (accessToken && refreshToken) {
+    // Validate and potentially refresh the token
+    const validation = await validateAndRefreshToken(accessToken, refreshToken);
+    
+    if (validation.valid) {
+      if (validation.newAccessToken && validation.newRefreshToken) {
+        // Token was refreshed, we need to update the cookie
+        needsTokenRefresh = true;
+        newTokens = {
+          accessToken: validation.newAccessToken,
+          refreshToken: validation.newRefreshToken
+        };
+        
+        // Extract authId from new token
+        try {
+          const decoded = jwt.decode(validation.newAccessToken) as Record<string, unknown> | null;
+          authId = decoded && typeof decoded === "object" && "sub" in decoded
+            ? (decoded.sub as string)
+            : undefined;
+        } catch (e) {
+          console.error("Failed to decode refreshed token:", e);
+        }
+      } else {
+        // Token is still valid, extract authId
+        try {
+          const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+          authId = decoded && typeof decoded === "object" && "sub" in decoded
+            ? (decoded.sub as string)
+            : undefined;
+        } catch (e) {
+          console.error("Failed to decode access token:", e);
+        }
+      }
+    } else {
+      console.error("Token validation failed:", validation.reason);
     }
   }
+  
+  let coachId = null;
   if (authId) {
     const { data: user } = await supabase
       .from("users")
@@ -339,35 +356,51 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   // Get coachId from auth cookie
   const cookies = parse(request.headers.get("cookie") || "");
-  const supabaseAuthCookieKey = Object.keys(cookies).find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-  let accessToken;
-  if (supabaseAuthCookieKey) {
-    try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
-    } catch (e) {
-      accessToken = undefined;
-    }
-  }
-  let coachId = null;
+  const { accessToken, refreshToken } = extractAuthFromCookie(cookies);
+  
   let authId: string | undefined;
-  if (accessToken) {
-    try {
-      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      authId =
-        decoded && typeof decoded === "object" && "sub" in decoded
-          ? (decoded.sub as string)
-          : undefined;
-    } catch (e) {
-      /* ignore */
+  let needsTokenRefresh = false;
+  let newTokens: { accessToken: string; refreshToken: string } | null = null;
+  
+  if (accessToken && refreshToken) {
+    // Validate and potentially refresh the token
+    const validation = await validateAndRefreshToken(accessToken, refreshToken);
+    
+    if (validation.valid) {
+      if (validation.newAccessToken && validation.newRefreshToken) {
+        // Token was refreshed, we need to update the cookie
+        needsTokenRefresh = true;
+        newTokens = {
+          accessToken: validation.newAccessToken,
+          refreshToken: validation.newRefreshToken
+        };
+        
+        // Extract authId from new token
+        try {
+          const decoded = jwt.decode(validation.newAccessToken) as Record<string, unknown> | null;
+          authId = decoded && typeof decoded === "object" && "sub" in decoded
+            ? (decoded.sub as string)
+            : undefined;
+        } catch (e) {
+          console.error("Failed to decode refreshed token:", e);
+        }
+      } else {
+        // Token is still valid, extract authId
+        try {
+          const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+          authId = decoded && typeof decoded === "object" && "sub" in decoded
+            ? (decoded.sub as string)
+            : undefined;
+        } catch (e) {
+          console.error("Failed to decode access token:", e);
+        }
+      }
+    } else {
+      console.error("Token validation failed:", validation.reason);
     }
   }
+  
+  let coachId = null;
   if (authId) {
     const { data: user } = await supabase
       .from("users")
@@ -898,7 +931,7 @@ export default function ClientMeals() {
     const handleMealCompleted = () => {
       if (client?.id) {
         const params = new URLSearchParams();
-        const weekStartDate = currentWeekStart ? currentWeekStart.split('T')[0] : '';
+        const weekStartDate = calendarStart ? calendarStart.toISOString().split('T')[0] : '';
         params.set("weekStart", weekStartDate);
         params.set("clientId", client.id);
         params.set("_t", Date.now().toString());
@@ -910,7 +943,7 @@ export default function ClientMeals() {
     return () => {
       window.removeEventListener("meals:completed", handleMealCompleted);
     };
-  }, [client?.id, currentWeekStart, complianceFetcher]);
+  }, [client?.id, calendarStart, complianceFetcher]);
 
   // Bright color scaling from theme green to red with smooth transitions
   function getBarColor(percent: number) {
