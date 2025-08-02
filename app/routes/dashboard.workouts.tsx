@@ -877,12 +877,12 @@ export default function Workouts() {
   const safeComplianceData = Array.isArray(complianceData) ? complianceData : [];
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="space-y-8 animate-fade-in">
       {/* Success Message */}
       {showSuccess && (
-        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-primary text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-fade-in">
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-gradient-to-r from-success-500 to-success-600 text-white px-6 py-3 rounded-2xl shadow-large flex items-center gap-3 animate-fade-in">
           <svg
-            className="w-5 h-5"
+            className="w-6 h-6"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -894,26 +894,36 @@ export default function Workouts() {
               d="M5 13l4 4L19 7"
             />
           </svg>
-          <span>Workout Submitted Successfully</span>
+          <span className="font-semibold">Workout Submitted Successfully!</span>
         </div>
       )}
 
-      <h1 className="text-xl sm:text-3xl font-bold mb-4 sm:mb-6">
-        {dayOffset === 0 ? "Today's Workout" : 
-         dayOffset === 1 ? "Tomorrow's Workout" : 
-         dayOffset === -1 ? "Yesterday's Workout" : 
-         `${dateDisplay.weekday}'s Workout`}
-      </h1>
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center shadow-soft">
+          <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="text-3xl sm:text-4xl font-bold text-gradient mb-2">
+            {dayOffset === 0 ? "Today's Workout" : 
+             dayOffset === 1 ? "Tomorrow's Workout" : 
+             dayOffset === -1 ? "Yesterday's Workout" : 
+             `${dateDisplay.weekday}'s Workout`}
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">Track your progress and complete your daily routine</p>
+        </div>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         <div className="md:col-span-2">
-          <Card className="mb-4 sm:mb-6">
+          <Card variant="elevated" className="mb-6">
             <div className="flex justify-between items-center mb-4 sm:mb-6">
               <button
                 onClick={() => setDayOffset(dayOffset - 1)}
-                className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1"
+                className="text-primary hover:text-primary-dark transition-all duration-200 flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-primary/10 hover:scale-105"
               >
                 <svg
-                  className="w-4 h-4"
+                  className="w-5 h-5"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -925,7 +935,7 @@ export default function Workouts() {
                     d="M15 19l-7-7 7-7"
                   />
                 </svg>
-                Previous
+                <span className="font-medium">Previous</span>
               </button>
               <div className="text-center">
                 <h2 className="text-xl font-semibold text-secondary dark:text-alabaster">
@@ -945,11 +955,11 @@ export default function Workouts() {
               </div>
               <button
                 onClick={() => setDayOffset(dayOffset + 1)}
-                className="text-primary hover:text-primary-dark transition-colors duration-200 flex items-center gap-1"
+                className="text-primary hover:text-primary-dark transition-all duration-200 flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-primary/10 hover:scale-105"
               >
-                Next
+                <span className="font-medium">Next</span>
                 <svg
-                  className="w-4 h-4"
+                  className="w-5 h-5"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -1472,7 +1482,7 @@ export default function Workouts() {
           </Card>
 
           {/* Workout Compliance Calendar */}
-          <Card title="Workout Compliance">
+          <Card variant="elevated" title="Workout Compliance">
             <div className="flex justify-between items-center mb-4">
               <span className="text-sm font-medium">This Week</span>
               <div className="text-xs text-gray-500">

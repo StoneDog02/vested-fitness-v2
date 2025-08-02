@@ -73,7 +73,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   
   const { data: userData } = await supabase
     .from("users")
-    .select("id, name, email, role, avatar_url, font_size, access_status, stripe_customer_id, chat_bubble_color")
+    .select("id, name, email, role, avatar_url, font_size, access_status, stripe_customer_id, chat_bubble_color, starting_weight, current_weight, created_at, coach_id")
     .eq("auth_id", authId)
     .single();
     

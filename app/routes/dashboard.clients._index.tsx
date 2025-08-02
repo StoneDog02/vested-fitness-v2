@@ -1,5 +1,6 @@
 import type { MetaFunction , LoaderFunction } from "@remix-run/node";
 import Button from "~/components/ui/Button";
+import Card from "~/components/ui/Card";
 import ClientInviteModal from "~/components/coach/ClientInviteModal";
 import { useState, useEffect } from "react";
 import { json } from "@remix-run/node";
@@ -249,7 +250,7 @@ export default function ClientsIndex() {
           </div>
           <input
             type="text"
-            className="block w-full pl-10 pr-3 py-2 border border-gray-light dark:border-davyGray rounded-md leading-5 bg-white dark:bg-night placeholder-gray dark:placeholder-gray-light focus:outline-none focus:ring-primary focus:border-primary sm:text-sm dark:text-alabaster"
+            className="block w-full pl-10 pr-3 py-3 border border-gray-200 dark:border-gray-600 rounded-2xl leading-5 bg-white dark:bg-gray-800 placeholder-gray dark:placeholder-gray-light focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-soft transition-all duration-300 hover:shadow-medium focus:shadow-medium"
             placeholder="Search clients..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -267,18 +268,21 @@ export default function ClientsIndex() {
             <Link
               key={client.id}
               to={`/dashboard/clients/${client.slug || client.id}`}
-              className="block hover:shadow-lg transition-all"
+              className="block"
               style={{ textDecoration: "none", color: "inherit" }}
             >
-              <div className="p-4 border rounded-md bg-white dark:bg-night flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2">
+              <div 
+                className="rounded-2xl overflow-hidden transition-all duration-300 ease-out bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-700 shadow-medium border border-gray-200 dark:border-gray-600 card-hover p-4"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
                   <div className="font-semibold text-lg text-secondary dark:text-alabaster">{client.name}</div>
                   {/* Notification pill for unread chat */}
                   {unreadCounts[client.id] > 0 && (
                     <span className="inline-block w-2 h-2 bg-red-500 rounded-full ml-1" title="Unread chat" />
                   )}
                 </div>
-                <div className="mt-2 sm:mt-0">
+                <div style={{ marginLeft: '16px', flexShrink: 0 }}>
                   <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${client.status === "active" ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-600"}`}>
                     {client.status || "Unknown"}
                   </span>

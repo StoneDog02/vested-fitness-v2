@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "@remix-run/react";
 import { UserRole } from "~/lib/supabase";
-import AccountDrawer from "../ui/AccountDrawer";
-import MenuDrawer from "../ui/MenuDrawer";
+import AccountDrawer from "~/components/ui/AccountDrawer";
+import MenuDrawer from "~/components/ui/MenuDrawer";
+import AnimatedBackground from "~/components/ui/AnimatedBackground";
 
 interface NavItem {
   name: string;
   path: string;
-  subItems?: NavItem[];
 }
 
 interface DashboardLayoutProps {
@@ -28,27 +28,41 @@ export default function DashboardLayout({
   userRole,
   user,
 }: DashboardLayoutProps) {
-  const location = useLocation();
-  const [isAccountDrawerOpen, setIsAccountDrawerOpen] = useState(false);
   const [isMenuDrawerOpen, setIsMenuDrawerOpen] = useState(false);
-
-  // Notification pill state for client chat
+  const [isAccountDrawerOpen, setIsAccountDrawerOpen] = useState(false);
   const [chatUnread, setChatUnread] = useState(false);
+  const location = useLocation();
+
+  const [isDarkMode, setIsDarkMode] = useState(false);
+
+  useEffect(() => {
+    const checkDarkMode = () => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
+    };
+    checkDarkMode();
+    const observer = new MutationObserver(checkDarkMode);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     let ignore = false;
     async function fetchUnread() {
-      if (userRole === "client" && user?.id) {
-        try {
-          const res = await fetch(`/api/chat-unread-count?clientId=${user.id}`);
-          const data = await res.json();
-          if (!ignore) setChatUnread((data.unreadCount ?? 0) > 0);
-        } catch {
-          if (!ignore) setChatUnread(false);
+      if (userRole !== "client" || !user?.id) return;
+      try {
+        const response = await fetch("/api/chat-unread-count");
+        if (!ignore && response.ok) {
+          const data = await response.json();
+          setChatUnread(data.unreadCount > 0);
         }
+      } catch (error) {
+        console.error("Failed to fetch unread count:", error);
       }
     }
     fetchUnread();
-    // Optionally poll every 10s for live updates
     const interval = setInterval(fetchUnread, 10000);
     return () => {
       ignore = true;
@@ -57,15 +71,12 @@ export default function DashboardLayout({
   }, [userRole, user?.id]);
 
   const isActive = (path: string) => {
-    // For dashboard path, only match exact
     if (path === "/dashboard") {
       return location.pathname === "/dashboard";
     }
-    // For client subitems, only match exact
     if (/^\/dashboard\/clients\/[\w-]+(\/\w+)?$/.test(path)) {
       return location.pathname === path;
     }
-    // For other paths match exact or subpaths
     return (
       location.pathname === path || location.pathname.startsWith(`${path}/`)
     );
@@ -82,57 +93,32 @@ export default function DashboardLayout({
     { name: "Meals", path: "/dashboard/meals" },
     { name: "Workouts", path: "/dashboard/workouts" },
     { name: "Supplements", path: "/dashboard/supplements" },
-    { name: "Chat", path: "/dashboard/chat" }, // Moved Chat tab to the end
+    { name: "Chat", path: "/dashboard/chat" },
   ];
 
   const navItems = userRole === "coach" ? coachNavItems : clientNavItems;
 
-  // Add client sub-items when on a client's page
-  const clientId = location.pathname.match(
-    /\/dashboard\/clients\/([^/]+)/
-  )?.[1];
-  if (clientId && userRole === "coach") {
-    const clientSubItems: NavItem[] = [
-      { name: "Overview", path: `/dashboard/clients/${clientId}` },
-      { name: "Meals", path: `/dashboard/clients/${clientId}/meals` },
-      { name: "Workouts", path: `/dashboard/clients/${clientId}/workouts` },
-      {
-        name: "Supplements",
-        path: `/dashboard/clients/${clientId}/supplements`,
-      },
-      { name: "Chat", path: `/dashboard/clients/${clientId}/chat` },
-    ];
-
-    // Find and update the Clients nav item
-    const clientsNavItem = navItems.find(
-      (item) => item.path === "/dashboard/clients"
-    );
-    if (clientsNavItem) {
-      clientsNavItem.subItems = clientSubItems;
-    }
-  }
-
-  // Helper function to get initials from full name (same as settings page)
   const getInitials = (fullName: string): string => {
-    const nameParts = fullName.trim().split(' ');
+    const nameParts = fullName.trim().split(" ");
     if (nameParts.length === 1) {
       return nameParts[0].charAt(0).toUpperCase();
     }
-    // Get first letter of first name and first letter of last name
     const firstInitial = nameParts[0].charAt(0).toUpperCase();
     const lastInitial = nameParts[nameParts.length - 1].charAt(0).toUpperCase();
     return firstInitial + lastInitial;
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-alabaster dark:bg-davyGray transition-colors duration-200">
-      <header className="sticky top-0 z-10 bg-white dark:bg-night border-b border-gray-light dark:border-secondary shadow-sm transition-colors duration-200">
+    <div className="min-h-screen flex flex-col transition-colors duration-300">
+      {/* Animated Background with Waves */}
+      <AnimatedBackground />
+      
+      <header className="z-10 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 shadow-soft backdrop-blur-md relative">
         <div className="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between gap-4">
-            {/* Mobile Menu Button */}
+          <div className="flex items-center justify-between gap-4 py-4">
             <button
               type="button"
-              className="sm:hidden text-secondary dark:text-alabaster hover:text-primary dark:hover:text-primary"
+              className="sm:hidden text-secondary dark:text-alabaster hover:text-primary dark:hover:text-primary transition-all duration-200 hover:scale-110"
               onClick={() => setIsMenuDrawerOpen(true)}
             >
               <span className="sr-only">Open menu</span>
@@ -151,38 +137,34 @@ export default function DashboardLayout({
               </svg>
             </button>
 
-            {/* Logo and Navigation Container */}
             <div className="flex-1 flex items-end">
-              {/* Logo */}
               <Link
                 to="/dashboard"
-                className="flex-shrink-0 flex items-center hover:opacity-90 transition-opacity"
+                className="flex-shrink-0 flex items-center hover:opacity-90 transition-all duration-300 hover:scale-105"
               >
                 <img
                   src="/KAVA-TRAIN.png"
                   alt="KAVA TRAINING"
-                  className="h-48 sm:h-32 w-auto dark:invert"
+                  className="h-48 sm:h-32 w-auto dark:invert drop-shadow-sm"
                 />
               </Link>
 
-              {/* Desktop Navigation */}
-              <nav className="hidden sm:flex overflow-x-auto ml-6">
-                <div className="flex space-x-4 pb-3">
+              <nav className="hidden sm:flex overflow-x-auto ml-8">
+                <div className="flex space-x-1 pb-3">
                   {navItems.map((item) => (
                     <Link
                       key={item.name}
                       to={item.path}
-                      className={`px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200 border-b-2 ${
+                      className={`px-4 py-3 text-sm font-medium whitespace-nowrap transition-all duration-300 rounded-xl relative group ${
                         isActive(item.path)
-                          ? "text-primary border-primary dark:text-primary dark:border-primary"
-                          : "border-transparent text-secondary dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:text-primary dark:hover:border-primary/50"
+                          ? "text-primary bg-primary/10 dark:bg-primary/20 shadow-soft"
+                          : "text-secondary dark:text-alabaster hover:text-primary hover:bg-primary/5 dark:hover:bg-primary/10"
                       }`}
                     >
-                      <span className="relative">
+                      <span className="relative flex items-center gap-2">
                         {item.name}
-                        {/* Show pill for Chat tab if client and unread */}
                         {userRole === "client" && item.name === "Chat" && chatUnread && (
-                          <span className="absolute -top-1 -right-2 inline-block w-2 h-2 bg-red-500 rounded-full" />
+                          <span className="absolute -top-1 -right-2 inline-block w-3 h-3 bg-gradient-to-r from-error-500 to-error-600 rounded-full animate-pulse-soft shadow-glow" />
                         )}
                       </span>
                     </Link>
@@ -193,29 +175,30 @@ export default function DashboardLayout({
 
             <button
               onClick={() => setIsAccountDrawerOpen(true)}
-              className="flex items-center gap-2 text-sm rounded-full focus:outline-none hover:opacity-80 transition-opacity"
+              className="flex items-center gap-3 text-sm rounded-2xl p-2 focus:outline-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200 hover:scale-105 group"
             >
               <span className="sr-only">Open user menu</span>
-              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary-light flex items-center justify-center text-white shadow-soft group-hover:shadow-glow transition-all duration-200">
                 {user?.avatar_url ? (
                   <img
                     src={user.avatar_url}
                     alt="Profile"
-                    className="w-full h-full rounded-full object-cover"
+                    className="w-full h-full rounded-xl object-cover"
                   />
                 ) : (
-                  <span className="text-sm">{user ? getInitials(user.name) : "U"}</span>
+                  <span className="text-sm font-semibold">{user ? getInitials(user.name) : "U"}</span>
                 )}
               </div>
-              <span className="hidden sm:inline text-secondary dark:text-white transition-colors duration-200">
+              <span className="hidden sm:inline text-secondary dark:text-white transition-colors duration-200 font-medium">
                 Profile
               </span>
             </button>
           </div>
         </div>
       </header>
-      <main className="flex-1 w-full">
-        <div className="px-4 py-6 mx-auto max-w-7xl sm:px-6 lg:px-8 transition-colors duration-200">
+
+      <main className="flex-1 w-full relative">
+        <div className="px-4 py-8 mx-auto max-w-7xl sm:px-6 lg:px-8 transition-colors duration-300 relative z-10">
           {children}
         </div>
       </main>
