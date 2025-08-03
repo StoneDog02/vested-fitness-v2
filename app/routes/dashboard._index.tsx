@@ -1323,14 +1323,18 @@ export default function Dashboard() {
                         <div className="space-y-4">
                           {workout.groups?.map(group => (
                             <div key={group.type}>
-                              <span className="bg-green-100 text-green-800 rounded-full px-3 py-1 text-xs font-medium mb-2 inline-block">{group.type}</span>
-                              <ul className="mt-2 pl-4 border-l-2 border-gray-100 space-y-2">
+                              <ul className="pl-4 border-l-2 border-gray-100 space-y-2">
                                 {group.exercises.map((exercise) => {
                                   const setsCount = exercise.sets.length;
                                   const reps = setsCount > 0 ? exercise.sets[0].reps : "-";
                                   return (
                                     <li key={exercise.id} className="text-gray-700">
-                                      <span className="font-medium">{exercise.name}</span>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium">{exercise.name}</span>
+                                        <span className="bg-green-100 text-green-800 rounded-full px-2 py-0.5 text-xs font-medium">
+                                          {exercise.type}
+                                        </span>
+                                      </div>
                                       <span className="ml-2 text-xs text-gray-500">
                                         {setsCount} set{setsCount !== 1 ? "s" : ""} x {reps} reps
                                       </span>
