@@ -137,6 +137,7 @@ interface LoaderData {
   checkInsPageSize: number;
   checkInsTotal: number;
   checkInsHasMore: boolean;
+  completedForms: any[];
 }
 
 // In-memory cache for client details (expires after 30s)
@@ -251,7 +252,8 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     mealPlansRaw,
     workoutPlansRaw,
     supplementsRaw,
-    weightLogsRaw
+    weightLogsRaw,
+    completedFormsRaw
   ] = await Promise.all([
     // Updates from last 7 days
     supabase
@@ -298,6 +300,21 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
       .select("id, weight, logged_at")
       .eq("user_id", client.id)
       .order("logged_at", { ascending: true }),
+    // Completed check-in forms
+    supabase
+      .from("check_in_form_instances")
+      .select(`
+        id,
+        form_id,
+        client_id,
+        sent_at,
+        completed_at,
+        status,
+        expires_at
+      `)
+      .eq("client_id", client.id)
+      .in("status", ["completed", "expired"])
+      .order("sent_at", { ascending: false }),
 
   ]);
 
@@ -340,6 +357,40 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   const supplements = supplementsRaw?.data || [];
   const weightLogs = weightLogsRaw?.data || [];
 
+  // Process completed check-in forms
+  let completedForms: any[] = [];
+  if (completedFormsRaw?.data && completedFormsRaw.data.length > 0) {
+    const formIds = completedFormsRaw.data.map((instance: any) => instance.form_id);
+    const { data: formsData } = await supabase
+      .from("check_in_forms")
+      .select("id, title, description")
+      .in("id", formIds);
+    
+    // Create a map of form data by ID
+    const formsMap = new Map();
+    (formsData || []).forEach((form: any) => {
+      formsMap.set(form.id, form);
+    });
+
+    // Combine instance data with form data
+    completedForms = completedFormsRaw.data.map((instance: any) => {
+      const formData = formsMap.get(instance.form_id);
+      return {
+        id: instance.id,
+        form_id: instance.form_id,
+        client_id: instance.client_id,
+        sent_at: instance.sent_at,
+        completed_at: instance.completed_at,
+        status: instance.status,
+        expires_at: instance.expires_at,
+        form: {
+          title: formData?.title || 'Untitled Form',
+          description: formData?.description,
+        },
+      };
+    });
+  }
+
   // For check-ins, add pagination info
   const checkIns = checkInsRaw?.data || [];
   const checkInsTotal = checkInsRaw?.count || 0;
@@ -359,6 +410,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
     weightLogs,
     activeMealPlan,
     activeWorkoutPlan,
+    completedForms,
   };
   // Cache result
   if (clientIdParam) {
@@ -584,6 +636,7 @@ export default function ClientDetails() {
     checkInsPageSize,
     checkInsTotal,
     checkInsHasMore,
+    completedForms: loaderCompletedForms,
   } = useLoaderData<LoaderData>();
   const [showAddMessage, setShowAddMessage] = useState(false);
   const [showAddCheckIn, setShowAddCheckIn] = useState(false);
@@ -603,7 +656,7 @@ export default function ClientDetails() {
   const [showFormResponseViewer, setShowFormResponseViewer] = useState(false);
   const [currentFormResponse, setCurrentFormResponse] = useState<any>(null);
   const [showFormHistory, setShowFormHistory] = useState(false);
-  const [completedForms, setCompletedForms] = useState<any[]>([]);
+  const [completedForms, setCompletedForms] = useState<any[]>(loaderCompletedForms);
   const fetcher = useFetcher();
 
   // Local state for updates, checkIns, and supplements
@@ -754,25 +807,7 @@ export default function ClientDetails() {
     setHistoryHasMore(checkInsHasMore);
   }, [loaderCheckIns, checkInsPage, checkInsHasMore]);
 
-  // Fetch completed check-in forms
-  useEffect(() => {
-    const fetchCompletedForms = async () => {
-      try {
-            const response = await fetch(`/api/get-completed-check-in-forms?clientId=${client.id}`);
-    if (response.ok) {
-      const data = await response.json();
-          setCompletedForms(data.forms || []);
-        } else {
-          const errorData = await response.json().catch(() => ({}));
-          console.error('Completed forms error response:', errorData);
-        }
-      } catch (error) {
-        console.error('Error fetching completed forms:', error);
-      }
-    };
 
-    fetchCompletedForms();
-  }, [client.id]);
 
   // When historyFetcher loads more, append to historyCheckIns
   useEffect(() => {
@@ -1255,12 +1290,12 @@ export default function ClientDetails() {
 
             {/* Completed Check-In Forms */}
             {(() => {
-              // Filter to show only recent forms (last 30 days)
-              const thirtyDaysAgo = new Date();
-              thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+              // Filter to show only very recent forms (last 7 days)
+              const sevenDaysAgo = new Date();
+              sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
               
               const recentForms = completedForms.filter(form => 
-                new Date(form.completed_at) >= thirtyDaysAgo
+                new Date(form.completed_at) >= sevenDaysAgo
               );
               
               if (completedForms.length > 0) {

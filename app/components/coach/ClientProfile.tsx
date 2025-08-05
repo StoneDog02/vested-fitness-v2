@@ -1,4 +1,5 @@
 import { calculateMacros } from "~/lib/utils";
+import Card from "~/components/ui/Card";
 
 // Inline Client type for this component
 interface Client {
@@ -37,7 +38,7 @@ export default function ClientProfile({
     : client.currentMacros;
 
   return (
-    <div className="p-4 bg-white dark:bg-night border border-gray-light dark:border-davyGray rounded-lg w-full">
+    <Card className="w-full">
       <div className="flex items-center gap-3 mb-6">
         <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white text-xl">
           {client.name.charAt(0)}
@@ -96,6 +97,6 @@ export default function ClientProfile({
           </p>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
