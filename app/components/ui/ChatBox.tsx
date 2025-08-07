@@ -50,7 +50,9 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [page, setPage] = useState(0);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch messages (paginated)
@@ -106,14 +108,29 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
     }
   }, [messages]);
 
+  // Scroll to bottom function
+  const scrollToBottom = () => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
   // Load more messages (infinite scroll)
   const handleScroll = (e: React.UIEvent<HTMLDivElement, UIEvent>) => {
-    if (e.currentTarget.scrollTop === 0 && hasMore && !fetchingMore) {
+    const element = e.currentTarget;
+    const { scrollTop, scrollHeight, clientHeight } = element;
+    
+    // Check if we're near the top to load more messages
+    if (scrollTop === 0 && hasMore && !fetchingMore) {
       setFetchingMore(true);
       const nextPage = page + 1;
       setPage(nextPage);
       fetchMessages(nextPage, true);
     }
+    
+    // Show scroll to bottom button if user has scrolled up
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+    setShowScrollToBottom(!isNearBottom);
   };
 
   // Send message
@@ -207,8 +224,13 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
   }, [clientId]);
 
   return (
-    <Card className="flex flex-col h-full max-h-[500px] w-full">
-      <div className="flex-1 overflow-y-auto p-4" onScroll={handleScroll} style={{ minHeight: 300 }}>
+    <Card className="flex flex-col h-full max-h-[600px] w-full">
+      <div 
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto p-4 scroll-smooth relative" 
+        onScroll={handleScroll} 
+        style={{ minHeight: 300 }}
+      >
         {loading ? (
           <div className="flex justify-center items-center h-full"><Spinner /></div>
         ) : error ? (
@@ -231,7 +253,7 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
                     className="px-3 py-2 rounded-lg max-w-xs shadow text-sm"
                     style={{
                       background: isMine && chat_bubble_color ? chat_bubble_color : "#f3f4f6",
-                      color: isMine && chat_bubble_color && isColorDark(chat_bubble_color) ? "#fff" : undefined,
+                      color: isMine && chat_bubble_color && isColorDark(chat_bubble_color) ? "#fff" : "#000",
                     }}
                   >
                     <div>{msg.content}</div>
@@ -240,7 +262,7 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
                       style={{
                         color: isMine && chat_bubble_color && isColorDark(chat_bubble_color)
                           ? "rgba(255,255,255,0.9)"
-                          : undefined
+                          : "rgba(0,0,0,0.6)"
                       }}
                     >{formatTime(msg.timestamp)}</div>
                   </div>
@@ -255,7 +277,30 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
             <div ref={chatEndRef} />
           </div>
         )}
-        {fetchingMore && <div className="text-center text-xs text-gray-400 py-2">Loading more...</div>}
+        {fetchingMore && (
+          <div className="text-center text-xs text-gray-400 py-2 flex items-center justify-center gap-2">
+            <Spinner />
+            Loading more messages...
+          </div>
+        )}
+        {hasMore && !fetchingMore && (
+          <div className="text-center text-xs text-gray-400 py-2">
+            Scroll up to load more messages
+          </div>
+        )}
+        
+        {/* Scroll to bottom button */}
+        {showScrollToBottom && (
+          <button
+            onClick={scrollToBottom}
+            className="absolute bottom-4 right-4 bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 shadow-lg transition-all duration-200 z-10"
+            title="Scroll to bottom"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+            </svg>
+          </button>
+        )}
       </div>
       <form onSubmit={handleSend} className="flex gap-2 p-4 border-t">
         <Input
