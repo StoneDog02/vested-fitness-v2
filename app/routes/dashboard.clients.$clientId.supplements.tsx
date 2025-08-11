@@ -125,10 +125,45 @@ export const loader = async ({
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
     const dayStr = day.toISOString().split('T')[0]; // Get YYYY-MM-DD format
-    // For each supplement, check if a completion exists for this day
-    const supplementIds = (supplementsRaw.data || []).map((s: any) => s.id);
+    
+    // Get supplements that are active for this specific day
+    const activeSupplementsForDay = (supplementsRaw.data || []).filter(supplement => {
+      if (!supplement.active_from) return false;
+      
+      // Check if this supplement is active for this day
+      const activeFromDate = supplement.active_from;
+      const isActiveForDay = activeFromDate <= dayStr;
+      
+      return isActiveForDay;
+    });
+    
+    // If no supplements are active for this day, show -2 (no supplements assigned)
+    if (activeSupplementsForDay.length === 0) {
+      complianceData.push(-2);
+      continue;
+    }
+    
+    // Check if any supplements were created on this specific day
+    const supplementsCreatedOnThisDay = (supplementsRaw.data || []).filter(supplement => {
+      if (!supplement.created_at) return false;
+      
+      const createdDate = supplement.created_at.split('T')[0]; // Get YYYY-MM-DD from timestamp
+      const isCreatedOnThisDay = createdDate === dayStr;
+      
+      return isCreatedOnThisDay;
+    });
+    
+    // If supplements were created on this day AND no supplements are active yet, show -1
+    // This indicates "supplements added today - compliance starts tomorrow"
+    if (supplementsCreatedOnThisDay.length > 0 && activeSupplementsForDay.length === 0) {
+      complianceData.push(-1);
+      continue;
+    }
+    
+    // For each active supplement, check if a completion exists for this day
+    const activeSupplementIds = activeSupplementsForDay.map((s) => s.id);
     let completedCount = 0;
-    for (const supplementId of supplementIds) {
+    for (const supplementId of activeSupplementIds) {
       const found = (completionsRaw.data || []).find((c: any) => {
         return (
           c.completed_at.startsWith(dayStr) &&
@@ -138,7 +173,7 @@ export const loader = async ({
       if (found) completedCount++;
     }
     const percent =
-      supplementIds.length > 0 ? completedCount / supplementIds.length : 0;
+      activeSupplementIds.length > 0 ? completedCount / activeSupplementIds.length : 0;
     complianceData.push(percent);
   }
 
@@ -147,20 +182,33 @@ export const loader = async ({
   today.setHours(0, 0, 0, 0);
   const weekAgo = new Date(today);
   weekAgo.setDate(today.getDate() - 6); // 7 days including today
-  // Group completions by supplement_id for last 7 days
-  const completions7dBySupp: Record<string, string[]> = {};
-  (completions7dRaw.data || []).forEach((c: any) => {
-    if (!completions7dBySupp[c.supplement_id]) completions7dBySupp[c.supplement_id] = [];
-    completions7dBySupp[c.supplement_id].push(c.completed_at);
-  });
+  
   const supplements = (supplementsRaw.data || []).map((supplement: any) => {
-    // Count unique days with a completion
-    const daysWithCompletion = new Set(
-      (completions7dBySupp[supplement.id] || []).map((d) =>
-        new Date(d).toISOString().slice(0, 10)
-      )
-    );
-    const compliance = Math.round((daysWithCompletion.size / 7) * 100);
+    // Count unique days with a completion, but only for days when the supplement was active
+    const daysWithCompletion = new Set();
+    
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(weekStart);
+      day.setDate(weekStart.getDate() + i);
+      const dayStr = day.toISOString().split('T')[0];
+      
+      // Check if supplement was active on this day
+      if (supplement.active_from && supplement.active_from <= dayStr) {
+        // Check if there's a completion for this day
+        const hasCompletion = (completions7dRaw.data || []).some((c: any) => {
+          return c.supplement_id === supplement.id && c.completed_at.startsWith(dayStr);
+        });
+        
+        if (hasCompletion) {
+          daysWithCompletion.add(dayStr);
+        }
+      }
+    }
+    
+    // Calculate compliance based on active days only
+    const activeDays = 7; // We're looking at the last 7 days
+    const compliance = Math.round((daysWithCompletion.size / activeDays) * 100);
+    
     return {
       id: supplement.id,
       name: supplement.name,
