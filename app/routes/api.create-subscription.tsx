@@ -78,7 +78,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       
       if (price.type === 'recurring') {
         // Create subscription for free recurring product
-        const subscription = await createStripeSubscription({ customerId, priceId, paymentMethodId });
+        const subscription = await createStripeSubscription({ 
+          customerId, 
+          priceId, 
+          paymentMethodId, 
+          userId: user.id 
+        });
         console.log('[API] Created free subscription:', subscription && subscription.id, 'for customer:', customerId);
         return json({ 
           success: true, 
@@ -99,7 +104,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (price.type === 'recurring') {
       // Create subscription with payment method if provided
-      const subscription = await createStripeSubscription({ customerId, priceId, paymentMethodId });
+      const subscription = await createStripeSubscription({ 
+        customerId, 
+        priceId, 
+        paymentMethodId, 
+        userId: user.id 
+      });
       console.log('[API] Created subscription:', subscription && subscription.id, 'for customer:', customerId);
       // Get client_secret for payment intent (if present)
       let clientSecret = null;

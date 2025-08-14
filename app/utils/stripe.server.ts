@@ -42,51 +42,46 @@ export async function getOrCreateStripeCustomer({ userId, email }: { userId: str
 }
 
 // Create a subscription for a user with immediate billing
-export async function createStripeSubscription({ customerId, priceId, paymentMethodId }: { customerId: string; priceId: string; paymentMethodId?: string }) {
-  // Get the price details to calculate prorated amount
+export async function createStripeSubscription({ customerId, priceId, paymentMethodId, userId }: { customerId: string; priceId: string; paymentMethodId?: string; userId?: string }) {
+  // Get the price details
   const price = await stripe.prices.retrieve(priceId);
-  
-  // Calculate the last day of the current month (UTC) for billing cycle anchor
-  const now = new Date();
-  const lastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
-  const lastDayTimestamp = Math.floor(lastDay.getTime() / 1000);
   
   const monthlyAmount = price.unit_amount || 0;
   
-  console.log(`[SUBSCRIPTION] Creating subscription with full price (no proration):`);
+  console.log(`[SUBSCRIPTION] Creating subscription with immediate full payment (no proration):`);
   console.log(`  Monthly amount: $${(monthlyAmount / 100).toFixed(2)}`);
-  console.log(`  Billing cycle anchor: ${new Date(lastDayTimestamp * 1000).toISOString()}`);
+  console.log(`  Billing cycle: Starts immediately, renews monthly on signup date`);
   
-  // Create subscription with immediate payment
+  // Create subscription with immediate payment and user metadata
+  // Let Stripe handle the billing cycle naturally based on signup date
   const subscription = await stripe.subscriptions.create({
     customer: customerId,
     items: [{ price: priceId }],
-    payment_behavior: 'allow_incomplete', // Allow immediate payment
+    payment_behavior: 'default_incomplete', // This ensures immediate payment attempt
     payment_settings: { save_default_payment_method: 'on_subscription' },
     expand: ['latest_invoice', 'latest_invoice.payment_intent'],
-    billing_cycle_anchor: lastDayTimestamp,
+    // No billing_cycle_anchor - Stripe will use signup date as the billing anchor
     proration_behavior: 'none', // No proration - charge full monthly amount
+    metadata: {
+      userId: userId || 'unknown',
+      createdVia: 'api'
+    },
     ...(paymentMethodId ? { default_payment_method: paymentMethodId } : {}),
   });
   
-  // Immediately pay the invoice if it exists and has an amount
-  if (subscription.latest_invoice && typeof subscription.latest_invoice === 'object') {
-    const invoice = subscription.latest_invoice as any;
-    if (invoice.amount_due > 0) {
-      try {
-        console.log(`[SUBSCRIPTION] Paying invoice immediately: ${invoice.id}`);
-        await stripe.invoices.pay(invoice.id);
-        console.log(`[SUBSCRIPTION] Invoice paid successfully`);
-        
-        // Refresh the subscription to get updated status
-        const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
-        return updatedSubscription;
-      } catch (error) {
-        console.error(`[SUBSCRIPTION] Failed to pay invoice immediately:`, error);
-        // Return the subscription anyway - it will be handled by Stripe's retry logic
-      }
-    }
-  }
+  console.log(`[SUBSCRIPTION] Created subscription: ${subscription.id}`);
+  console.log(`[SUBSCRIPTION] Status: ${subscription.status}`);
+  
+  // Type assertion to access subscription properties
+  const subscriptionData = subscription as any;
+  console.log(`[SUBSCRIPTION] Current period start: ${new Date(subscriptionData.current_period_start * 1000).toISOString()}`);
+  console.log(`[SUBSCRIPTION] Current period end: ${new Date(subscriptionData.current_period_end * 1000).toISOString()}`);
+  console.log(`[SUBSCRIPTION] Next billing date: ${new Date(subscriptionData.current_period_end * 1000).toISOString()}`);
+  
+  // The subscription will automatically attempt to charge the payment method
+  // If successful, it will be marked as 'active'
+  // If it fails, it will be marked as 'incomplete' and Stripe will retry
+  // Future billing will occur on the same date each month (subscription timeline)
   
   return subscription;
 }
