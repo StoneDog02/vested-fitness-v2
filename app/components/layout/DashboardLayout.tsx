@@ -82,9 +82,23 @@ export default function DashboardLayout({
     );
   };
 
+  // Check if we're on a client detail page to show sub-navigation
+  const isOnClientDetailPage = /^\/dashboard\/clients\/[\w-]+(\/\w+)?$/.test(location.pathname);
+  const currentClientId = location.pathname.match(/^\/dashboard\/clients\/([\w-]+)/)?.[1];
+
   const coachNavItems: NavItem[] = [
     { name: "Dashboard", path: "/dashboard" },
-    { name: "Clients", path: "/dashboard/clients" },
+    { 
+      name: "Clients", 
+      path: "/dashboard/clients",
+      subItems: isOnClientDetailPage && currentClientId ? [
+        { name: "Overview", path: `/dashboard/clients/${currentClientId}` },
+        { name: "Meals", path: `/dashboard/clients/${currentClientId}/meals` },
+        { name: "Workouts", path: `/dashboard/clients/${currentClientId}/workouts` },
+        { name: "Supplements", path: `/dashboard/clients/${currentClientId}/supplements` },
+        { name: "Chat", path: `/dashboard/clients/${currentClientId}/chat` },
+      ] : undefined
+    },
   ];
 
   const clientNavItems: NavItem[] = [
