@@ -749,9 +749,16 @@ type SkeletonCardProps = {
 
 function SkeletonCard({ lines = 3, className = "" }: SkeletonCardProps) { 
   return (
-    <div className={`space-y-3 ${className}`} aria-busy="true">
+    <div className={`space-y-4 ${className}`} aria-busy="true">
       {[...Array(lines)].map((_, i) => (
-        <div key={i} className="animate-pulse h-5 bg-gray-200 dark:bg-davyGray rounded w-full" />
+        <div key={i} className="flex items-center space-x-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl animate-pulse">
+          <div className="rounded-xl bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 h-12 w-12 animate-pulse-soft"></div>
+          <div className="flex-1 space-y-3">
+            <div className="h-4 bg-gradient-to-r from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 rounded-full w-3/4 animate-pulse-soft"></div>
+            <div className="h-3 bg-gradient-to-r from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 rounded-full w-1/2 animate-pulse-soft"></div>
+          </div>
+          <div className="h-8 w-16 bg-gradient-to-r from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 rounded-full animate-pulse-soft"></div>
+        </div>
       ))}
     </div>
   );
@@ -961,94 +968,135 @@ export default function Dashboard() {
   return (
     <>
       {parentRole === "coach" ? (
-        <div className="p-6 space-y-6">
+        <div className="space-y-8 animate-fade-in">
           <div className="flex justify-between items-center">
-            <h1 className="text-3xl font-bold">Coach Dashboard</h1>
+            <div>
+              <h1 className="text-4xl font-bold text-gradient mb-2">Coach Dashboard</h1>
+              <p className="text-gray-600 dark:text-gray-400">Manage your clients and track their progress</p>
+            </div>
             <Button
-              variant="primary"
+              variant="gradient"
               onClick={() =>
                 window.open("https://kavabodybuilding.myshopify.com", "_blank")
               }
-              className="bg-green-500 hover:bg-green-600 whitespace-nowrap"
+              className="whitespace-nowrap"
             >
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+              </svg>
               Shop KAVA
             </Button>
           </div>
 
           {/* Metrics Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Link to="/dashboard/clients" className="group" prefetch="intent">
-              <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
-                <h3 className="font-semibold text-lg mb-2">Total Clients</h3>
-                <p className="text-4xl font-bold">{totalClients}</p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  +{recentClients.length} this month
-                </p>
+              <Card variant="elevated" className="p-6 cursor-pointer animate-scale-in">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-soft">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">This month</p>
+                    <p className="text-lg font-bold text-primary">+{recentClients.length}</p>
+                  </div>
+                </div>
+                <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Total Clients</h3>
+                <p className="text-4xl font-bold text-gradient">{totalClients}</p>
               </Card>
             </Link>
 
             <Link to="/dashboard/clients/active" className="group" prefetch="intent">
-              <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
-                <h3 className="font-semibold text-lg mb-2">Active Clients</h3>
-                <p className="text-4xl font-bold">{activeClients}</p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  {totalClients > 0 ? Math.round((activeClients / totalClients) * 100) : 0}% of total
-                </p>
+              <Card variant="elevated" className="p-6 cursor-pointer animate-scale-in" style={{animationDelay: '0.1s'}}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-gradient-to-br from-success-500 to-success-600 rounded-xl flex items-center justify-center shadow-soft">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Percentage</p>
+                    <p className="text-lg font-bold text-success-600">{totalClients > 0 ? Math.round((activeClients / totalClients) * 100) : 0}%</p>
+                  </div>
+                </div>
+                <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Active Clients</h3>
+                <p className="text-4xl font-bold text-success-600">{activeClients}</p>
               </Card>
             </Link>
 
             <Link to="/dashboard/clients/inactive" className="group" prefetch="intent">
-              <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
-                <h3 className="font-semibold text-lg mb-2">Inactive Clients</h3>
-                <p className="text-4xl font-bold text-red-500">
-                  {inactiveClients}
-                </p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  {totalClients > 0 ? Math.round((inactiveClients / totalClients) * 100) : 0}% of total
-                </p>
+              <Card variant="elevated" className="p-6 cursor-pointer animate-scale-in" style={{animationDelay: '0.2s'}}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-gradient-to-br from-error-500 to-error-600 rounded-xl flex items-center justify-center shadow-soft">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Percentage</p>
+                    <p className="text-lg font-bold text-error-600">{totalClients > 0 ? Math.round((inactiveClients / totalClients) * 100) : 0}%</p>
+                  </div>
+                </div>
+                <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Inactive Clients</h3>
+                <p className="text-4xl font-bold text-error-600">{inactiveClients}</p>
               </Card>
             </Link>
 
             <Link to="/dashboard/clients/compliance" className="group" prefetch="intent">
-              <Card className="p-6 group-hover:shadow-lg group-hover:ring-2 group-hover:ring-primary/30 cursor-pointer transition-all">
-                <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
+              <Card variant="elevated" className="p-6 cursor-pointer animate-scale-in" style={{animationDelay: '0.3s'}}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-gradient-to-br from-warning-500 to-warning-600 rounded-xl flex items-center justify-center shadow-soft">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Change</p>
+                    <p className={`text-lg font-bold ${percentChange > 0 ? 'text-success-600' : percentChange < 0 ? 'text-error-600' : 'text-gray-600'}`}>
+                      {percentChange > 0 && "+"}{percentChange}%
+                    </p>
+                  </div>
+                </div>
+                <h3 className="font-semibold text-lg mb-2 flex items-center gap-2 text-secondary dark:text-alabaster">
                   <Tooltip content="Overall client compliance shows workout adherence only. Rest day compliance, meals, and supplements are tracked separately. Click to see detailed breakdown of all compliance metrics.">
                     <span className="flex items-center gap-1">
                       Client Compliance
-                      <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                      <svg className="w-4 h-4 text-info-500" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                       </svg>
                     </span>
                   </Tooltip>
                 </h3>
-                <p className="text-4xl font-bold">{compliance}%</p>
-                <p
-                  className={`text-sm mt-2 ${
-                    percentChange > 0
-                      ? "text-green-600"
-                      : percentChange < 0
-                      ? "text-red-500"
-                      : "text-gray-400"
-                  }`}
-                >
-                  {percentChange > 0 && "+"}
-                  {percentChange}% from last week
-                </p>
+                <p className="text-4xl font-bold text-gradient">{compliance}%</p>
               </Card>
             </Link>
           </div>
 
           {/* Recent Clients and Activity Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Recent Clients */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-4">Recent Clients</h3>
+            <Card variant="elevated" className="p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center shadow-soft">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                </div>
+                <h3 className="font-semibold text-xl text-secondary dark:text-alabaster">Recent Clients</h3>
+              </div>
               <div className="space-y-4">
                 {nonCriticalLoading ? (
                   <SkeletonCard lines={4} />
                 ) : recentClients.length === 0 ? (
-                  <div className="text-gray-dark dark:text-gray-light">
-                    No new clients in the last month.
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                      </svg>
+                    </div>
+                    <p className="text-gray-600 dark:text-gray-400">No new clients in the last month.</p>
                   </div>
                 ) : (
                   recentClients.map((client: Client & { activeMealPlan?: any; activeWorkoutPlan?: any; supplements?: any[] }) => {
@@ -1061,25 +1109,27 @@ export default function Dashboard() {
                     return (
                       <div
                         key={client.id}
-                        className="flex items-center justify-between"
+                        className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-200"
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-gradient-to-br from-primary/20 to-primary-light/20 rounded-xl flex items-center justify-center">
+                            <span className="text-primary font-semibold text-sm">{client.name.charAt(0).toUpperCase()}</span>
+                          </div>
                           <div>
-                            <p className="font-medium">{client.name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              Joined{" "}
-                              {new Date(client.created_at).toLocaleDateString()}
+                            <p className="font-semibold text-secondary dark:text-alabaster">{client.name}</p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              Joined {new Date(client.created_at).toLocaleDateString()}
                             </p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-[60px] h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="flex items-center gap-3">
+                          <div className="w-20 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                             <div
-                              className="h-full bg-green-500 rounded-full"
+                              className="h-full bg-gradient-to-r from-primary to-primary-light rounded-full transition-all duration-300"
                               style={{ width: `${percent}%` }}
                             />
                           </div>
-                          <span className="text-sm font-medium">{percent}%</span>
+                          <span className="text-sm font-bold text-primary">{percent}%</span>
                         </div>
                       </div>
                     );
@@ -1089,14 +1139,26 @@ export default function Dashboard() {
             </Card>
 
             {/* Recent Activity */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-4">Recent Activity</h3>
+            <Card variant="elevated" className="p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 bg-gradient-to-br from-info-500 to-info-600 rounded-xl flex items-center justify-center shadow-soft">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                </div>
+                <h3 className="font-semibold text-xl text-secondary dark:text-alabaster">Recent Activity</h3>
+              </div>
               <div className="space-y-4">
                 {nonCriticalLoading ? (
                   <SkeletonCard lines={4} />
                 ) : activity.length === 0 ? (
-                  <div className="text-gray-dark dark:text-gray-light">
-                    No activity yet today.
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                      </svg>
+                    </div>
+                    <p className="text-gray-600 dark:text-gray-400">No activity yet today.</p>
                   </div>
                 ) : (
                   <>
@@ -1128,71 +1190,121 @@ export default function Dashboard() {
           </div>
         </div>
       ) : (
-        <div className="p-6 space-y-6">
+        <div className="space-y-8 animate-fade-in">
           <div className="flex justify-between items-center">
-            <h1 className="text-3xl font-bold">Client Dashboard</h1>
+            <div>
+              <h1 className="text-4xl font-bold text-gradient mb-2">Your Dashboard</h1>
+              <p className="text-gray-600 dark:text-gray-400">Track your progress and stay on top of your fitness journey</p>
+            </div>
             <Button
-              variant="primary"
+              variant="gradient"
               onClick={() =>
                 window.open("https://kavabodybuilding.myshopify.com", "_blank")
               }
-              className="bg-green-500 hover:bg-green-600 whitespace-nowrap"
+              className="whitespace-nowrap"
             >
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+              </svg>
               Shop KAVA
             </Button>
           </div>
-          {/* Commitment banner moved to settings pages */}
 
           {/* Client Metrics Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Workout Compliance</h3>
-              <p className="text-4xl font-bold">
+            <Card variant="elevated" className="p-6 animate-scale-in">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center shadow-soft">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 7 days</p>
+                </div>
+              </div>
+              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Workout Compliance</h3>
+              <p className="text-3xl font-bold text-gradient">
                 {typeof clientData?.workoutCompliance === "number" && !isNaN(clientData.workoutCompliance)
                   ? `${clientData.workoutCompliance}%`
                   : "-%"}
               </p>
-              <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
             </Card>
 
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Rest Day Compliance</h3>
-              <p className="text-4xl font-bold text-blue-600">
+            <Card variant="elevated" className="p-6 animate-scale-in" style={{animationDelay: '0.1s'}}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 bg-gradient-to-br from-info-500 to-info-600 rounded-xl flex items-center justify-center shadow-soft">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                  </svg>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 7 days</p>
+                </div>
+              </div>
+              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Rest Day Compliance</h3>
+              <p className="text-3xl font-bold text-info-600">
                 {typeof clientData?.restDayCompliance === "number" && !isNaN(clientData.restDayCompliance)
                   ? `${clientData.restDayCompliance}%`
                   : "-%"}
               </p>
-              <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
             </Card>
 
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Meal Compliance</h3>
-              <p className="text-4xl font-bold">
+            <Card variant="elevated" className="p-6 animate-scale-in" style={{animationDelay: '0.2s'}}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 bg-gradient-to-br from-success-500 to-success-600 rounded-xl flex items-center justify-center shadow-soft">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0l-2.5 5M7 13l2.5 5m6-5v6a2 2 0 01-2 2H9a2 2 0 01-2-2v-6m6 0V9a2 2 0 00-2-2H9a2 2 0 00-2 2v4.01" />
+                  </svg>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 7 days</p>
+                </div>
+              </div>
+              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Meal Compliance</h3>
+              <p className="text-3xl font-bold text-success-600">
                 {typeof clientData?.mealCompliance === "number" && !isNaN(clientData.mealCompliance)
                   ? `${clientData.mealCompliance}%`
                   : "-%"}
               </p>
-              <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
             </Card>
 
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Supplement Compliance</h3>
-              <p className="text-4xl font-bold">
+            <Card variant="elevated" className="p-6 animate-scale-in" style={{animationDelay: '0.3s'}}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 bg-gradient-to-br from-warning-500 to-warning-600 rounded-xl flex items-center justify-center shadow-soft">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                  </svg>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 7 days</p>
+                </div>
+              </div>
+              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Supplement Compliance</h3>
+              <p className="text-3xl font-bold text-warning-600">
                 {typeof clientData?.supplementCompliance === "number" && !isNaN(clientData.supplementCompliance)
                   ? `${clientData.supplementCompliance}%`
                   : "-%"}
               </p>
-              <p className="text-sm text-muted-foreground mt-2">Last 7 days</p>
             </Card>
 
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-2">Weight Change</h3>
-              <p className="text-4xl font-bold text-green-500">
+            <Card variant="elevated" className="p-6 animate-scale-in" style={{animationDelay: '0.4s'}}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center shadow-soft">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
+                  </svg>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Since sign up</p>
+                </div>
+              </div>
+              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Weight Change</h3>
+              <p className="text-3xl font-bold text-gradient">
                 {typeof weightChange === "number" && !isNaN(weightChange)
                   ? `${weightChange > 0 ? "+" : ""}${weightChange} lbs`
                   : "- lbs"}
               </p>
-              <p className="text-sm text-muted-foreground mt-2">Since sign up</p>
             </Card>
           </div>
 
@@ -1225,11 +1337,11 @@ export default function Dashboard() {
             {/* Next Meal */}
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Next Meal</h3>
-              <div className="rounded-xl bg-white shadow p-6 space-y-6">
+              <div className="rounded-xl bg-gray-50 dark:bg-gray-800 shadow p-6 space-y-6">
                 {!isHydrated ? (
-                  <div className="text-gray-500">Loading meals...</div>
+                  <div className="text-gray-500 dark:text-gray-400">Loading meals...</div>
                 ) : (!clientData?.meals || clientData.meals.length === 0) ? (
-                  <div className="text-gray-500">No meals planned for today.</div>
+                  <div className="text-gray-500 dark:text-gray-400">No meals planned for today.</div>
                 ) : (() => {
                     // Create meal key function to match the one used in meals page
                     const createMealKey = (meal: { id?: string | number; name: string; time: string }) => {
@@ -1243,29 +1355,29 @@ export default function Dashboard() {
                       return !isChecked;
                     });
                     if (!nextMeal) {
-                      return <div className="text-green-600 font-semibold">All meals completed for today!</div>;
+                      return <div className="text-green-600 dark:text-green-400 font-semibold">All meals completed for today!</div>;
                     }
                     return (
-                      <div className="rounded-lg bg-gray-50 shadow-sm p-5">
+                      <div className="rounded-lg bg-white dark:bg-gray-700 shadow-sm p-5">
                         <div className="flex justify-between items-center">
                           <div>
-                            <div className="text-xl font-semibold">{nextMeal.name}</div>
-                            <div className="text-gray-500">{nextMeal.time.slice(0, 5)}</div>
+                            <div className="text-xl font-semibold text-secondary dark:text-alabaster">{nextMeal.name}</div>
+                            <div className="text-gray-500 dark:text-gray-400">{nextMeal.time.slice(0, 5)}</div>
                           </div>
                           <div className="flex flex-col items-end">
-                            <span className="font-bold text-lg">{nextMeal.calories} cal</span>
+                            <span className="font-bold text-lg text-secondary dark:text-alabaster">{nextMeal.calories} cal</span>
                             <div className="flex gap-2 mt-1">
-                              <span className="bg-blue-100 text-blue-800 rounded-full px-2 py-0.5 text-xs font-medium">P: {nextMeal.protein}g</span>
-                              <span className="bg-green-100 text-green-800 rounded-full px-2 py-0.5 text-xs font-medium">C: {nextMeal.carbs}g</span>
-                              <span className="bg-yellow-100 text-yellow-800 rounded-full px-2 py-0.5 text-xs font-medium">F: {nextMeal.fat}g</span>
+                              <span className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full px-2 py-0.5 text-xs font-medium">P: {nextMeal.protein}g</span>
+                              <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full px-2 py-0.5 text-xs font-medium">C: {nextMeal.carbs}g</span>
+                              <span className="bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full px-2 py-0.5 text-xs font-medium">F: {nextMeal.fat}g</span>
                             </div>
                           </div>
                         </div>
-                        <ul className="mt-3 pl-4 border-l-2 border-gray-100 space-y-1">
+                        <ul className="mt-3 pl-4 border-l-2 border-gray-100 dark:border-gray-600 space-y-1">
                           {nextMeal.foods.map(food => (
-                            <li key={food.id} className="text-gray-700">
+                            <li key={food.id} className="text-gray-700 dark:text-gray-300">
                               <span className="font-medium">{food.name}</span> ({food.portion}) – 
-                              <span className="ml-1 text-xs text-gray-500">
+                              <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
                                 {food.calories} cal, P: {food.protein}g, C: {food.carbs}g, F: {food.fat}g
                               </span>
                             </li>
@@ -1281,23 +1393,23 @@ export default function Dashboard() {
             {/* Today's Workouts */}
             <Card className="p-6">
               <h3 className="font-semibold text-lg mb-4">Today's Workouts</h3>
-              <div className="rounded-xl bg-white shadow p-6 space-y-6 max-h-96 overflow-y-auto">
+              <div className="rounded-xl bg-gray-50 dark:bg-gray-800 shadow p-6 space-y-6 max-h-96 overflow-y-auto">
                 {clientData?.todaysWorkoutCompletion ? (
                   // Show today's completed workout/rest day
                   <div className="text-center py-6">
-                    <div className="text-green-600 mb-4">
+                    <div className="text-green-600 dark:text-green-400 mb-4">
                       <div className="font-semibold text-lg mb-2">✅ Completed Today</div>
                       <div className="text-xl font-bold">
                         {clientData.todaysWorkoutCompletion.isRestDay ? "Rest Day" : clientData.todaysWorkoutCompletion.workoutName}
                       </div>
                       {clientData.todaysWorkoutCompletion.isRestDay && (
-                        <div className="text-sm text-gray-600 mt-2">Take time to recover and recharge</div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400 mt-2">Take time to recover and recharge</div>
                       )}
                     </div>
                   </div>
                 ) : clientData?.isFlexibleSchedule ? (
                   <div className="text-center py-8">
-                    <div className="text-gray-600 mb-4">
+                    <div className="text-gray-600 dark:text-gray-400 mb-4">
                       <div className="font-semibold text-lg mb-2">Flexible Schedule Active</div>
                       <div className="text-sm">Head to Workouts and pick your workout for today!</div>
                     </div>
@@ -1309,33 +1421,29 @@ export default function Dashboard() {
                     </Link>
                   </div>
                 ) : clientData?.workouts?.length === 0 && clientData?.planName && clientData?.isRestDay ? (
-                  <div className="text-gray-500 text-center">
+                  <div className="text-gray-500 dark:text-gray-400 text-center">
                     <div className="font-semibold mb-1">Workout - {dayjs().tz('America/Denver').format('dddd')}</div>
                     <div>Today is a Rest Day</div>
                   </div>
                 ) : clientData?.workouts?.length === 0 ? (
-                  <div className="text-gray-500">No workouts planned for today.</div>
+                  <div className="text-gray-500 dark:text-gray-400">No workouts planned for today.</div>
                 ) : (
                   <div className="space-y-6">
                     {(clientData?.workouts ?? []).map((workout) => (
-                      <div key={workout.id} className="rounded-lg bg-gray-50 shadow-sm p-5">
-                        <div className="text-xl font-semibold mb-2">{workout.name}</div>
+                      <div key={workout.id} className="rounded-lg bg-white dark:bg-gray-700 shadow-sm p-5">
+                        <div className="text-xl font-semibold mb-2 text-secondary dark:text-alabaster">{workout.name}</div>
                         <div className="space-y-4">
                           {workout.groups?.map(group => (
                             <div key={group.type}>
-                              <ul className="pl-4 border-l-2 border-gray-100 space-y-2">
+                              <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full px-3 py-1 text-xs font-medium mb-2 inline-block">{group.type}</span>
+                              <ul className="mt-2 pl-4 border-l-2 border-gray-100 dark:border-gray-600 space-y-2">
                                 {group.exercises.map((exercise) => {
                                   const setsCount = exercise.sets.length;
                                   const reps = setsCount > 0 ? exercise.sets[0].reps : "-";
                                   return (
-                                    <li key={exercise.id} className="text-gray-700">
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-medium">{exercise.name}</span>
-                                        <span className="bg-green-100 text-green-800 rounded-full px-2 py-0.5 text-xs font-medium">
-                                          {exercise.type}
-                                        </span>
-                                      </div>
-                                      <span className="ml-2 text-xs text-gray-500">
+                                    <li key={exercise.id} className="text-gray-700 dark:text-gray-300">
+                                      <span className="font-medium">{exercise.name}</span>
+                                      <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
                                         {setsCount} set{setsCount !== 1 ? "s" : ""} x {reps} reps
                                       </span>
                                     </li>

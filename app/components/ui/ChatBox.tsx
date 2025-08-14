@@ -50,7 +50,7 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [page, setPage] = useState(0);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -103,9 +103,15 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
 
   // Scroll to bottom on new messages
   useEffect(() => {
-    if (chatEndRef.current && messagesContainerRef.current) {
-      const container = messagesContainerRef.current;
-      container.scrollTop = container.scrollHeight;
+    if (chatEndRef.current) {
+      // Only auto-scroll if user is already near the bottom
+      const container = chatEndRef.current.parentElement?.parentElement;
+      if (container) {
+        const isNearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 100;
+        if (isNearBottom) {
+          chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+        }
+      }
     }
   }, [messages]);
 
@@ -122,20 +128,19 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
 
   // Load more messages (infinite scroll)
   const handleScroll = (e: React.UIEvent<HTMLDivElement, UIEvent>) => {
-    const element = e.currentTarget;
-    const { scrollTop, scrollHeight, clientHeight } = element;
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     
-    // Check if we're near the top to load more messages
+    // Show scroll button if user has scrolled up (not near bottom)
+    const isNearBottom = scrollTop + clientHeight >= scrollHeight - 100;
+    setShowScrollButton(!isNearBottom);
+    
+    // Load more messages when scrolling to the top
     if (scrollTop === 0 && hasMore && !fetchingMore) {
       setFetchingMore(true);
       const nextPage = page + 1;
       setPage(nextPage);
       fetchMessages(nextPage, true);
     }
-    
-    // Show scroll to bottom button if user has scrolled up
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-    setShowScrollToBottom(!isNearBottom);
   };
 
   // Send message
@@ -229,12 +234,16 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
   }, [clientId]);
 
   return (
-    <Card className="flex flex-col h-full max-h-[600px] w-full">
+    <Card className="flex flex-col h-full w-full relative">
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto p-4 scroll-smooth relative" 
+        className="flex-1 overflow-y-auto p-4 scroll-smooth" 
         onScroll={handleScroll} 
-        style={{ minHeight: 300 }}
+        style={{ 
+          minHeight: 400,
+          maxHeight: 'calc(100vh - 300px)',
+          scrollBehavior: 'smooth'
+        }}
       >
         {loading ? (
           <div className="flex justify-center items-center h-full"><Spinner /></div>
@@ -244,6 +253,12 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
           <div className="text-gray-500 text-center">No messages yet.</div>
         ) : (
           <div className="flex flex-col gap-4">
+            {fetchingMore && (
+              <div className="text-center text-xs text-gray-400 py-2">
+                <Spinner />
+                <span className="ml-2">Loading more messages...</span>
+              </div>
+            )}
             {messages.map((msg) => {
               // Align right if this message was sent by the current user
               const isMine = msg.sender === currentUserRole;
@@ -258,16 +273,16 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
                     className="px-3 py-2 rounded-lg max-w-xs shadow text-sm"
                     style={{
                       background: isMine && chat_bubble_color ? chat_bubble_color : "#f3f4f6",
-                      color: isMine && chat_bubble_color && isColorDark(chat_bubble_color) ? "#fff" : "#000",
+                      color: isMine && chat_bubble_color && isColorDark(chat_bubble_color) ? "#fff" : "#374151",
                     }}
                   >
                     <div>{msg.content}</div>
                     <div
-                      className="text-xs text-gray-400 text-right mt-1"
+                      className="text-xs text-right mt-1"
                       style={{
                         color: isMine && chat_bubble_color && isColorDark(chat_bubble_color)
                           ? "rgba(255,255,255,0.9)"
-                          : "rgba(0,0,0,0.6)"
+                          : "#6b7280"
                       }}
                     >{formatTime(msg.timestamp)}</div>
                   </div>
@@ -282,32 +297,22 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
             <div ref={chatEndRef} />
           </div>
         )}
-        {fetchingMore && (
-          <div className="text-center text-xs text-gray-400 py-2 flex items-center justify-center gap-2">
-            <Spinner />
-            Loading more messages...
-          </div>
-        )}
-        {hasMore && !fetchingMore && (
-          <div className="text-center text-xs text-gray-400 py-2">
-            Scroll up to load more messages
-          </div>
-        )}
-        
-        {/* Scroll to bottom button */}
-        {showScrollToBottom && (
-          <button
-            onClick={scrollToBottom}
-            className="absolute bottom-4 right-4 bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 shadow-lg transition-all duration-200 z-10"
-            title="Scroll to bottom"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-            </svg>
-          </button>
-        )}
       </div>
-      <form onSubmit={handleSend} className="flex gap-2 p-4 border-t">
+      
+      {/* Scroll to Bottom Button */}
+      {showScrollButton && (
+        <button
+          onClick={scrollToBottom}
+          className="absolute bottom-20 right-4 bg-primary hover:bg-primary/90 text-white rounded-full p-2 shadow-lg transition-all duration-200 hover:scale-110 z-10"
+          title="Scroll to bottom"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+          </svg>
+        </button>
+      )}
+      
+      <form onSubmit={handleSend} className="flex gap-2 p-4 border-t bg-white dark:bg-gray-800">
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -316,7 +321,7 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
           className="flex-1"
         />
         <Button type="submit" disabled={sending || !input.trim()}>
-          Send
+          {sending ? <Spinner /> : "Send"}
         </Button>
       </form>
     </Card>

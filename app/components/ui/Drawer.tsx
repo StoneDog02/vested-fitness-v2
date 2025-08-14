@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 interface DrawerProps {
@@ -15,6 +15,12 @@ export default function Drawer({
   children,
 }: DrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Ensure we're on the client side
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Handle ESC key press
   useEffect(() => {
@@ -35,14 +41,17 @@ export default function Drawer({
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  // Don't render anything on the server
+  if (!mounted) {
+    return null;
+  }
 
   return createPortal(
     <>
       {/* Backdrop */}
       <div
-        className={`fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 ${
-          isOpen ? "opacity-100" : "opacity-0"
+        className={`fixed inset-0 z-40 bg-black/50 transition-opacity duration-500 ease-out ${
+          isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
         }`}
         onClick={onClose}
         aria-hidden="true"
@@ -51,7 +60,7 @@ export default function Drawer({
       {/* Drawer */}
       <div
         ref={drawerRef}
-        className={`fixed inset-y-0 right-0 z-50 w-full max-w-sm bg-white dark:bg-night shadow-xl transform transition-transform duration-300 ease-in-out ${
+        className={`fixed inset-y-0 right-0 z-50 w-full max-w-sm bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-700 shadow-2xl border-l border-gray-200 dark:border-gray-600 transform transition-all duration-500 ease-out ${
           isOpen ? "translate-x-0" : "translate-x-full"
         }`}
         role="dialog"
@@ -59,16 +68,16 @@ export default function Drawer({
         aria-labelledby="drawer-title"
       >
         {/* Header */}
-        <div className="flex justify-between items-center p-5 border-b border-gray-light dark:border-davyGray">
+        <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-600 bg-gradient-to-r from-gray-50 to-white dark:from-gray-700 dark:to-gray-800">
           <h3
             id="drawer-title"
-            className="text-lg font-semibold text-secondary dark:text-alabaster"
+            className="text-xl font-semibold text-secondary dark:text-alabaster"
           >
             {title}
           </h3>
           <button
             onClick={onClose}
-            className="text-gray-dark hover:text-secondary dark:text-gray-light dark:hover:text-alabaster transition-colors duration-200"
+            className="p-2 text-gray-600 dark:text-gray-400 hover:text-secondary dark:hover:text-alabaster hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-all duration-200 hover:scale-110"
             aria-label="Close"
           >
             <svg
@@ -89,7 +98,7 @@ export default function Drawer({
         </div>
 
         {/* Content */}
-        <div className="p-5 h-full overflow-y-auto">{children}</div>
+        <div className="p-6 h-full overflow-y-auto">{children}</div>
       </div>
     </>,
     document.body
