@@ -82,7 +82,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Get ALL workout plans for this user (both active and recently deactivated)
   const { data: allPlans } = await supabase
     .from("workout_plans")
-    .select("id, title, activated_at, deactivated_at, is_active")
+    .select("id, title, activated_at, deactivated_at, is_active, instructions")
     .eq("user_id", user.id)
     .eq("is_template", false)
     .order("activated_at", { ascending: false, nullsFirst: false });

@@ -7,6 +7,7 @@ export type WorkoutPlanLibrary = {
   id: string;
   title: string;
   description: string;
+  instructions?: string;
   createdAt: string;
   builderMode?: 'week' | 'day';
   workoutDaysPerWeek?: number;
@@ -171,6 +172,11 @@ export default function ViewWorkoutPlanLibraryModal({
                   <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
                     {plan.description}
                   </p>
+                  {plan.instructions && (
+                    <div className="text-sm text-gray-dark dark:text-gray-light mt-2">
+                      Instructions: {plan.instructions}
+                    </div>
+                  )}
                   <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                     Created: {new Date(plan.createdAt).toLocaleDateString(undefined, {
                       month: "2-digit",

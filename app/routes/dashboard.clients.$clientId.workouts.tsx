@@ -81,6 +81,7 @@ interface WorkoutPlan {
   id: string;
   title: string;
   description: string;
+  instructions: string;
   isActive: boolean;
   createdAt: string;
   activatedAt: string | null;
@@ -466,6 +467,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   // Move these variable declarations up so they're available for all action branches
   const planName = formData.get("planName") as string;
   const description = formData.get("description") as string | null;
+  const instructions = formData.get("instructions") as string | null;
   const weekJson = formData.get("week") as string;
   const week = weekJson ? JSON.parse(weekJson) : null;
   const planId = formData.get("workoutPlanId") as string | null;
@@ -543,7 +545,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     // Get template plan
     const { data: template } = await supabase
       .from("workout_plans")
-      .select("title, description")
+      .select("title, description, instructions")
       .eq("id", templateId)
       .single();
     if (!template) {
@@ -556,6 +558,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         user_id: client.id,
         title: template.title,
         description: template.description,
+        instructions: template.instructions,
         is_active: false,
         is_template: false,
         template_id: templateId,
@@ -673,6 +676,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         user_id: coachId,
         title: planName,
         description: description || null,
+        instructions: instructions || null,
         is_active: false,
         is_template: true,
         builder_mode: builderMode,
@@ -690,6 +694,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         user_id: client.id,
         title: planName,
         description: description || null,
+        instructions: instructions || null,
         is_active: false,
         is_template: false,
         template_id: newTemplate.id,
@@ -808,6 +813,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       .update({
         title: planName,
         description: description || null,
+        instructions: instructions || null,
         builder_mode: builderMode,
         workout_days_per_week: workoutDaysPerWeek,
         updated_at: new Date().toISOString(),
@@ -1151,6 +1157,7 @@ export default function ClientWorkouts() {
 
   const handleUpdateWorkout = (updated: {
     planName: string;
+    instructions: string;
     builderMode: 'week' | 'day';
     workoutDaysPerWeek?: number;
     week: { [day: string]: DayPlan };
@@ -1160,6 +1167,7 @@ export default function ClientWorkouts() {
     form.append("intent", "edit");
     form.append("workoutPlanId", selectedWorkout.id);
     form.append("planName", updated.planName);
+    form.append("instructions", updated.instructions);
     form.append("builderMode", updated.builderMode);
     if (updated.workoutDaysPerWeek) {
       form.append("workoutDaysPerWeek", updated.workoutDaysPerWeek.toString());
@@ -1171,6 +1179,7 @@ export default function ClientWorkouts() {
 
   const handleCreateWorkout = (workoutData: {
     planName: string;
+    instructions: string;
     builderMode: 'week' | 'day';
     workoutDaysPerWeek?: number;
     week: { [day: string]: DayPlan };
@@ -1178,6 +1187,7 @@ export default function ClientWorkouts() {
     const form = new FormData();
     form.append("intent", "create");
     form.append("planName", workoutData.planName);
+    form.append("instructions", workoutData.instructions);
     form.append("builderMode", workoutData.builderMode);
     if (workoutData.workoutDaysPerWeek) {
       form.append("workoutDaysPerWeek", workoutData.workoutDaysPerWeek.toString());
@@ -1337,6 +1347,11 @@ export default function ClientWorkouts() {
                         <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
                           {workout.description}
                         </p>
+                        {workout.instructions && (
+                          <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                            Instructions: {workout.instructions}
+                          </p>
+                        )}
                         <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                           Created: {formatDateMMDDYYYY(workout.createdAt)}
                         </div>
@@ -1419,6 +1434,11 @@ export default function ClientWorkouts() {
                         <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
                           {workout.description}
                         </p>
+                        {workout.instructions && (
+                          <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                            Instructions: {workout.instructions}
+                          </p>
+                        )}
                         <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                           Created: {formatDateMMDDYYYY(workout.createdAt)}
                         </div>
@@ -1475,6 +1495,11 @@ export default function ClientWorkouts() {
                   <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
                     {sortedPlans.find((p) => p.isActive)!.description}
                   </p>
+                  {sortedPlans.find((p) => p.isActive)!.instructions && (
+                    <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                      Instructions: {sortedPlans.find((p) => p.isActive)!.instructions}
+                    </p>
+                  )}
                   <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
                     Created:{" "}
                     {formatDateMMDDYYYY(
@@ -1576,7 +1601,7 @@ export default function ClientWorkouts() {
                       const hasRestCompletion = complianceFetcher.data?.completions?.some((c: any) => 
                         c.completed_at === dayStr && 
                         (!c.completed_groups || c.completed_groups.length === 0)
-                      );
+                      ) || false;
                       
                       isRestDay = !hasWorkoutCompletion && hasRestCompletion;
                     } else {
@@ -1784,7 +1809,7 @@ export default function ClientWorkouts() {
                                       )}
                                     </div>
                                     <p className="text-sm text-gray-dark dark:text-gray-light">
-                                      {template.groups.reduce((total, group) => total + (group.exercises?.length || 0), 0)} exercises • {template.groups.length} groups
+                                      {template.groups.reduce((total: number, group: any) => total + (group.exercises?.length || 0), 0)} exercises • {template.groups.length} groups
                                     </p>
                                   </div>
                                   {shouldShowCompleted && (
@@ -2006,6 +2031,7 @@ export default function ClientWorkouts() {
           isLoading={fetcher.state !== "idle"}
           initialValues={{
             planName: "",
+            instructions: "",
             builderMode: 'week',
             workoutDaysPerWeek: 4,
             week: [
@@ -2037,6 +2063,7 @@ export default function ClientWorkouts() {
             isLoading={fetcher.state !== "idle"}
             initialValues={{
               planName: selectedWorkout.title,
+              instructions: selectedWorkout.instructions || "",
               builderMode: selectedWorkout.builderMode || 'week',
               workoutDaysPerWeek: selectedWorkout.workoutDaysPerWeek || 4,
               week: buildWeekFromPlan(selectedWorkout),

@@ -286,6 +286,7 @@ export interface Database {
           user_id: string;
           title: string;
           description?: string;
+          instructions?: string;
           is_active: boolean;
           is_template: boolean;
           template_id?: string;
@@ -301,6 +302,7 @@ export interface Database {
           user_id: string;
           title: string;
           description?: string;
+          instructions?: string;
           is_active?: boolean;
           is_template?: boolean;
           template_id?: string;
@@ -316,6 +318,7 @@ export interface Database {
           user_id?: string;
           title?: string;
           description?: string;
+          instructions?: string;
           is_active?: boolean;
           is_template?: boolean;
           template_id?: string;

@@ -77,7 +77,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Get the active workout plan with builder mode info
   const { data: workoutPlans } = await supabase
     .from("workout_plans")
-    .select("id, title, is_active, builder_mode, workout_days_per_week")
+    .select("id, title, is_active, builder_mode, workout_days_per_week, instructions")
     .eq("user_id", user.id)
     .eq("is_active", true)
     .limit(1);

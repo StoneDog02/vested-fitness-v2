@@ -24,12 +24,14 @@ interface CreateWorkoutModalProps {
   onClose: () => void;
   onSubmit: (data: {
     planName: string;
+    instructions: string;
     builderMode: 'week' | 'day';
     workoutDaysPerWeek?: number;
     week: { [day: string]: DayPlan };
   }) => void;
   initialValues?: {
     planName: string;
+    instructions?: string;
     builderMode?: 'week' | 'day';
     workoutDaysPerWeek?: number;
     week: { [day: string]: DayPlan };
@@ -68,6 +70,7 @@ export default function CreateWorkoutModal({
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [currentWorkoutIndex, setCurrentWorkoutIndex] = useState(0);
   const [planName, setPlanName] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [builderMode, setBuilderMode] = useState<'week' | 'day'>('week');
   const [workoutDaysPerWeek, setWorkoutDaysPerWeek] = useState(4);
   const [weekPlans, setWeekPlans] = useState<{ [day: string]: DayPlan }>(() =>
@@ -86,6 +89,7 @@ export default function CreateWorkoutModal({
     if (isOpen) {
       if (initialValues) {
         setPlanName(initialValues.planName || "");
+        setInstructions(initialValues.instructions || "");
         setBuilderMode(initialValues.builderMode || 'week');
         setWorkoutDaysPerWeek(initialValues.workoutDaysPerWeek || 4);
         
@@ -124,6 +128,7 @@ export default function CreateWorkoutModal({
         }
       } else {
         setPlanName("");
+        setInstructions("");
         setBuilderMode('week');
         setWorkoutDaysPerWeek(4);
         setWeekPlans(
@@ -509,7 +514,7 @@ export default function CreateWorkoutModal({
     
     if (builderMode === 'week') {
       // Submit the week object as-is for Fixed Schedule
-      onSubmit({ planName, builderMode, week: weekPlans });
+      onSubmit({ planName, instructions, builderMode, week: weekPlans });
     } else {
       // For Flexible Schedule, flatten the workout templates into a week structure
       const weekData: { [day: string]: DayPlan } = {};
@@ -534,6 +539,7 @@ export default function CreateWorkoutModal({
       
       onSubmit({ 
         planName, 
+        instructions, 
         builderMode, 
         workoutDaysPerWeek, 
         week: weekData 
@@ -542,6 +548,7 @@ export default function CreateWorkoutModal({
     
     if (!initialValues) {
       setPlanName("");
+      setInstructions("");
       setBuilderMode('week');
       setWorkoutDaysPerWeek(7);
       setWeekPlans(
@@ -576,6 +583,24 @@ export default function CreateWorkoutModal({
               placeholder="e.g., Push Day, Pull Day, Legs Day"
               className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
               required
+            />
+          </div>
+
+          {/* Instructions */}
+          <div>
+            <label
+              htmlFor="instructions"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Instructions (optional)
+            </label>
+            <textarea
+              id="instructions"
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              rows={4}
+              placeholder="e.g., Warm-up, Cool-down, Pre-requisites"
+              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
 

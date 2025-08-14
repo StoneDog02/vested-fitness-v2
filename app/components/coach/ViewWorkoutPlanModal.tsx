@@ -20,6 +20,7 @@ interface WorkoutPlanData {
   id: string;
   title: string;
   description: string;
+  instructions?: string;
   createdAt: string;
   isActive: boolean;
   exercises: ExerciseData[];
@@ -48,6 +49,11 @@ export default function ViewWorkoutPlanModal({
           <p className="text-gray-dark dark:text-gray-light">
             {workoutPlan.description}
           </p>
+          {workoutPlan.instructions && (
+            <p className="text-sm text-gray-dark dark:text-gray-light mt-2">
+              Instructions: {workoutPlan.instructions}
+            </p>
+          )}
           <p className="text-sm text-gray-dark dark:text-gray-light mt-2">
             Created: {workoutPlan.createdAt}
           </p>
