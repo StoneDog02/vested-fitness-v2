@@ -322,7 +322,7 @@ function CardSection({ cardError, setCardError, cardPaymentMethodId }: { cardErr
       <div id="card-element" className="border rounded-md p-2 bg-white">
         <CardElement onChange={e => setCardError(e.error ? e.error.message : null)} options={{ style: { base: { fontSize: '16px' } } }} />
       </div>
-      <input type="hidden" name="paymentMethodId" value={cardPaymentMethodId || ''} />
+      <input type="hidden" name="paymentMethodId" value={cardPaymentMethodId === 'free-plan' ? '' : (cardPaymentMethodId || '')} />
       {cardError && <div className="text-red-600 text-sm mt-1">{cardError}</div>}
     </div>
   );
@@ -365,10 +365,26 @@ function ClientOnlyRegisterForm(props: any) {
   const [cardPaymentMethodId, setCardPaymentMethodId] = React.useState<string | null>(null);
   const [cardLoading, setCardLoading] = React.useState(false);
   const formRef = React.useRef<HTMLFormElement>(null);
+  const hasSubmittedRef = React.useRef(false);
   const [cardError, setCardError] = React.useState<string | null>(null);
 
   const stripe = useStripe();
   const elements = useElements();
+
+  // Effect to handle form submission after payment method is created
+  React.useEffect(() => {
+    if (cardPaymentMethodId && formRef.current && !hasSubmittedRef.current) {
+      hasSubmittedRef.current = true;
+      formRef.current.submit();
+    }
+  }, [cardPaymentMethodId]);
+
+  // Cleanup effect to reset submission flag on unmount
+  React.useEffect(() => {
+    return () => {
+      hasSubmittedRef.current = false;
+    };
+  }, []);
 
   // Fetch plan info robustly: use plan_price_id from invite fetch if available, else fallback to URL
   React.useEffect(() => {
@@ -478,6 +494,9 @@ function ClientOnlyRegisterForm(props: any) {
       e.preventDefault();
       setPaymentLoading(true);
       setCardError(null);
+      
+      // Reset submission flag for new payment method creation
+      hasSubmittedRef.current = false;
 
       // Check if this is a free plan by looking at the plan price
       const isFreePlan = planPrice === "Free";
@@ -486,9 +505,8 @@ function ClientOnlyRegisterForm(props: any) {
         // For free plans, skip payment method creation and submit directly
         console.log('[REGISTRATION] Free plan detected, skipping payment method creation');
         setPaymentLoading(false);
-        setTimeout(() => {
-          formRef.current?.submit();
-        }, 0);
+        // Trigger form submission via useEffect for consistency
+        setCardPaymentMethodId('free-plan');
         return;
       }
 
@@ -516,9 +534,8 @@ function ClientOnlyRegisterForm(props: any) {
       setCardPaymentMethodId(paymentMethod.id);
       setCardError(null);
       setPaymentLoading(false);
-      setTimeout(() => {
-        formRef.current?.submit();
-      }, 0);
+
+      // Form will be submitted automatically via useEffect when cardPaymentMethodId is set
       return;
     }
     // For non-client-invite, allow normal submit
