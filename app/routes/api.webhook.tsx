@@ -45,8 +45,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           stripe_subscription_id: subscription.id,
           price_id: subscription.items.data[0]?.price.id,
           status: subscription.status,
-          current_period_start: new Date(subscription.current_period_start * 1000),
-          current_period_end: new Date(subscription.current_period_end * 1000)
+          current_period_start: new Date((subscription as any).current_period_start * 1000),
+          current_period_end: new Date((subscription as any).current_period_end * 1000)
         });
       
       if (error) {
@@ -65,8 +65,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         .from('recurring_subscriptions')
         .update({
           status: subscription.status,
-          current_period_start: new Date(subscription.current_period_start * 1000),
-          current_period_end: new Date(subscription.current_period_end * 1000),
+          current_period_start: new Date((subscription as any).current_period_start * 1000),
+          current_period_end: new Date((subscription as any).current_period_end * 1000),
           updated_at: new Date()
         })
         .eq('stripe_subscription_id', subscription.id);
@@ -125,8 +125,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Handle successful payments for recurring subscriptions
     else if (event.type === 'invoice.payment_succeeded') {
       const invoice = event.data.object as Stripe.Invoice;
-      if (invoice.subscription && typeof invoice.subscription === 'string') {
-        console.log('[WEBHOOK] Payment succeeded for subscription:', invoice.subscription);
+      if ((invoice as any).subscription && typeof (invoice as any).subscription === 'string') {
+        console.log('[WEBHOOK] Payment succeeded for subscription:', (invoice as any).subscription);
         
         // Update subscription period dates if this is a renewal
         const { error } = await supabase
@@ -136,7 +136,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             current_period_end: new Date(invoice.period_end * 1000),
             updated_at: new Date()
           })
-          .eq('stripe_subscription_id', invoice.subscription);
+          .eq('stripe_subscription_id', (invoice as any).subscription);
         
         if (error) {
           console.error('[WEBHOOK] Failed to update subscription period:', error);
