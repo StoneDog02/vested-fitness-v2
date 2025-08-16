@@ -58,7 +58,10 @@ export const loader: LoaderFunction = async ({ request }) => {
       try {
         const decoded = jwt.decode(accessToken);
         authId = decoded && typeof decoded === "object" && "sub" in decoded ? decoded.sub : undefined;
-      } catch (e) {}
+      } catch (e) {
+        // Handle JWT decode error silently
+        console.error('Failed to decode JWT token:', e);
+      }
     }
 
     if (!authId) {

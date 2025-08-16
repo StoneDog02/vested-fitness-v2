@@ -914,7 +914,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           }
         }
       } else {
-
+        // Handle case where no action is needed
       }
     }
     return redirect(request.url);

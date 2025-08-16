@@ -60,7 +60,7 @@ const getChangeColor = (change: number, goal: string) => {
 };
 
 // In-memory cache for coach access data (per user, 30s TTL)
-const coachAccessCache: Record<string, { data: any; expires: number }> = {};
+const coachAccessCache: Record<string, { data: unknown; expires: number }> = {};
 
 // Type for check-in records
 interface CheckIn {
@@ -248,7 +248,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Filter updates to only those from the last 7 days
   const now = getCurrentDate().toDate();
   const oneWeekAgo = dayjs(now).subtract(7, "day").toDate();
-  const recentUpdates = (updates || []).filter((u: any) => {
+  const recentUpdates = (updates || []).filter((u: { created_at: string }) => {
     const created = new Date(u.created_at);
     return created >= oneWeekAgo;
   });
@@ -302,9 +302,19 @@ export default function CoachAccess() {
   const [showProgressPhotos, setShowProgressPhotos] = useState(false);
   
   // Check-in form state
-  const [pendingForms, setPendingForms] = useState<any[]>([]);
+  const [pendingForms, setPendingForms] = useState<Array<{
+    id: string;
+    form: { title: string; description?: string };
+    sent_at: string;
+    expires_at?: string;
+  }>>([]);
   const [showCheckInForm, setShowCheckInForm] = useState(false);
-  const [currentFormInstance, setCurrentFormInstance] = useState<any>(null);
+  const [currentFormInstance, setCurrentFormInstance] = useState<{
+    id: string;
+    form: { title: string; description?: string };
+    sent_at: string;
+    expires_at?: string;
+  } | null>(null);
 
   // Pagination state for check-ins
   const [checkInPage, setCheckInPage] = useState(1);
@@ -421,7 +431,12 @@ export default function CoachAccess() {
   };
 
   // Check-in form handlers
-  const handleOpenCheckInForm = (formInstance: any) => {
+  const handleOpenCheckInForm = (formInstance: {
+    id: string;
+    form: { title: string; description?: string };
+    sent_at: string;
+    expires_at?: string;
+  }) => {
     setCurrentFormInstance(formInstance);
     setShowCheckInForm(true);
   };
@@ -467,7 +482,7 @@ export default function CoachAccess() {
   // Filter updates to only those from the last 7 days
   const now = getCurrentDate().toDate();
   const oneWeekAgo = dayjs(now).subtract(7, "day").toDate();
-  const recentUpdates = (updates || []).filter((u: any) => {
+  const recentUpdates = (updates || []).filter((u: { created_at: string }) => {
     const created = new Date(u.created_at);
     return created >= oneWeekAgo;
   });
@@ -484,13 +499,15 @@ export default function CoachAccess() {
         setWeightLogs(data.weightLogs || []);
       }
     } catch (err) {
+      // Handle fetch error silently
+      console.error('Failed to fetch weight logs:', err);
     }
   }
 
   // Prepare chart data from live weight logs
   const hasWeightLogs = weightLogs && weightLogs.length > 0;
   const chartData = hasWeightLogs
-    ? weightLogs.map((w: any) => ({
+    ? weightLogs.map((w: { logged_at: string; weight: string | number }) => ({
         date: w.logged_at,
         weight: Number(w.weight),
       }))
@@ -521,7 +538,7 @@ export default function CoachAccess() {
             </div>
           }>
             <div className={`relative space-y-4 overflow-y-auto pr-2 custom-scrollbar ${containerMaxHeight}`} style={{ maxHeight: recentUpdates.length > 3 ? '10rem' : 'none' }}>
-              {recentUpdates.map((update: any) => (
+              {recentUpdates.map((update: { id: string; created_at: string; message: string }) => (
                 <div
                   key={update.id}
                   className="border-b border-gray-light dark:border-davyGray pb-3 last:border-0 last:pb-0"
