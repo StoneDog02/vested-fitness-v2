@@ -82,6 +82,7 @@ export default function VideoRecorder({
   const [transcript, setTranscript] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [speechRecognition, setSpeechRecognition] = useState<SpeechRecognition | null>(null);
+  const [expandedForms, setExpandedForms] = useState<Set<string>>(new Set());
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -90,6 +91,18 @@ export default function VideoRecorder({
   const accumulatedTranscriptRef = useRef<string>(''); // Store transcript across pause/resume cycles
   const speechRecognitionRestartRef = useRef<NodeJS.Timeout | null>(null); // For auto-restarting speech recognition
   const speechRecognitionMonitorRef = useRef<NodeJS.Timeout | null>(null); // For monitoring speech recognition state
+
+  const toggleFormExpansion = (formId: string) => {
+    setExpandedForms(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(formId)) {
+        newSet.delete(formId);
+      } else {
+        newSet.add(formId);
+      }
+      return newSet;
+    });
+  };
 
   const startSpeechRecognition = useCallback(() => {
     if (!enableDictation || !SpeechRecognitionAPI || typeof window === 'undefined') {
@@ -436,10 +449,10 @@ export default function VideoRecorder({
   return (
     <div className="space-y-4">
       <div className="text-center">
-        <h3 className="text-lg font-medium text-secondary dark:text-alabaster mb-2">
+        <h3 className="text-base sm:text-lg font-medium text-secondary dark:text-alabaster mb-2">
           {recordingType === 'video' ? 'Camera & Audio Recording' : 'Audio Recording'}
         </h3>
-        <p className="text-sm text-gray-dark dark:text-gray-light">
+        <p className="text-xs sm:text-sm text-gray-dark dark:text-gray-light">
           {recordingType === 'video' 
             ? 'Record your camera and voice to provide personalized feedback'
             : 'Record audio-only messages for quick updates'
@@ -449,68 +462,117 @@ export default function VideoRecorder({
 
       {/* Form Responses Reference */}
       {completedForms.length > 0 && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-          <div className="flex items-center space-x-2 mb-3">
-            <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 sm:p-4">
+          <div className="flex items-center space-x-2 mb-2 sm:mb-3">
+            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
             </svg>
-            <h4 className="font-medium text-blue-800 dark:text-blue-200">
+            <h4 className="font-medium text-green-800 dark:text-green-200 text-sm sm:text-base">
               Client Form Responses - Reference During Recording
             </h4>
           </div>
-          <div className="space-y-3 max-h-48 overflow-y-auto">
-            {/* Filter to show only recent forms (last 30 days) */}
+          <div className="space-y-2 sm:space-y-3 max-h-48 sm:max-h-64 overflow-y-auto">
+            {/* Filter to show only recent forms (last 7 days) */}
             {completedForms
               .filter(form => {
-                const thirtyDaysAgo = new Date();
-                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-                return new Date(form.completed_at) >= thirtyDaysAgo;
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                return new Date(form.completed_at) >= sevenDaysAgo;
               })
-              .slice(0, 2)
-              .map((form) => (
-              <div
-                key={form.id}
-                className="bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-lg p-3"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <h5 className="font-medium text-blue-900 dark:text-blue-100 text-sm">
-                    {form.form.title}
-                  </h5>
-                  <span className="text-xs text-blue-600 dark:text-blue-400">
-                    {new Date(form.completed_at).toLocaleDateString()}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {form.responses?.map((response: any, index: number) => (
-                    <div key={response.id} className="text-xs">
-                      <div className="font-medium text-blue-800 dark:text-blue-200 mb-1">
-                        Q{index + 1}: {response.question?.question_text}
+              .slice(0, 3)
+              .map((form) => {
+                const isExpanded = expandedForms.has(form.id);
+                return (
+                  <div
+                    key={form.id}
+                    className="bg-white dark:bg-gray-800 border border-green-200 dark:border-green-700 rounded-lg overflow-hidden"
+                  >
+                    {/* Form Header - Always Visible */}
+                    <button
+                      onClick={() => toggleFormExpansion(form.id)}
+                      className="w-full p-2 sm:p-3 text-left hover:bg-green-50 dark:hover:bg-green-900/30 transition-colors duration-200"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <h5 className="font-medium text-green-900 dark:text-green-100 text-xs sm:text-sm">
+                            {form.form?.title || 'Untitled Form'}
+                          </h5>
+                          <span className="text-xs text-green-600 dark:text-green-400">
+                            {new Date(form.completed_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs text-green-600 dark:text-green-400">
+                            {form.responses?.length || 0} responses
+                          </span>
+                          <svg 
+                            className={`w-4 h-4 text-green-600 dark:text-green-400 transition-transform duration-200 ${
+                              isExpanded ? 'rotate-180' : ''
+                            }`} 
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
                       </div>
-                      <div className="text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded">
-                        A: {response.response_text || response.response_number || response.response_options?.join(', ') || 'No response'}
+                    </button>
+
+                    {/* Form Responses - Expandable */}
+                    {isExpanded && form.responses && form.responses.length > 0 && (
+                      <div className="px-2 sm:px-3 pb-2 sm:pb-3 border-t border-green-200 dark:border-green-700">
+                        <div className="space-y-2 sm:space-y-3 pt-2">
+                          {form.responses.map((response: any, index: number) => (
+                            <div key={response.id} className="text-xs">
+                              <div className="font-medium text-green-800 dark:text-green-200 mb-1">
+                                Q{index + 1}: {response.question?.question_text || `Question ${index + 1}`}
+                              </div>
+                              <div className="text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded">
+                                A: {response.response_text || response.response_number || response.response_options?.join(', ') || 'No response'}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    )}
+                  </div>
+                );
+              })}
+            {completedForms.filter(form => {
+              const sevenDaysAgo = new Date();
+              sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+              return new Date(form.completed_at) >= sevenDaysAgo;
+            }).length === 0 && (
+              <div className="text-center text-green-600 dark:text-green-400 text-xs italic py-4">
+                No forms completed in the last 7 days
               </div>
-            ))}
-            {completedForms.length > 2 && (
-              <div className="text-center text-blue-600 dark:text-blue-400 text-xs italic">
-                +{completedForms.length - 2} more forms available
+            )}
+            {completedForms.filter(form => {
+              const sevenDaysAgo = new Date();
+              sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+              return new Date(form.completed_at) >= sevenDaysAgo;
+            }).length > 3 && (
+              <div className="text-center text-green-600 dark:text-green-400 text-xs italic">
+                +{completedForms.filter(form => {
+                  const sevenDaysAgo = new Date();
+                  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                  return new Date(form.completed_at) >= sevenDaysAgo;
+                }).length - 3} more forms available
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Video Preview */}
+      {/* Video Preview - Mobile Optimized */}
       {recordingType === 'video' && (
         <div className="relative bg-black rounded-lg overflow-hidden">
           <video
             ref={videoRef}
             autoPlay
             muted
-            className="w-full h-64 object-contain"
+            className="w-full h-32 sm:h-48 md:h-64 object-contain"
             style={{ transform: 'scaleX(-1)' }}
           />
           {isRecording && (
@@ -523,8 +585,8 @@ export default function VideoRecorder({
 
       {/* Audio Visualizer */}
       {recordingType === 'audio' && isRecording && (
-        <div className="bg-gray-100 dark:bg-davyGray rounded-lg p-4 text-center">
-          <div className="text-2xl mb-2">🎤</div>
+        <div className="bg-gray-100 dark:bg-davyGray rounded-lg p-3 sm:p-4 text-center">
+          <div className="text-xl sm:text-2xl mb-2">🎤</div>
           <div className="text-sm text-gray-dark dark:text-gray-light">
             Recording... {formatTime(recordingTime)}
           </div>
@@ -545,14 +607,14 @@ export default function VideoRecorder({
 
       {/* Live Transcript Display */}
       {enableDictation && isRecording && (
-        <div className="bg-gray-50 dark:bg-davyGray rounded-lg p-4">
+        <div className="bg-gray-50 dark:bg-davyGray rounded-lg p-3 sm:p-4">
           <div className="flex items-center space-x-2 mb-2">
             <div className={`w-2 h-2 rounded-full ${isTranscribing ? 'bg-green-500 animate-pulse' : transcript ? 'bg-yellow-500' : 'bg-gray-400'}`}></div>
             <span className="text-sm font-medium text-gray-dark dark:text-gray-light">
               {isTranscribing ? 'Live Transcription' : transcript ? 'Transcription (Paused)' : 'Live Transcription'}
             </span>
           </div>
-          <div className="text-sm text-gray-dark dark:text-gray-light min-h-[60px] max-h-[120px] overflow-y-auto">
+          <div className="text-sm text-gray-dark dark:text-gray-light min-h-[50px] sm:min-h-[60px] max-h-[100px] sm:max-h-[120px] overflow-y-auto">
             {transcript ? (
               <p className="whitespace-pre-wrap">{transcript}</p>
             ) : (
@@ -562,13 +624,13 @@ export default function VideoRecorder({
         </div>
       )}
 
-      {/* Controls */}
-      <div className="flex justify-center space-x-3">
+      {/* Controls - Mobile Optimized */}
+      <div className="flex flex-col sm:flex-row justify-center space-y-3 sm:space-y-0 sm:space-x-3">
         {!isRecording ? (
           <Button
             onClick={startRecording}
             variant="primary"
-            className="flex items-center space-x-2"
+            className="flex items-center justify-center space-x-2 w-full sm:w-auto"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
@@ -580,7 +642,7 @@ export default function VideoRecorder({
             <Button
               onClick={pauseRecording}
               variant="secondary"
-              className="flex items-center space-x-2"
+              className="flex items-center justify-center space-x-2 w-full sm:w-auto"
             >
               {isPaused ? (
                 <>
@@ -601,7 +663,7 @@ export default function VideoRecorder({
             <Button
               onClick={stopRecording}
               variant="primary"
-              className="flex items-center space-x-2 bg-red-500 hover:bg-red-600"
+              className="flex items-center justify-center space-x-2 bg-red-500 hover:bg-red-600 w-full sm:w-auto"
             >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
@@ -610,7 +672,7 @@ export default function VideoRecorder({
             </Button>
           </>
         )}
-        <Button onClick={onCancel} variant="outline">
+        <Button onClick={onCancel} variant="outline" className="w-full sm:w-auto">
           Cancel
         </Button>
       </div>

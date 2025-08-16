@@ -360,35 +360,76 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
   // Process completed check-in forms
   let completedForms: any[] = [];
   if (completedFormsRaw?.data && completedFormsRaw.data.length > 0) {
-    const formIds = completedFormsRaw.data.map((instance: any) => instance.form_id);
-    const { data: formsData } = await supabase
-      .from("check_in_forms")
-      .select("id, title, description")
-      .in("id", formIds);
-    
-    // Create a map of form data by ID
-    const formsMap = new Map();
-    (formsData || []).forEach((form: any) => {
-      formsMap.set(form.id, form);
-    });
+    // Fetch complete form data with responses and questions
+    completedForms = await Promise.all(
+      completedFormsRaw.data.map(async (instance: any) => {
+        // Fetch form data
+        const { data: formData } = await supabase
+          .from("check_in_forms")
+          .select("id, title, description")
+          .eq("id", instance.form_id)
+          .single();
 
-    // Combine instance data with form data
-    completedForms = completedFormsRaw.data.map((instance: any) => {
-      const formData = formsMap.get(instance.form_id);
-      return {
-        id: instance.id,
-        form_id: instance.form_id,
-        client_id: instance.client_id,
-        sent_at: instance.sent_at,
-        completed_at: instance.completed_at,
-        status: instance.status,
-        expires_at: instance.expires_at,
-        form: {
-          title: formData?.title || 'Untitled Form',
-          description: formData?.description,
-        },
-      };
-    });
+        // Fetch responses for this instance
+        const { data: responses } = await supabase
+          .from("check_in_form_responses")
+          .select(`
+            id,
+            question_id,
+            response_text,
+            response_number,
+            response_options
+          `)
+          .eq("instance_id", instance.id);
+
+        // Fetch questions for the responses
+        let responsesWithQuestions: any[] = [];
+        if (responses && responses.length > 0) {
+          responsesWithQuestions = await Promise.all(
+            responses.map(async (response: any) => {
+              const { data: questionData } = await supabase
+                .from("check_in_form_questions")
+                .select("id, question_text, question_type")
+                .eq("id", response.question_id)
+                .single();
+
+              return {
+                id: response.id,
+                question_id: response.question_id,
+                response_text: response.response_text,
+                response_number: response.response_number,
+                response_options: response.response_options,
+                question: questionData ? {
+                  question_text: questionData.question_text,
+                  question_type: questionData.question_type,
+                } : {
+                  question_text: 'Unknown Question',
+                  question_type: 'text',
+                },
+              };
+            })
+          );
+        }
+
+        return {
+          id: instance.id,
+          form_id: instance.form_id,
+          client_id: instance.client_id,
+          sent_at: instance.sent_at,
+          completed_at: instance.completed_at,
+          status: instance.status,
+          expires_at: instance.expires_at,
+          form: {
+            title: formData?.title || 'Untitled Form',
+            description: formData?.description,
+          },
+          client: {
+            name: client.name || 'Unknown Client',
+          },
+          responses: responsesWithQuestions,
+        };
+      })
+    );
   }
 
   // For check-ins, add pagination info
@@ -736,60 +777,6 @@ export default function ClientDetails() {
     return lastWeekCheckIns.length > 0 ? 
       (lastWeekCheckIns.find(ci => ci.video_url || ci.audio_url) || lastWeekCheckIns[0]) : null;
   })();
-
-  // Debug logging to help identify the issue
-  if (typeof window !== 'undefined') {
-    console.log('Debug Check-in Info:', {
-      currentDate: now.format('YYYY-MM-DD dddd'),
-      currentTimestamp: now.valueOf(),
-      thisWeekRange: `${dayjs(thisWeekStart).format('MM/DD')} - ${dayjs(thisWeekEnd).format('MM/DD/YYYY')}`,
-      thisWeekStart: thisWeekStart,
-      thisWeekEnd: thisWeekEnd,
-      lastWeekRange: `${dayjs(lastWeekStart).format('MM/DD')} - ${dayjs(lastWeekEnd).format('MM/DD/YYYY')}`,
-      lastWeekStart: lastWeekStart,
-      lastWeekEnd: lastWeekEnd,
-      lastWeekCutoffDate: dayjs(lastWeekEnd).add(1, 'day').format('MM/DD/YYYY'),
-      isCurrentDateBeyondCutoff: now.valueOf() > dayjs(lastWeekEnd).add(1, 'day').valueOf(),
-      allCheckIns: sortedCheckIns.map(c => ({ 
-        date: c.date, 
-        timestamp: dayjs(c.date).valueOf(),
-        notes: c.notes.substring(0, 20),
-        video_url: c.video_url,
-        audio_url: c.audio_url,
-        recording_type: c.recording_type,
-        inThisWeek: dayjs(c.date).valueOf() >= thisWeekStart && dayjs(c.date).valueOf() <= thisWeekEnd,
-        inLastWeek: dayjs(c.date).valueOf() >= lastWeekStart && dayjs(c.date).valueOf() <= lastWeekEnd
-      })),
-      thisWeekCheckIns: thisWeekCheckIns.map(c => ({ 
-        date: c.date, 
-        notes: c.notes.substring(0, 20),
-        video_url: c.video_url,
-        audio_url: c.audio_url,
-        recording_type: c.recording_type
-      })),
-      lastWeekCheckIns: lastWeekCheckIns.map(c => ({ 
-        date: c.date, 
-        notes: c.notes.substring(0, 20),
-        video_url: c.video_url,
-        audio_url: c.audio_url,
-        recording_type: c.recording_type
-      })),
-      thisWeekCheckIn: thisWeekCheckIn ? { 
-        date: thisWeekCheckIn.date, 
-        notes: thisWeekCheckIn.notes.substring(0, 20),
-        video_url: thisWeekCheckIn.video_url,
-        audio_url: thisWeekCheckIn.audio_url,
-        recording_type: thisWeekCheckIn.recording_type
-      } : null,
-      lastWeekCheckIn: lastWeekCheckIn ? { 
-        date: lastWeekCheckIn.date, 
-        notes: lastWeekCheckIn.notes.substring(0, 20),
-        video_url: lastWeekCheckIn.video_url,
-        audio_url: lastWeekCheckIn.audio_url,
-        recording_type: lastWeekCheckIn.recording_type
-      } : null,
-    });
-  }
 
   // New history state
   const [historyCheckIns, setHistoryCheckIns] = useState<CheckInNote[]>([]);

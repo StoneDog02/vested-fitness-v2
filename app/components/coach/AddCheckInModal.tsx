@@ -27,6 +27,19 @@ export default function AddCheckInModal({
   const [recordingData, setRecordingData] = useState<{ blob: Blob; duration: number; type: 'video' | 'audio'; transcript?: string } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [expandedForms, setExpandedForms] = useState<Set<string>>(new Set());
+
+  const toggleFormExpansion = (formId: string) => {
+    setExpandedForms(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(formId)) {
+        newSet.delete(formId);
+      } else {
+        newSet.add(formId);
+      }
+      return newSet;
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,7 +124,7 @@ export default function AddCheckInModal({
         isOpen={isOpen}
         onClose={onClose}
         title="Record Check In"
-        size="lg"
+        size="video"
       >
         <VideoRecorder
           onRecordingComplete={handleRecordingComplete}
@@ -147,45 +160,83 @@ export default function AddCheckInModal({
             <h4 className="font-medium text-secondary dark:text-alabaster mb-2">
               Recent Form Responses
             </h4>
-            <div className="space-y-2 max-h-40 overflow-y-auto">
-              {/* Filter to show only recent forms (last 30 days) */}
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {/* Filter to show only recent forms (last 7 days) */}
               {completedForms
                 .filter(form => {
-                  const thirtyDaysAgo = new Date();
-                  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-                  return new Date(form.completed_at) >= thirtyDaysAgo;
+                  const sevenDaysAgo = new Date();
+                  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                  return new Date(form.completed_at) >= sevenDaysAgo;
                 })
                 .slice(0, 3)
-                .map((form) => (
-                <div
-                  key={form.id}
-                  className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <h5 className="font-medium text-green-800 dark:text-green-200 text-sm">
-                      {form.form.title}
-                    </h5>
-                    <span className="text-xs text-green-600 dark:text-green-400">
-                      {new Date(form.completed_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <div className="text-xs text-green-700 dark:text-green-300">
-                    {form.responses?.slice(0, 2).map((response: any, index: number) => (
-                      <div key={response.id} className="mb-1">
-                        <span className="font-medium">{response.question?.question_text}:</span>{' '}
-                        <span className="truncate">
-                          {response.response_text || response.response_number || 'No response'}
-                        </span>
-                      </div>
-                    ))}
-                    {form.responses?.length > 2 && (
-                      <div className="text-green-600 dark:text-green-400 italic">
-                        +{form.responses.length - 2} more responses
-                      </div>
-                    )}
-                  </div>
+                .map((form) => {
+                  const isExpanded = expandedForms.has(form.id);
+                  return (
+                    <div
+                      key={form.id}
+                      className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg overflow-hidden"
+                    >
+                      {/* Form Header - Always Visible */}
+                      <button
+                        onClick={() => toggleFormExpansion(form.id)}
+                        className="w-full p-3 text-left hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors duration-200"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <h5 className="font-medium text-green-800 dark:text-green-200 text-sm">
+                              {form.form.title}
+                            </h5>
+                            <span className="text-xs text-green-600 dark:text-green-400">
+                              {new Date(form.completed_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs text-green-600 dark:text-green-400">
+                              {form.responses?.length || 0} responses
+                            </span>
+                            <svg 
+                              className={`w-4 h-4 text-green-600 dark:text-green-400 transition-transform duration-200 ${
+                                isExpanded ? 'rotate-180' : ''
+                              }`} 
+                              fill="none" 
+                              stroke="currentColor" 
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Form Responses - Expandable */}
+                      {isExpanded && form.responses && form.responses.length > 0 && (
+                        <div className="px-3 pb-3 border-t border-green-200 dark:border-green-800">
+                          <div className="space-y-2 pt-2">
+                            {form.responses.map((response: any, index: number) => (
+                              <div key={response.id} className="text-xs">
+                                <div className="font-medium text-green-800 dark:text-green-200 mb-1">
+                                  Q{index + 1}: {response.question?.question_text || `Question ${index + 1}`}
+                                </div>
+                                <div className="text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded">
+                                  A: {response.response_text || response.response_number || response.response_options?.join(', ') || 'No response'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              {completedForms.filter(form => {
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                return new Date(form.completed_at) >= sevenDaysAgo;
+              }).length === 0 && (
+                <div className="text-center text-green-600 dark:text-green-400 text-xs italic py-4">
+                  No forms completed in the last 7 days
                 </div>
-              ))}
+              )}
             </div>
           </div>
         )}

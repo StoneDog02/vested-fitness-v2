@@ -6,7 +6,7 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
-  size?: "sm" | "md" | "lg" | "xl" | "full";
+  size?: "sm" | "md" | "lg" | "xl" | "full" | "video";
   hideCloseButton?: boolean;
 }
 
@@ -45,6 +45,7 @@ export default function Modal({
     lg: "max-w-2xl",
     xl: "max-w-4xl",
     full: "max-w-none w-full h-full",
+    video: "max-w-2xl sm:max-w-3xl md:max-w-4xl w-full",
   };
 
   if (!isOpen) return null;
@@ -60,7 +61,7 @@ export default function Modal({
 
       {/* Modal */}
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
@@ -70,7 +71,7 @@ export default function Modal({
           className={`${sizeClasses[size]} w-full bg-white dark:bg-night rounded-xl shadow-lg transform transition-all duration-300 ease-in-out flex flex-col ${size === 'full' ? 'h-full' : 'max-h-[90vh]'}`}
         >
           {!hideCloseButton && (
-            <div className="flex justify-between items-center p-5 border-b border-gray-light dark:border-davyGray shrink-0">
+            <div className="flex justify-between items-center p-4 sm:p-5 border-b border-gray-light dark:border-davyGray shrink-0">
               <h3
                 id="modal-title"
                 className="text-lg font-semibold text-secondary dark:text-alabaster"
@@ -99,7 +100,7 @@ export default function Modal({
               </button>
             </div>
           )}
-          <div className={`${size === 'full' ? 'flex-1' : 'p-5'} overflow-y-auto`}>{children}</div>
+          <div className={`${size === 'full' ? 'flex-1' : 'p-4 sm:p-5'} overflow-y-auto`}>{children}</div>
         </div>
       </div>
     </>,
