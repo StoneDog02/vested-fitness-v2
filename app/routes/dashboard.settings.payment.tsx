@@ -214,6 +214,7 @@ export default function PaymentSettings() {
   const [showAddCardForm, setShowAddCardForm] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loadingDefault, setLoadingDefault] = useState<string | null>(null);
+  const [deletingPaymentMethod, setDeletingPaymentMethod] = useState<string | null>(null);
   const [showAllInvoices, setShowAllInvoices] = useState(false);
   const [invoiceLimit, setInvoiceLimit] = useState(10);
   const [loadingMoreInvoices, setLoadingMoreInvoices] = useState(false);
@@ -233,6 +234,72 @@ export default function PaymentSettings() {
     billingHistory = data.billingHistory;
     currentInvoice = data.currentInvoice;
   }
+
+  // State for client payment methods (will be updated when refreshKey changes)
+  const [clientPaymentMethods, setClientPaymentMethods] = useState(paymentMethods);
+
+  // Effect to refetch payment methods when refreshKey changes
+  useEffect(() => {
+    if (data.isCoach) return; // Only for clients
+    
+    async function fetchPaymentMethods() {
+      try {
+        const res = await fetch("/api/payment-methods");
+        if (res.ok) {
+          const data = await res.json();
+          setClientPaymentMethods(data.paymentMethods || []);
+        }
+      } catch (err) {
+        console.error("Failed to refresh payment methods:", err);
+      }
+    }
+    
+    fetchPaymentMethods();
+  }, [refreshKey, data.isCoach]);
+
+  // Use clientPaymentMethods instead of paymentMethods for client UI
+  if (!data.isCoach) {
+    paymentMethods = clientPaymentMethods;
+  }
+
+  // Handle payment method deletion
+  const handleDeletePaymentMethod = async (paymentMethodId: string) => {
+    // Prevent deleting the default payment method if it's the only one
+    if (paymentMethods.length === 1) {
+      alert('Cannot delete the only payment method. Please add another payment method first.');
+      return;
+    }
+    
+    // Prevent deleting the default payment method
+    if (paymentMethodId === defaultPaymentMethodId) {
+      alert('Cannot delete the default payment method. Please set another payment method as default first.');
+      return;
+    }
+    
+    if (!confirm('Are you sure you want to delete this payment method? This action cannot be undone.')) {
+      return;
+    }
+    
+    setDeletingPaymentMethod(paymentMethodId);
+    try {
+      const res = await fetch("/api/payment-methods", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentMethodId }),
+      });
+      
+      if (res.ok) {
+        setRefreshKey((k) => k + 1); // trigger reload
+      } else {
+        const data = await res.json();
+        alert(`Failed to delete payment method: ${data.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      alert('Network error while deleting payment method');
+    } finally {
+      setDeletingPaymentMethod(null);
+    }
+  };
 
   // Helper functions and sortedInvoices (must be before any logic/JSX that uses them)
   const getInvoiceDate = (inv: any) => inv.created || inv.date;
@@ -555,9 +622,9 @@ export default function PaymentSettings() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center">
+                  <div className="flex items-center space-x-2">
                     {isDefault && (
-                      <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded mr-2">
+                      <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded">
                         Default
                       </span>
                     )}
@@ -565,11 +632,25 @@ export default function PaymentSettings() {
                       <button
                         className="text-sm text-gray-dark dark:text-gray-300 hover:text-primary dark:hover:text-primary"
                         onClick={handleSetDefault}
-                        disabled={loadingDefault === method.id}
+                        disabled={loadingDefault === method.id || deletingPaymentMethod === method.id}
                       >
                         {loadingDefault === method.id ? "Setting..." : "Set Default"}
                       </button>
                     )}
+                    <button
+                      className="text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 disabled:text-gray-400 disabled:cursor-not-allowed"
+                      onClick={() => handleDeletePaymentMethod(method.id)}
+                      disabled={loadingDefault === method.id || deletingPaymentMethod === method.id || isDefault || paymentMethods.length === 1}
+                      title={
+                        isDefault 
+                          ? "Cannot delete default payment method" 
+                          : paymentMethods.length === 1 
+                            ? "Cannot delete the only payment method"
+                            : "Delete payment method"
+                      }
+                    >
+                      {deletingPaymentMethod === method.id ? "Deleting..." : "Delete"}
+                    </button>
                   </div>
                 </div>
               );
