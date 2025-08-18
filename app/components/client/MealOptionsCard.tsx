@@ -40,9 +40,8 @@ export default function MealOptionsCard({
   checkedMeals = [],
   toggleMealCheck,
 }: MealOptionsCardProps) {
-  const [selectedOption, setSelectedOption] = useState<'A' | 'B'>(
-    meals.find(m => m.id === selectedMealId)?.mealOption || 'A'
-  );
+  // Track selection per meal group (keyed by name-time)
+  const [selectedOptionsByGroup, setSelectedOptionsByGroup] = useState<Record<string, 'A' | 'B'>>({});
 
   // Group meals by name and time
   const mealGroups = meals.reduce((groups, meal) => {
@@ -54,22 +53,33 @@ export default function MealOptionsCard({
     return groups;
   }, {} as Record<string, Meal[]>);
 
-  const handleOptionSelect = (option: 'A' | 'B') => {
-    setSelectedOption(option);
-    const selectedMeal = meals.find(m => m.mealOption === option);
+  const handleOptionSelect = (groupKey: string, option: 'A' | 'B') => {
+    setSelectedOptionsByGroup(prev => ({ ...prev, [groupKey]: option }));
+    const groupMeals = mealGroups[groupKey] || [];
+    const selectedMeal = groupMeals.find(m => m.mealOption === option) || groupMeals[0];
     if (selectedMeal) {
       onMealSelect(selectedMeal);
     }
   };
 
   // Update selected option when selectedMealId changes
+  // Initialize or update group selections when meals change
   useEffect(() => {
-    if (selectedMealId) {
-      const meal = meals.find(m => m.id === selectedMealId);
-      if (meal) {
-        setSelectedOption(meal.mealOption);
-      }
-    }
+    const next: Record<string, 'A' | 'B'> = {};
+    Object.entries(mealGroups).forEach(([key, groupMeals]) => {
+      const hasA = !!groupMeals.find(m => m.mealOption === 'A');
+      next[key] = hasA ? 'A' : 'B';
+    });
+    setSelectedOptionsByGroup(next);
+  }, [meals]);
+
+  // When an external selectedMealId is provided, align that group's option
+  useEffect(() => {
+    if (!selectedMealId) return;
+    const meal = meals.find(m => m.id === selectedMealId);
+    if (!meal) return;
+    const groupKey = `${meal.name}-${meal.time}`;
+    setSelectedOptionsByGroup(prev => ({ ...prev, [groupKey]: meal.mealOption }));
   }, [selectedMealId, meals]);
 
   return (
@@ -78,7 +88,8 @@ export default function MealOptionsCard({
         const mealA = mealOptions.find(m => m.mealOption === 'A');
         const mealB = mealOptions.find(m => m.mealOption === 'B');
         const hasMealB = !!mealB;
-        const currentMeal = selectedOption === 'A' ? mealA : mealB;
+        const selectedOption = selectedOptionsByGroup[key] || (mealA ? 'A' : 'B');
+        const currentMeal = selectedOption === 'A' ? (mealA || mealB) : (mealB || mealA);
         
         if (!currentMeal) return null;
 
@@ -115,7 +126,7 @@ export default function MealOptionsCard({
                   <div className="flex bg-gray-light dark:bg-davyGray rounded-lg p-1">
                     <button
                       type="button"
-                      onClick={() => handleOptionSelect('A')}
+                      onClick={() => handleOptionSelect(key, 'A')}
                       className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
                         selectedOption === 'A'
                           ? "bg-primary text-white shadow-sm"
@@ -126,7 +137,7 @@ export default function MealOptionsCard({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleOptionSelect('B')}
+                      onClick={() => handleOptionSelect(key, 'B')}
                       className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
                         selectedOption === 'B'
                           ? "bg-primary text-white shadow-sm"
@@ -230,7 +241,7 @@ export default function MealOptionsCard({
                 <div className="space-y-2">
                   {currentMeal.foods.map((food: Food) => (
                     <div
-                      key={food.name + food.portion}
+                      key={`${currentMeal.id}-${food.name}-${food.portion}`}
                       className="grid grid-cols-3 gap-2 sm:gap-4 py-2 text-xs sm:text-sm hover:bg-gray-lightest dark:hover:bg-secondary-light/10 rounded-lg transition-colors duration-200"
                     >
                       <div className="font-medium text-secondary dark:text-alabaster">
