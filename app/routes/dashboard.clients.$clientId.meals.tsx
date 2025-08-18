@@ -1,4 +1,4 @@
-import { useLoaderData, useRevalidator , useFetcher } from "@remix-run/react";
+import { useLoaderData, useRevalidator , useFetcher, useParams } from "@remix-run/react";
 import type { MetaFunction } from "@remix-run/node";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import { json , ActionFunctionArgs, redirect } from "@remix-run/node";
@@ -20,6 +20,7 @@ import { Buffer } from "buffer";
 import NABadge from "../components/ui/NABadge";
 import ActivationDateModal from "~/components/coach/ActivationDateModal";
 import { extractAuthFromCookie, validateAndRefreshToken } from "~/lib/supabase";
+import { useToast } from "~/context/ToastContext";
 
 // Helper function to truncate meal plan descriptions
 const truncateDescription = (description: string, maxLength: number = 50) => {
@@ -222,14 +223,17 @@ export const loader = async ({
     .from("meals")
     .select("id, name, time, sequence_order, meal_plan_id, meal_option")
     .in("meal_plan_id", [...mealPlanIds, ...libraryPlanIds].length > 0 ? [...mealPlanIds, ...libraryPlanIds] : [""])
-    .order("sequence_order", { ascending: true });
+    .order("sequence_order", { ascending: true })
+    .order("id", { ascending: true });
 
   // Batch fetch all foods for just these meals
   const allMealIds = (allMealsRaw || []).map((m: any) => m.id);
   const { data: allFoodsRaw } = await supabase
     .from("foods")
-    .select("name, portion, calories, protein, carbs, fat, meal_id")
-    .in("meal_id", allMealIds.length > 0 ? allMealIds : [""]);
+    .select("id, name, portion, calories, protein, carbs, fat, meal_id, sequence_order")
+    .in("meal_id", allMealIds.length > 0 ? allMealIds : [""])
+    .order("sequence_order", { ascending: true })
+    .order("id", { ascending: true });
 
   // Group foods by meal
   const foodsByMeal: Record<string, any[]> = {};
@@ -443,6 +447,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await supabase.from("meals").delete().eq("meal_plan_id", planId);
     }
     await supabase.from("meal_plans").delete().eq("id", planId);
+    // Clear cache to force fresh data
+    if (params.clientId && clientMealsCache[params.clientId]) {
+      delete clientMealsCache[params.clientId];
+    }
     return redirect(request.url);
   }
 
@@ -530,11 +538,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           // Get and copy foods
           const { data: foods } = await supabase
             .from("foods")
-            .select("name, portion, calories, protein, carbs, fat")
-            .eq("meal_id", meal.id);
+            .select("name, portion, calories, protein, carbs, fat, sequence_order")
+            .eq("meal_id", meal.id)
+            .order("sequence_order", { ascending: true });
 
           if (foods) {
-            for (const food of foods) {
+            for (const [foodIndex, food] of foods.entries()) {
               await supabase.from("foods").insert({
                 meal_id: newMeal.id,
                 name: food.name,
@@ -542,7 +551,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                 calories: food.calories,
                 protein: food.protein,
                 carbs: food.carbs,
-                fat: food.fat
+                fat: food.fat,
+                sequence_order: foodIndex,
               });
             }
           }
@@ -616,7 +626,76 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   // First, create or update the template version
   let templatePlan;
-  if (!planId) {
+  if (intent === "edit" && planId) {
+    // Edit existing plan
+    const { data: updatedPlan } = await supabase
+      .from("meal_plans")
+      .update({ title, description })
+      .eq("id", planId)
+      .select()
+      .single();
+
+    if (updatedPlan) {
+      // Delete old meals/foods
+      const { data: oldMeals } = await supabase
+        .from("meals")
+        .select("id")
+        .eq("meal_plan_id", planId);
+      if (oldMeals) {
+        for (const meal of oldMeals) {
+          await supabase.from("foods").delete().eq("meal_id", meal.id);
+        }
+        await supabase.from("meals").delete().eq("meal_plan_id", planId);
+      }
+
+      // Insert new meals and foods
+      for (const [i, meal] of validMeals.entries()) {
+        const { data: mealRow, error: mealError } = await supabase
+          .from("meals")
+          .insert({
+            meal_plan_id: planId,
+            name: meal.name,
+            time: meal.time,
+            sequence_order: i,
+            meal_option: meal.mealOption || 'A',
+          })
+          .select()
+          .single();
+
+        if (mealError) {
+          console.error('[MEAL PLAN] Failed to update meal:', mealError);
+          return json({ error: "Failed to update meal" }, { status: 500 });
+        }
+
+        if (mealRow) {
+          for (const [foodIndex, food] of meal.foods.entries()) {
+            const { error: foodError } = await supabase.from("foods").insert({
+              meal_id: mealRow.id,
+              name: food.name,
+              portion: food.portion,
+              calories: food.calories,
+              protein: food.protein,
+              carbs: food.carbs,
+              fat: food.fat,
+              sequence_order: foodIndex,
+            });
+
+            if (foodError) {
+              console.error('[MEAL PLAN] Failed to update food:', foodError);
+              return json({ error: "Failed to update food" }, { status: 500 });
+            }
+          }
+        }
+      }
+
+      // Invalidate server cache for this client so the next load returns fresh data
+      if (params.clientId && clientMealsCache[params.clientId]) {
+        delete clientMealsCache[params.clientId];
+      }
+      // Return success response for edit operations
+      return json({ success: true, message: "Meal plan updated successfully" });
+    }
+  } else if (intent === "create" || !planId) {
     // Create new template plan
     const { data: newTemplate, error: templateError } = await supabase
       .from("meal_plans")
@@ -692,7 +771,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
 
       if (templateMeal && clientMeal) {
-        for (const food of meal.foods) {
+        for (const [foodIndex, food] of meal.foods.entries()) {
           // Add food to template meal
             const { error: templateFoodError } = await supabase.from("foods").insert({
             meal_id: templateMeal.id,
@@ -702,6 +781,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             protein: food.protein,
             carbs: food.carbs,
             fat: food.fat,
+            sequence_order: foodIndex,
           });
 
             if (templateFoodError) {
@@ -718,6 +798,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             protein: food.protein,
             carbs: food.carbs,
             fat: food.fat,
+            sequence_order: foodIndex,
           });
 
             if (clientFoodError) {
@@ -727,69 +808,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         }
       }
     }
-  } else {
-    // Update existing plan
-    const { data: updatedPlan } = await supabase
-      .from("meal_plans")
-      .update({ title, description })
-      .eq("id", planId)
-      .select()
-      .single();
-
-    if (updatedPlan) {
-      // Delete old meals/foods
-      const { data: oldMeals } = await supabase
-        .from("meals")
-        .select("id")
-        .eq("meal_plan_id", planId);
-      if (oldMeals) {
-        for (const meal of oldMeals) {
-          await supabase.from("foods").delete().eq("meal_id", meal.id);
-        }
-        await supabase.from("meals").delete().eq("meal_plan_id", planId);
-      }
-
-      // Insert new meals and foods
-      for (const [i, meal] of validMeals.entries()) {
-        const { data: mealRow, error: mealError } = await supabase
-          .from("meals")
-          .insert({
-            meal_plan_id: planId,
-            name: meal.name,
-            time: meal.time,
-            sequence_order: i,
-            meal_option: meal.mealOption || 'A',
-          })
-          .select()
-          .single();
-
-        if (mealError) {
-          console.error('[MEAL PLAN] Failed to update meal:', mealError);
-          return json({ error: "Failed to update meal" }, { status: 500 });
-        }
-
-        if (mealRow) {
-          for (const food of meal.foods) {
-            const { error: foodError } = await supabase.from("foods").insert({
-              meal_id: mealRow.id,
-              name: food.name,
-              portion: food.portion,
-              calories: food.calories,
-              protein: food.protein,
-              carbs: food.carbs,
-              fat: food.fat,
-            });
-
-            if (foodError) {
-              console.error('[MEAL PLAN] Failed to update food:', foodError);
-              return json({ error: "Failed to update food" }, { status: 500 });
-            }
-          }
-        }
-      }
-    }
   }
 
+  // Invalidate server cache for this client so the next load returns fresh data
+  if (params.clientId && clientMealsCache[params.clientId]) {
+    delete clientMealsCache[params.clientId];
+  }
   return redirect(request.url);
 };
 
@@ -833,19 +857,52 @@ export default function ClientMeals() {
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[]; completions: any[] }>();
   const revalidator = useRevalidator();
+  const toast = useToast();
+  const params = useParams();
   
   // State for library plans
   const [libraryPlans, setLibraryPlans] = React.useState(initialLibraryPlans);
 
-  // Refresh page data when meal plan form submission completes successfully
+  // Ref to track if we've already processed a response to prevent infinite loops
+  const processedResponseRef = React.useRef<string | null>(null);
+
+  // Handle fetcher responses for toast notifications and modal management
   React.useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
-      // Form submission completed successfully, revalidate the page data and close modal
-      revalidator.revalidate();
-      setIsCreateModalOpen(false);
-      setSelectedPlan(null);
+      const data = fetcher.data as any;
+      const responseKey = `${fetcher.state}-${JSON.stringify(data)}`;
+      
+      // Check if we've already processed this exact response
+      if (processedResponseRef.current === responseKey) {
+        return;
+      }
+      
+      // Mark this response as processed
+      processedResponseRef.current = responseKey;
+      
+      if (data.success) {
+        toast.success("Meal Plan Saved", data.message || "Your meal plan has been updated successfully.");
+        setIsCreateModalOpen(false);
+        setSelectedPlan(null);
+        revalidator.revalidate(); // Immediate data refresh
+        setTimeout(() => {
+          fetcher.load(window.location.pathname); // Backup refresh
+        }, 100);
+        if (params.clientId && clientMealsCache[params.clientId]) {
+          delete clientMealsCache[params.clientId]; // Clear in-memory cache
+        }
+      } else if (data.error) {
+        toast.error("Failed to Save Meal Plan", data.error);
+      }
     }
-  }, [fetcher.state, fetcher.data, revalidator]);
+  }, [fetcher.state, fetcher.data, toast, revalidator, params.clientId]);
+
+  // Reset processed response ref when a new submission starts
+  React.useEffect(() => {
+    if (fetcher.state === "submitting") {
+      processedResponseRef.current = null;
+    }
+  }, [fetcher.state]);
 
   // Sort meal plans by createdAt descending
   const activeMealPlan = mealPlans.find((plan) => plan.isActive);
@@ -914,7 +971,6 @@ export default function ClientMeals() {
   // Update compliance data when fetcher returns
   useEffect(() => {
     if (complianceFetcher.data?.complianceData) {
-      console.log('[COACH-MEALS] Received compliance data:', complianceFetcher.data.complianceData);
       setCompliancePercentages(complianceFetcher.data.complianceData);
     }
   }, [complianceFetcher.data]);
@@ -1018,6 +1074,13 @@ export default function ClientMeals() {
       setHasMoreMealPlans(loaderMealPlansHasMore ?? true);
     }
   }, [isHistoryModalOpen, mealPlans, loaderMealPlansHasMore]);
+
+  // Keep history data in sync after revalidation (when modal is closed)
+  React.useEffect(() => {
+    if (!isHistoryModalOpen) {
+      setHistoryMealPlans(mealPlans);
+    }
+  }, [mealPlans, isHistoryModalOpen]);
 
   return (
     <ClientDetailLayout>
@@ -1703,12 +1766,7 @@ export default function ClientMeals() {
             form.append("meals", JSON.stringify(data.meals));
             if (selectedPlan) {
               form.append("intent", "edit");
-              const planId = historyMealPlans.find(
-                (p) =>
-                  p.title === selectedPlan.title &&
-                  p.description === selectedPlan.description
-              )?.id || "";
-              form.append("planId", planId);
+              form.append("planId", selectedPlan.id);
             } else {
               form.append("intent", "create");
             }

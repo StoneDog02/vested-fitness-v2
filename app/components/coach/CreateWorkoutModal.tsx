@@ -1,6 +1,26 @@
 import { useState, useEffect, useRef } from "react";
 import Modal from "~/components/ui/Modal";
 import Button from "~/components/ui/Button";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import {
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Bars3Icon } from "@heroicons/react/24/outline";
 
 export type WorkoutType = "Single" | "Super Set" | "Giant Set";
 
@@ -83,6 +103,131 @@ export default function CreateWorkoutModal({
   );
   // Ref to track last edited day
   const lastDayIndex = useRef(currentDayIndex);
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Drag and drop handlers
+  const handleDragEnd = (event: DragEndEvent, day: string, type: 'groups' | 'exercises', groupIndex?: number) => {
+    const { active, over } = event;
+    
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    if (type === 'groups') {
+      // Reorder groups within a day
+      setWeekPlans((prev) => {
+        const currentDay = prev[day];
+        if (!currentDay || !currentDay.groups) return prev;
+        
+        const oldIndex = currentDay.groups.findIndex((_, idx) => `group-${idx}` === active.id);
+        const newIndex = currentDay.groups.findIndex((_, idx) => `group-${idx}` === over.id);
+        
+        if (oldIndex === -1 || newIndex === -1) return prev;
+        
+        const newGroups = arrayMove(currentDay.groups, oldIndex, newIndex);
+        
+        return {
+          ...prev,
+          [day]: {
+            ...currentDay,
+            groups: newGroups,
+          },
+        };
+      });
+    } else if (type === 'exercises' && groupIndex !== undefined) {
+      // Reorder exercises within a group
+      setWeekPlans((prev) => {
+        const currentDay = prev[day];
+        if (!currentDay || !currentDay.groups || !currentDay.groups[groupIndex]) return prev;
+        
+        const group = currentDay.groups[groupIndex];
+        const oldIndex = group.exercises.findIndex((_, idx) => `exercise-${groupIndex}-${idx}` === active.id);
+        const newIndex = group.exercises.findIndex((_, idx) => `exercise-${groupIndex}-${idx}` === over.id);
+        
+        if (oldIndex === -1 || newIndex === -1) return prev;
+        
+        const newExercises = arrayMove(group.exercises, oldIndex, newIndex);
+        const newGroups = [...currentDay.groups];
+        newGroups[groupIndex] = {
+          ...group,
+          exercises: newExercises,
+        };
+        
+        return {
+          ...prev,
+          [day]: {
+            ...currentDay,
+            groups: newGroups,
+          },
+        };
+      });
+    }
+  };
+
+  // Drag and drop handlers for workout templates
+  const handleTemplateDragEnd = (event: DragEndEvent, templateIndex: number, type: 'groups' | 'exercises', groupIndex?: number) => {
+    const { active, over } = event;
+    
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    if (type === 'groups') {
+      // Reorder groups within a template
+      setWorkoutTemplates((prev) => {
+        const template = prev[templateIndex];
+        if (!template || !template.groups) return prev;
+        
+        const oldIndex = template.groups.findIndex((_, idx) => `template-group-${templateIndex}-${idx}` === active.id);
+        const newIndex = template.groups.findIndex((_, idx) => `template-group-${templateIndex}-${idx}` === over.id);
+        
+        if (oldIndex === -1 || newIndex === -1) return prev;
+        
+        const newGroups = arrayMove(template.groups, oldIndex, newIndex);
+        const newTemplates = [...prev];
+        newTemplates[templateIndex] = {
+          ...template,
+          groups: newGroups,
+        };
+        
+        return newTemplates;
+      });
+    } else if (type === 'exercises' && groupIndex !== undefined) {
+      // Reorder exercises within a group in a template
+      setWorkoutTemplates((prev) => {
+        const template = prev[templateIndex];
+        if (!template || !template.groups || !template.groups[groupIndex]) return prev;
+        
+        const group = template.groups[groupIndex];
+        const oldIndex = group.exercises.findIndex((_, idx) => `template-exercise-${templateIndex}-${groupIndex}-${idx}` === active.id);
+        const newIndex = group.exercises.findIndex((_, idx) => `template-exercise-${templateIndex}-${groupIndex}-${idx}` === over.id);
+        
+        if (oldIndex === -1 || newIndex === -1) return prev;
+        
+        const newExercises = arrayMove(group.exercises, oldIndex, newIndex);
+        const newGroups = [...template.groups];
+        newGroups[groupIndex] = {
+          ...group,
+          exercises: newExercises,
+        };
+        
+        const newTemplates = [...prev];
+        newTemplates[templateIndex] = {
+          ...template,
+          groups: newGroups,
+        };
+        
+        return newTemplates;
+      });
+    }
+  };
 
   // Populate form with initial values when editing
   useEffect(() => {
@@ -563,6 +708,127 @@ export default function CreateWorkoutModal({
     }
   };
 
+  // Sortable components for drag and drop
+  const SortableGroup = ({ children, groupIndex, day }: { children: React.ReactNode; groupIndex: number; day: string }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: `group-${groupIndex}` });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+      <div ref={setNodeRef} style={style} className="relative">
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute left-0 top-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 p-1"
+        >
+          <Bars3Icon className="h-4 w-4" />
+        </div>
+        {children}
+      </div>
+    );
+  };
+
+  const SortableExercise = ({ children, exerciseIndex, groupIndex, day }: { children: React.ReactNode; exerciseIndex: number; groupIndex: number; day: string }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: `exercise-${groupIndex}-${exerciseIndex}` });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+      <div ref={setNodeRef} style={style} className="relative">
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute left-0 top-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 p-1"
+        >
+          <Bars3Icon className="h-3 w-3" />
+        </div>
+        {children}
+      </div>
+    );
+  };
+
+  const SortableTemplateGroup = ({ children, groupIndex, templateIndex }: { children: React.ReactNode; groupIndex: number; templateIndex: number }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: `template-group-${templateIndex}-${groupIndex}` });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+      <div ref={setNodeRef} style={style} className="relative">
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute left-0 top-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 p-1"
+        >
+          <Bars3Icon className="h-4 w-4" />
+        </div>
+        {children}
+      </div>
+    );
+  };
+
+  const SortableTemplateExercise = ({ children, exerciseIndex, groupIndex, templateIndex }: { children: React.ReactNode; exerciseIndex: number; groupIndex: number; templateIndex: number }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: `template-exercise-${templateIndex}-${groupIndex}-${exerciseIndex}` });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+      <div ref={setNodeRef} style={style} className="relative">
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute left-0 top-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 p-1"
+        >
+          <Bars3Icon className="h-3 w-3" />
+        </div>
+        {children}
+      </div>
+    );
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={isLoading ? () => {} : onClose} title={title} size="lg">
       <div className="relative">
@@ -733,223 +999,243 @@ export default function CreateWorkoutModal({
                 <>
                   {/* Workout Groups */}
                   <div className="space-y-8">
-                    {(
-                      currentPlan.groups || [
-                        {
-                          type: "Single",
-                          exercises: [{ name: "", sets: "", reps: "" }],
-                        },
-                      ]
-                    ).map((group, groupIdx) => (
-                      <div
-                        key={groupIdx}
-                        className="border border-primary/40 rounded-lg p-4 bg-primary/5 dark:bg-primary/10"
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={(event) => handleDragEnd(event, currentDay, 'groups')}
+                    >
+                      <SortableContext
+                        items={(currentPlan.groups || [{ type: "Single", exercises: [{ name: "", sets: "", reps: "" }] }]).map((_, idx) => `group-${idx}`)}
+                        strategy={verticalListSortingStrategy}
                       >
-                        <div className="flex items-center gap-4 mb-4">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Type:
-                            <select
-                              value={group.type}
-                              onChange={(e) =>
-                                handleGroupTypeChange(
-                                  groupIdx,
-                                  e.target.value as WorkoutType
-                                )
-                              }
-                              className="ml-2 rounded-full border border-primary text-primary bg-primary/10 px-6 py-1 font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-primary transition min-w-[8rem]"
-                            >
-                              <option value="Single">Single</option>
-                              <option value="Super Set">Super Set</option>
-                              <option value="Giant Set">Giant Set</option>
-                            </select>
-                          </label>
-                          {(currentPlan.groups?.length || 1) > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-500 ml-auto"
-                              onClick={() => removeGroup(groupIdx)}
-                            >
-                              Remove Group
-                            </Button>
-                          )}
-                        </div>
-                        <div className="space-y-6">
-                          {group.exercises.map((exercise, exIdx) => (
-                            <div
-                              key={exIdx}
-                              className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
-                            >
-                              <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                                  Exercise {exIdx + 1}
-                                </h3>
-                                {group.type === "Giant Set" &&
-                                  group.exercises.length > 3 &&
-                                  exIdx >= 3 && (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() =>
-                                        removeExerciseFromGroup(groupIdx, exIdx)
-                                      }
-                                      className="!text-red-500 !border-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/20"
-                                    >
-                                      Remove Exercise
-                                    </Button>
-                                  )}
-                              </div>
-                              <div className="space-y-4">
-                                {/* Exercise Name */}
-                                <div>
-                                  <label
-                                    htmlFor={`exerciseName-${groupIdx}-${exIdx}`}
-                                    className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                                  >
-                                    Exercise Name
-                                  </label>
-                                  <input
-                                    id={`exerciseName-${groupIdx}-${exIdx}`}
-                                    type="text"
-                                    value={exercise.name}
+                        {(
+                          currentPlan.groups || [
+                            {
+                              type: "Single",
+                              exercises: [{ name: "", sets: "", reps: "" }],
+                            },
+                          ]
+                        ).map((group, groupIdx) => (
+                          <SortableGroup key={groupIdx} groupIndex={groupIdx} day={currentDay}>
+                            <div className="border border-primary/40 rounded-lg p-4 bg-primary/5 dark:bg-primary/10 ml-6">
+                              <div className="flex items-center gap-4 mb-4">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                  Type:
+                                  <select
+                                    value={group.type}
                                     onChange={(e) =>
-                                      handleExerciseChange(
+                                      handleGroupTypeChange(
                                         groupIdx,
-                                        exIdx,
-                                        "name",
-                                        e.target.value
+                                        e.target.value as WorkoutType
                                       )
                                     }
-                                    placeholder="e.g., Bench Press, Lateral Raises"
-                                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                                    required
-                                  />
-                                </div>
-                                {/* Sets and Reps */}
-                                <div className="flex gap-4">
-                                  <div className="flex-1">
-                                    <label
-                                      htmlFor={`sets-${groupIdx}-${exIdx}`}
-                                      className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                                    >
-                                      Sets
-                                    </label>
-                                    <input
-                                      id={`sets-${groupIdx}-${exIdx}`}
-                                      type="text"
-                                      value={exercise.sets}
-                                      onChange={(e) =>
-                                        handleExerciseChange(
-                                          groupIdx,
-                                          exIdx,
-                                          "sets",
-                                          e.target.value
-                                        )
-                                      }
-                                      placeholder="e.g., 3, AMRAP, 5-8"
-                                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                                      required
-                                    />
-                                  </div>
-                                  <div className="flex-1">
-                                    <label
-                                      htmlFor={`reps-${groupIdx}-${exIdx}`}
-                                      className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                                    >
-                                      Reps
-                                    </label>
-                                    <input
-                                      id={`reps-${groupIdx}-${exIdx}`}
-                                      type="text"
-                                      value={exercise.reps}
-                                      onChange={(e) =>
-                                        handleExerciseChange(
-                                          groupIdx,
-                                          exIdx,
-                                          "reps",
-                                          e.target.value
-                                        )
-                                      }
-                                      placeholder="e.g., 10, AMRAP, 8-12"
-                                      className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                                      required
-                                    />
-                                  </div>
-                                </div>
-                                {/* Notes */}
-                                <div>
-                                  <label
-                                    htmlFor={`notes-${groupIdx}-${exIdx}`}
-                                    className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                    className="ml-2 rounded-full border border-primary text-primary bg-primary/10 px-6 py-1 font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-primary transition min-w-[8rem]"
                                   >
-                                    Notes (optional)
-                                  </label>
-                                  <input
-                                    id={`notes-${groupIdx}-${exIdx}`}
-                                    type="text"
-                                    value={exercise.notes || ""}
-                                    onChange={(e) =>
-                                      handleExerciseChange(
-                                        groupIdx,
-                                        exIdx,
-                                        "notes",
-                                        e.target.value
-                                      )
-                                    }
-                                    className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                                  />
-                                </div>
-                                {/* Upload Video */}
-                                <div>
-                                  <label
-                                    htmlFor={`videoFile-${groupIdx}-${exIdx}`}
-                                    className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                    <option value="Single">Single</option>
+                                    <option value="Super Set">Super Set</option>
+                                    <option value="Giant Set">Giant Set</option>
+                                  </select>
+                                </label>
+                                {(currentPlan.groups?.length || 1) > 1 && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-red-500 ml-auto"
+                                    onClick={() => removeGroup(groupIdx)}
                                   >
-                                    Upload Video (optional)
-                                  </label>
-                                  <input
-                                    id={`videoFile-${groupIdx}-${exIdx}`}
-                                    type="file"
-                                    accept="video/*"
-                                    onChange={(e) => {
-                                      const file =
-                                        e.target.files && e.target.files[0]
-                                          ? e.target.files[0]
-                                          : undefined;
-                                      handleExerciseChange(
-                                        groupIdx,
-                                        exIdx,
-                                        "videoFile",
-                                        file
-                                      );
-                                    }}
-                                    className="w-full text-gray-900 dark:text-gray-100"
-                                  />
-                                  {exercise.videoFile && (
-                                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                      Selected: {exercise.videoFile.name}
-                                    </div>
-                                  )}
-                                </div>
+                                    Remove Group
+                                  </Button>
+                                )}
                               </div>
+                              <DndContext
+                                sensors={sensors}
+                                collisionDetection={closestCenter}
+                                onDragEnd={(event) => handleDragEnd(event, currentDay, 'exercises', groupIdx)}
+                              >
+                                <SortableContext
+                                  items={group.exercises.map((_, idx) => `exercise-${groupIdx}-${idx}`)}
+                                  strategy={verticalListSortingStrategy}
+                                >
+                                  <div className="space-y-6">
+                                    {group.exercises.map((exercise, exIdx) => (
+                                      <SortableExercise key={exIdx} exerciseIndex={exIdx} groupIndex={groupIdx} day={currentDay}>
+                                        <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 ml-6">
+                                          <div className="flex justify-between items-center mb-4">
+                                            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                                              Exercise {exIdx + 1}
+                                            </h3>
+                                            {group.type === "Giant Set" &&
+                                              group.exercises.length > 3 &&
+                                              exIdx >= 3 && (
+                                                <Button
+                                                  type="button"
+                                                  variant="outline"
+                                                  size="sm"
+                                                  onClick={() =>
+                                                    removeExerciseFromGroup(groupIdx, exIdx)
+                                                  }
+                                                  className="!text-red-500 !border-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/20"
+                                                >
+                                                  Remove Exercise
+                                                </Button>
+                                              )}
+                                          </div>
+                                          <div className="space-y-4">
+                                            {/* Exercise Name */}
+                                            <div>
+                                              <label
+                                                htmlFor={`exerciseName-${groupIdx}-${exIdx}`}
+                                                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                              >
+                                                Exercise Name
+                                              </label>
+                                              <input
+                                                id={`exerciseName-${groupIdx}-${exIdx}`}
+                                                type="text"
+                                                value={exercise.name}
+                                                onChange={(e) =>
+                                                  handleExerciseChange(
+                                                    groupIdx,
+                                                    exIdx,
+                                                    "name",
+                                                    e.target.value
+                                                  )
+                                                }
+                                                placeholder="e.g., Bench Press, Lateral Raises"
+                                                className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                                                required
+                                              />
+                                            </div>
+                                            {/* Sets and Reps */}
+                                            <div className="flex gap-4">
+                                              <div className="flex-1">
+                                                <label
+                                                  htmlFor={`sets-${groupIdx}-${exIdx}`}
+                                                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                                >
+                                                  Sets
+                                                </label>
+                                                <input
+                                                  id={`sets-${groupIdx}-${exIdx}`}
+                                                  type="text"
+                                                  value={exercise.sets}
+                                                  onChange={(e) =>
+                                                    handleExerciseChange(
+                                                      groupIdx,
+                                                      exIdx,
+                                                      "sets",
+                                                      e.target.value
+                                                    )
+                                                  }
+                                                  placeholder="e.g., 3, AMRAP, 5-8"
+                                                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                                                  required
+                                                />
+                                              </div>
+                                              <div className="flex-1">
+                                                <label
+                                                  htmlFor={`reps-${groupIdx}-${exIdx}`}
+                                                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                                >
+                                                  Reps
+                                                </label>
+                                                <input
+                                                  id={`reps-${groupIdx}-${exIdx}`}
+                                                  type="text"
+                                                  value={exercise.reps}
+                                                  onChange={(e) =>
+                                                    handleExerciseChange(
+                                                      groupIdx,
+                                                      exIdx,
+                                                      "reps",
+                                                      e.target.value
+                                                    )
+                                                  }
+                                                  placeholder="e.g., 10, AMRAP, 8-12"
+                                                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                                                  required
+                                                />
+                                              </div>
+                                            </div>
+                                            {/* Notes */}
+                                            <div>
+                                              <label
+                                                htmlFor={`notes-${groupIdx}-${exIdx}`}
+                                                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                              >
+                                                Notes (optional)
+                                              </label>
+                                              <input
+                                                id={`notes-${groupIdx}-${exIdx}`}
+                                                type="text"
+                                                value={exercise.notes || ""}
+                                                onChange={(e) =>
+                                                  handleExerciseChange(
+                                                    groupIdx,
+                                                    exIdx,
+                                                    "notes",
+                                                    e.target.value
+                                                  )
+                                                }
+                                                className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                                              />
+                                            </div>
+                                            {/* Upload Video */}
+                                            <div>
+                                              <label
+                                                htmlFor={`videoFile-${groupIdx}-${exIdx}`}
+                                                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                              >
+                                                Upload Video (optional)
+                                              </label>
+                                              <input
+                                                id={`videoFile-${groupIdx}-${exIdx}`}
+                                                type="file"
+                                                accept="video/*"
+                                                onChange={(e) => {
+                                                  const file =
+                                                    e.target.files && e.target.files[0]
+                                                      ? e.target.files[0]
+                                                      : undefined;
+                                                  handleExerciseChange(
+                                                    groupIdx,
+                                                    exIdx,
+                                                    "videoFile",
+                                                    file
+                                                  );
+                                                }}
+                                                className="w-full text-gray-900 dark:text-gray-100"
+                                              />
+                                              {exercise.videoFile && (
+                                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                                  Selected: {exercise.videoFile.name}
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </SortableExercise>
+                                    ))}
+                                    {/* Add Exercise Button for Giant Set only */}
+                                    {group.type === "Giant Set" && (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => addExerciseToGroup(groupIdx)}
+                                      >
+                                        Add Exercise to Giant Set
+                                      </Button>
+                                    )}
+                                  </div>
+                                </SortableContext>
+                              </DndContext>
                             </div>
-                          ))}
-                          {/* Add Exercise Button for Giant Set only */}
-                          {group.type === "Giant Set" && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => addExerciseToGroup(groupIdx)}
-                            >
-                              Add Exercise to Giant Set
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                          </SortableGroup>
+                        ))}
+                      </SortableContext>
+                    </DndContext>
                   </div>
                   {/* Add Workout Group Button */}
                   <div className="flex justify-end">
@@ -1016,225 +1302,251 @@ export default function CreateWorkoutModal({
 
               {/* Workout Groups */}
               <div className="space-y-8">
-                {(workoutTemplates[currentWorkoutIndex]?.groups || [
-                  { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
-                ]).map((group, groupIdx) => (
-                  <div
-                    key={groupIdx}
-                    className="border border-primary/40 rounded-lg p-4 bg-primary/5 dark:bg-primary/10"
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={(event) => handleTemplateDragEnd(event, currentWorkoutIndex, 'groups')}
+                >
+                  <SortableContext
+                    items={(workoutTemplates[currentWorkoutIndex]?.groups || [{ type: "Single", exercises: [{ name: "", sets: "", reps: "" }] }]).map((_, idx) => `template-group-${currentWorkoutIndex}-${idx}`)}
+                    strategy={verticalListSortingStrategy}
                   >
-                    <div className="flex items-center gap-4 mb-4">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Type:
-                        <select
-                          value={group.type}
-                          onChange={(e) =>
-                            handleGroupTypeChangeForTemplate(
-                              currentWorkoutIndex,
-                              groupIdx,
-                              e.target.value as WorkoutType
-                            )
-                          }
-                          className="ml-2 rounded-full border border-primary text-primary bg-primary/10 px-6 py-1 font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-primary transition min-w-[8rem]"
-                        >
-                          <option value="Single">Single</option>
-                          <option value="Super Set">Super Set</option>
-                          <option value="Giant Set">Giant Set</option>
-                        </select>
-                      </label>
-                      {(workoutTemplates[currentWorkoutIndex].groups?.length || 1) > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="text-red-500 ml-auto"
-                          onClick={() => removeGroupFromTemplate(currentWorkoutIndex, groupIdx)}
-                        >
-                          Remove Group
-                        </Button>
-                      )}
-                    </div>
-                    <div className="space-y-6">
-                      {group.exercises.map((exercise, exIdx) => (
+                    {(workoutTemplates[currentWorkoutIndex]?.groups || [
+                      { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
+                    ]).map((group, groupIdx) => (
+                      <SortableTemplateGroup key={groupIdx} groupIndex={groupIdx} templateIndex={currentWorkoutIndex}>
                         <div
-                          key={exIdx}
-                          className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+                          key={groupIdx}
+                          className="border border-primary/40 rounded-lg p-4 bg-primary/5 dark:bg-primary/10 ml-6"
                         >
-                          <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                              Exercise {exIdx + 1}
-                            </h3>
-                            {group.type === "Giant Set" &&
-                              group.exercises.length > 3 &&
-                              exIdx >= 3 && (
+                            <div className="flex items-center gap-4 mb-4">
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Type:
+                                <select
+                                  value={group.type}
+                                  onChange={(e) =>
+                                    handleGroupTypeChangeForTemplate(
+                                      currentWorkoutIndex,
+                                      groupIdx,
+                                      e.target.value as WorkoutType
+                                    )
+                                  }
+                                  className="ml-2 rounded-full border border-primary text-primary bg-primary/10 px-6 py-1 font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-primary transition min-w-[8rem]"
+                                >
+                                  <option value="Single">Single</option>
+                                  <option value="Super Set">Super Set</option>
+                                  <option value="Giant Set">Giant Set</option>
+                                </select>
+                              </label>
+                              {(workoutTemplates[currentWorkoutIndex].groups?.length || 1) > 1 && (
                                 <Button
                                   type="button"
-                                  variant="outline"
+                                  variant="ghost"
                                   size="sm"
-                                  onClick={() =>
-                                    removeExerciseFromGroupInTemplate(currentWorkoutIndex, groupIdx, exIdx)
-                                  }
-                                  className="!text-red-500 !border-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/20"
+                                  className="text-red-500 ml-auto"
+                                  onClick={() => removeGroupFromTemplate(currentWorkoutIndex, groupIdx)}
                                 >
-                                  Remove Exercise
+                                  Remove Group
                                 </Button>
                               )}
-                          </div>
-                          <div className="space-y-4">
-                            {/* Exercise Name */}
-                            <div>
-                              <label
-                                htmlFor={`exerciseName-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                              >
-                                Exercise Name
-                              </label>
-                              <input
-                                id={`exerciseName-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                type="text"
-                                value={exercise.name}
-                                onChange={(e) =>
-                                  handleExerciseChangeForTemplate(
-                                    currentWorkoutIndex,
-                                    groupIdx,
-                                    exIdx,
-                                    "name",
-                                    e.target.value
-                                  )
-                                }
-                                placeholder="e.g., Bench Press, Lateral Raises"
-                                className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                                required
-                              />
                             </div>
-                            {/* Sets and Reps */}
-                            <div className="flex gap-4">
-                              <div className="flex-1">
-                                <label
-                                  htmlFor={`sets-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                                >
-                                  Sets
-                                </label>
-                                <input
-                                  id={`sets-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                  type="text"
-                                  value={exercise.sets}
-                                  onChange={(e) =>
-                                    handleExerciseChangeForTemplate(
-                                      currentWorkoutIndex,
-                                      groupIdx,
-                                      exIdx,
-                                      "sets",
-                                      e.target.value
-                                    )
-                                  }
-                                  placeholder="e.g., 3, AMRAP, 5-8"
-                                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                                  required
-                                />
-                              </div>
-                              <div className="flex-1">
-                                <label
-                                  htmlFor={`reps-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                                >
-                                  Reps
-                                </label>
-                                <input
-                                  id={`reps-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                  type="text"
-                                  value={exercise.reps}
-                                  onChange={(e) =>
-                                    handleExerciseChangeForTemplate(
-                                      currentWorkoutIndex,
-                                      groupIdx,
-                                      exIdx,
-                                      "reps",
-                                      e.target.value
-                                    )
-                                  }
-                                  placeholder="e.g., 10, AMRAP, 8-12"
-                                  className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                                  required
-                                />
-                              </div>
-                            </div>
-                            {/* Notes */}
-                            <div>
-                              <label
-                                htmlFor={`notes-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                            <DndContext
+                              sensors={sensors}
+                              collisionDetection={closestCenter}
+                              onDragEnd={(event) => handleTemplateDragEnd(event, currentWorkoutIndex, 'exercises', groupIdx)}
+                            >
+                              <SortableContext
+                                items={group.exercises.map((_, idx) => `exercise-${currentWorkoutIndex}-${groupIdx}-${idx}`)}
+                                strategy={verticalListSortingStrategy}
                               >
-                                Notes (optional)
-                              </label>
-                              <input
-                                id={`notes-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                type="text"
-                                value={exercise.notes || ""}
-                                onChange={(e) =>
-                                  handleExerciseChangeForTemplate(
-                                    currentWorkoutIndex,
-                                    groupIdx,
-                                    exIdx,
-                                    "notes",
-                                    e.target.value
-                                  )
-                                }
-                                className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
-                              />
-                            </div>
-                            {/* Upload Video */}
-                            <div>
-                              <label
-                                htmlFor={`videoFile-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-                              >
-                                Upload Video (optional)
-                              </label>
-                              <input
-                                id={`videoFile-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
-                                type="file"
-                                accept="video/*"
-                                onChange={(e) => {
-                                  const file =
-                                    e.target.files && e.target.files[0]
-                                      ? e.target.files[0]
-                                      : undefined;
-                                  handleExerciseChangeForTemplate(
-                                    currentWorkoutIndex,
-                                    groupIdx,
-                                    exIdx,
-                                    "videoFile",
-                                    file
-                                  );
-                                }}
-                                className="w-full text-gray-900 dark:text-gray-100"
-                              />
-                              {exercise.videoFile && (
-                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                  Selected: {exercise.videoFile.name}
+                                <div className="space-y-6">
+                                  {group.exercises.map((exercise, exIdx) => (
+                                    <SortableTemplateExercise key={exIdx} exerciseIndex={exIdx} groupIndex={groupIdx} templateIndex={currentWorkoutIndex}>
+                                      <div
+                                        key={exIdx}
+                                        className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+                                      >
+                                        <div className="flex justify-between items-center mb-4">
+                                          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                                            Exercise {exIdx + 1}
+                                          </h3>
+                                          {group.type === "Giant Set" &&
+                                            group.exercises.length > 3 &&
+                                            exIdx >= 3 && (
+                                              <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() =>
+                                                  removeExerciseFromGroupInTemplate(currentWorkoutIndex, groupIdx, exIdx)
+                                                }
+                                                className="!text-red-500 !border-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/20"
+                                              >
+                                                Remove Exercise
+                                              </Button>
+                                            )}
+                                        </div>
+                                        <div className="space-y-4">
+                                          {/* Exercise Name */}
+                                          <div>
+                                            <label
+                                              htmlFor={`exerciseName-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                            >
+                                              Exercise Name
+                                            </label>
+                                            <input
+                                              id={`exerciseName-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                              type="text"
+                                              value={exercise.name}
+                                              onChange={(e) =>
+                                                handleExerciseChangeForTemplate(
+                                                  currentWorkoutIndex,
+                                                  groupIdx,
+                                                  exIdx,
+                                                  "name",
+                                                  e.target.value
+                                                )
+                                              }
+                                              placeholder="e.g., Bench Press, Lateral Raises"
+                                              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                                              required
+                                            />
+                                          </div>
+                                          {/* Sets and Reps */}
+                                          <div className="flex gap-4">
+                                            <div className="flex-1">
+                                              <label
+                                                htmlFor={`sets-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                              >
+                                                Sets
+                                              </label>
+                                              <input
+                                                id={`sets-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                                type="text"
+                                                value={exercise.sets}
+                                                onChange={(e) =>
+                                                  handleExerciseChangeForTemplate(
+                                                    currentWorkoutIndex,
+                                                    groupIdx,
+                                                    exIdx,
+                                                    "sets",
+                                                    e.target.value
+                                                  )
+                                                }
+                                                placeholder="e.g., 3, AMRAP, 5-8"
+                                                className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                                                required
+                                              />
+                                            </div>
+                                            <div className="flex-1">
+                                              <label
+                                                htmlFor={`reps-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                              >
+                                                Reps
+                                              </label>
+                                              <input
+                                                id={`reps-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                                type="text"
+                                                value={exercise.reps}
+                                                onChange={(e) =>
+                                                  handleExerciseChangeForTemplate(
+                                                    currentWorkoutIndex,
+                                                    groupIdx,
+                                                    exIdx,
+                                                    "reps",
+                                                    e.target.value
+                                                  )
+                                                }
+                                                placeholder="e.g., 10, AMRAP, 8-12"
+                                                className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                                                required
+                                              />
+                                            </div>
+                                          </div>
+                                          {/* Notes */}
+                                          <div>
+                                            <label
+                                              htmlFor={`notes-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                            >
+                                              Notes (optional)
+                                            </label>
+                                            <input
+                                              id={`notes-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                              type="text"
+                                              value={exercise.notes || ""}
+                                              onChange={(e) =>
+                                                handleExerciseChangeForTemplate(
+                                                  currentWorkoutIndex,
+                                                  groupIdx,
+                                                  exIdx,
+                                                  "notes",
+                                                  e.target.value
+                                                )
+                                              }
+                                              className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            />
+                                          </div>
+                                          {/* Upload Video */}
+                                          <div>
+                                            <label
+                                              htmlFor={`videoFile-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+                                            >
+                                              Upload Video (optional)
+                                            </label>
+                                            <input
+                                              id={`videoFile-${currentWorkoutIndex}-${groupIdx}-${exIdx}`}
+                                              type="file"
+                                              accept="video/*"
+                                              onChange={(e) => {
+                                                const file =
+                                                  e.target.files && e.target.files[0]
+                                                    ? e.target.files[0]
+                                                    : undefined;
+                                                handleExerciseChangeForTemplate(
+                                                  currentWorkoutIndex,
+                                                  groupIdx,
+                                                  exIdx,
+                                                  "videoFile",
+                                                  file
+                                                );
+                                              }}
+                                              className="w-full text-gray-900 dark:text-gray-100"
+                                            />
+                                            {exercise.videoFile && (
+                                              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                                Selected: {exercise.videoFile.name}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </SortableTemplateExercise>
+                                  ))}
+                                  {/* Add Exercise Button for Giant Set only */}
+                                  {group.type === "Giant Set" && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => addExerciseToGroupInTemplate(currentWorkoutIndex, groupIdx)}
+                                    >
+                                      Add Exercise to Giant Set
+                                    </Button>
+                                  )}
                                 </div>
-                              )}
-                            </div>
+                              </SortableContext>
+                            </DndContext>
                           </div>
-                        </div>
+                        </SortableTemplateGroup>
                       ))}
-                      {/* Add Exercise Button for Giant Set only */}
-                      {group.type === "Giant Set" && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addExerciseToGroupInTemplate(currentWorkoutIndex, groupIdx)}
-                        >
-                          Add Exercise to Giant Set
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    </SortableContext>
+                  </DndContext>
+                </div>
               {/* Add Workout Group Button */}
               <div className="flex justify-end">
                 <button

@@ -10,7 +10,7 @@ import ActivationDateModal from "~/components/coach/ActivationDateModal";
 import { json, redirect , ActionFunctionArgs } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
-import { useLoaderData, useFetcher, useSearchParams, useRevalidator } from "@remix-run/react";
+import { useLoaderData, useFetcher, useSearchParams, useRevalidator, useParams } from "@remix-run/react";
 import type {
   DayPlan,
   WorkoutType,
@@ -23,6 +23,8 @@ import { Buffer } from "buffer";
 import NABadge from "../components/ui/NABadge";
 import { getCurrentDate, USER_TIMEZONE, getStartOfWeek } from "~/lib/timezone";
 import dayjs from "dayjs";
+import { useToast } from "~/context/ToastContext";
+import React from "react";
 
 // Helper function to determine activation status for coaches
 const getActivationStatus = (plan: { isActive: boolean; activatedAt: string | null }) => {
@@ -516,7 +518,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 
   if (intent === "setActive") {
-    const planId = formData.get("workoutPlanId") as string;
+    const activePlanId = formData.get("workoutPlanId") as string;
     const activationDate = formData.get("activationDate") as string;
     
     // Set all other plans inactive
@@ -524,13 +526,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       .from("workout_plans")
       .update({ is_active: false })
       .eq("user_id", client.id)
-      .neq("id", planId);
+      .neq("id", activePlanId);
     
     // Set selected plan active with the chosen activation date
     await supabase
       .from("workout_plans")
       .update({ is_active: true, activated_at: activationDate })
-      .eq("id", planId);
+      .eq("id", activePlanId);
     
     // Clear cache to force refresh of compliance data
     if (params.clientId && clientWorkoutsCache[params.clientId]) {
@@ -808,6 +810,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "edit") {
     // Update workout_plans row
     if (!planId) return json({ error: "Missing plan id" }, { status: 400 });
+    
     await supabase
       .from("workout_plans")
       .update({
@@ -899,8 +902,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                 group_notes: group.notes || null,
               };
               
-
-              
               const { error: exerciseError } = await supabase
                 .from("workout_exercises")
                 .insert(exerciseInsert);
@@ -917,7 +918,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         // Handle case where no action is needed
       }
     }
-    return redirect(request.url);
+    
+    // Return success response for edit operations
+    return json({ success: true, message: "Workout plan updated successfully" });
   }
 
   return json({ error: "Invalid action intent" }, { status: 400 });
@@ -1003,20 +1006,54 @@ export default function ClientWorkouts() {
   const fetcher = useFetcher();
   const complianceFetcher = useFetcher<{ complianceData: number[]; completions: any[] }>();
   const revalidator = useRevalidator();
+  const toast = useToast();
+  const params = useParams();
   
   // State for library plans
   const [libraryPlans, setLibraryPlans] = useState(initialLibraryPlans);
 
-  // Refresh page data when workout plan form submission completes successfully
-  useEffect(() => {
+  // Ref to track if we've already processed a response to prevent infinite loops
+  const processedResponseRef = React.useRef<string | null>(null);
+
+  // Handle fetcher responses for toast notifications and modal management
+  React.useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
-      // Form submission completed successfully, revalidate the page data and close modals
-      revalidator.revalidate();
-      setIsCreateModalOpen(false);
-      setIsEditModalOpen(false);
-      setSelectedWorkout(null);
+      const data = fetcher.data as any;
+      const responseKey = `${fetcher.state}-${JSON.stringify(data)}`;
+
+      // Check if we've already processed this exact response
+      if (processedResponseRef.current === responseKey) {
+        return;
+      }
+
+      // Mark this response as processed
+      processedResponseRef.current = responseKey;
+
+      if (data.success) {
+        toast.success("Workout Plan Saved", data.message || "Your workout plan has been updated successfully.");
+        setIsCreateModalOpen(false);
+        setIsEditModalOpen(false);
+        setSelectedWorkout(null);
+        revalidator.revalidate(); // Immediate data refresh
+        setTimeout(() => {
+          fetcher.load(window.location.pathname); // Backup refresh
+        }, 100);
+        if (params.clientId && clientWorkoutsCache[params.clientId]) {
+          delete clientWorkoutsCache[params.clientId]; // Clear in-memory cache
+        }
+      } else if (data.error) {
+        toast.error("Failed to Save Workout Plan", data.error);
+      }
     }
-  }, [fetcher.state, fetcher.data, revalidator]);
+  }, [fetcher.state, fetcher.data, toast, revalidator, params.clientId]);
+
+  // Reset processed response ref when a new submission starts
+  React.useEffect(() => {
+    if (fetcher.state === "submitting") {
+      processedResponseRef.current = null;
+    }
+  }, [fetcher.state]);
+
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutPlan | null>(
