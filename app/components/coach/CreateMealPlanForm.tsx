@@ -396,6 +396,36 @@ export default function CreateMealPlanForm({
   initialData,
   isLoading = false,
 }: CreateMealPlanFormProps) {
+  // Debug: Log the initial data when editing
+  React.useEffect(() => {
+    if (initialData) {
+      console.log('CreateMealPlanForm - initialData received:', initialData);
+      console.log('Meals in initialData:', initialData.meals);
+      console.log('Meal options breakdown:', initialData.meals.map((meal, idx) => ({
+        index: idx,
+        name: meal.name,
+        time: meal.time,
+        mealOption: meal.mealOption,
+        foodsCount: meal.foods?.length || 0,
+        foods: meal.foods
+      })));
+      
+      // Debug individual food items
+      initialData.meals.forEach((meal, mealIdx) => {
+        console.log(`Meal ${mealIdx} (${meal.mealOption}):`, meal);
+        meal.foods?.forEach((food, foodIdx) => {
+          console.log(`  Food ${foodIdx}:`, {
+            name: food.name,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat
+          });
+        });
+      });
+    }
+  }, [initialData]);
+
   const [formData, setFormData] = useState<MealPlanFormData>(
     initialData || {
       title: "",
@@ -615,20 +645,68 @@ export default function CreateMealPlanForm({
     onSubmit(formData);
   };
 
-  // Calculate total macros
+  // Calculate total macros dynamically based on currently selected meal options
   const calculateTotalMacros = () => {
     let totalCalories = 0;
     let totalProtein = 0;
     let totalCarbs = 0;
     let totalFat = 0;
 
-    formData.meals.forEach((meal) => {
-      meal.foods.forEach((food) => {
-        totalCalories += Number(food.calories);
-        totalProtein += Number(food.protein);
-        totalCarbs += Number(food.carbs);
-        totalFat += Number(food.fat);
-      });
+    // Group meals by name and time
+    const mealGroups = formData.meals.reduce((groups, meal) => {
+      const key = `${meal.name}-${meal.time}`;
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(meal);
+      return groups;
+    }, {} as Record<string, Meal[]>);
+
+    // For each meal group, determine which meal option to count based on current selection
+    Object.values(mealGroups).forEach((groupMeals) => {
+      if (groupMeals.length === 1) {
+        // Only one meal option, count it
+        const meal = groupMeals[0];
+        meal.foods.forEach((food) => {
+          totalCalories += Number(food.calories);
+          totalProtein += Number(food.protein);
+          totalCarbs += Number(food.carbs);
+          totalFat += Number(food.fat);
+        });
+      } else if (groupMeals.length > 1) {
+        // Multiple meal options (A/B), determine which one to count
+        const mealA = groupMeals.find(m => m.mealOption === 'A');
+        const mealB = groupMeals.find(m => m.mealOption === 'B');
+        
+        // Determine which meal option is currently "active" for this group
+        let mealToCount: Meal | undefined;
+        
+        if (mealA && mealB) {
+          // Check if the currently active meal index corresponds to this meal group
+          const currentMeal = formData.meals[activeMealIndex];
+          if (currentMeal && 
+              currentMeal.name === mealA.name && 
+              currentMeal.time === mealA.time) {
+            // We're currently viewing this meal group, count the active option
+            mealToCount = currentMeal;
+          } else {
+            // We're not currently viewing this meal group, default to Meal A
+            mealToCount = mealA;
+          }
+        } else {
+          // Fallback to first meal if meal options aren't properly set
+          mealToCount = groupMeals[0];
+        }
+        
+        if (mealToCount) {
+          mealToCount.foods.forEach((food) => {
+            totalCalories += Number(food.calories);
+            totalProtein += Number(food.protein);
+            totalCarbs += Number(food.carbs);
+            totalFat += Number(food.fat);
+          });
+        }
+      }
     });
 
     return {
@@ -639,7 +717,40 @@ export default function CreateMealPlanForm({
     };
   };
 
-  const macros = calculateTotalMacros();
+  // Calculate macros based on current meal selection
+  const [macros, setMacros] = useState(() => calculateTotalMacros());
+  
+  // Recalculate macros whenever activeMealIndex or formData changes
+  React.useEffect(() => {
+    const newMacros = calculateTotalMacros();
+    setMacros(newMacros);
+    
+    // Debug: Log the calculated macros to verify they're correct
+    console.log('CreateMealPlanForm - Recalculated macros:', newMacros);
+    console.log('CreateMealPlanForm - Active meal index:', activeMealIndex);
+    console.log('CreateMealPlanForm - Total meals:', formData.meals.length);
+    
+    // Show which meal options are currently being calculated
+    const currentMeal = formData.meals[activeMealIndex];
+    if (currentMeal) {
+      console.log('CreateMealPlanForm - Currently viewing meal:', {
+        name: currentMeal.name,
+        time: currentMeal.time,
+        mealOption: currentMeal.mealOption,
+        foodsCount: currentMeal.foods?.length || 0
+      });
+    }
+    
+    console.log('CreateMealPlanForm - Meal breakdown:', formData.meals.map((meal, idx) => ({
+      index: idx,
+      name: meal.name,
+      time: meal.time,
+      mealOption: meal.mealOption,
+      foodsCount: meal.foods?.length || 0,
+      totalCalories: meal.foods?.reduce((sum, food) => sum + Number(food.calories), 0) || 0,
+      isActive: idx === activeMealIndex
+    })));
+  }, [activeMealIndex, formData.meals]);
 
   // Group meals by name and time to show Meal A/B options together
   const groupedMeals = formData.meals.reduce((groups, meal) => {
@@ -801,7 +912,9 @@ export default function CreateMealPlanForm({
           <h4 className="font-semibold text-secondary dark:text-alabaster mb-4 text-center">
             Total Macros
           </h4>
-          <div className="grid grid-cols-4 gap-4">
+          
+          {/* Macro Values */}
+          <div className="grid grid-cols-4 gap-4 mb-6">
             <div className="text-center bg-white/60 dark:bg-night/60 p-3 rounded-lg border border-primary/20 dark:border-primary/30">
               <div className="text-xs text-gray-dark dark:text-gray-light font-medium mb-1">
                 Calories
@@ -833,6 +946,84 @@ export default function CreateMealPlanForm({
               <div className="font-bold text-lg text-secondary dark:text-alabaster">
                 {macros.fat}g
               </div>
+            </div>
+          </div>
+          
+          {/* Meal Option Breakdown */}
+          <div className="bg-white/40 dark:bg-night/40 rounded-lg p-4 border border-primary/20 dark:border-primary/30">
+            <h5 className="text-sm font-semibold text-secondary dark:text-alabaster mb-3 text-center">
+              Included Meal Options
+            </h5>
+            <div className="space-y-2">
+              {Object.entries(groupedMeals).map(([key, meals], groupIndex) => {
+                const firstMeal = meals[0];
+                const hasMealB = meals.some(meal => meal.mealOption === 'B');
+                
+                if (meals.length === 1) {
+                  // Single meal option
+                  return (
+                    <div key={key} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-dark dark:text-gray-light">
+                        {firstMeal.name || `Meal ${groupIndex + 1}`}
+                      </span>
+                      <span className="bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-2 py-1 rounded text-xs font-medium">
+                        {firstMeal.mealOption || 'A'}
+                      </span>
+                    </div>
+                  );
+                } else {
+                  // Multiple meal options (A/B) - show which one is being counted
+                  const mealA = meals.find(m => m.mealOption === 'A');
+                  const mealB = meals.find(m => m.mealOption === 'B');
+                  
+                  // Determine which option is currently being counted for this meal group
+                  let countedOption: 'A' | 'B' | undefined;
+                  let isCurrentlyViewing = false;
+                  
+                  if (mealA && mealB) {
+                    const currentMeal = formData.meals[activeMealIndex];
+                    if (currentMeal && 
+                        currentMeal.name === mealA.name && 
+                        currentMeal.time === mealA.time) {
+                      // We're currently viewing this meal group, count the active option
+                      countedOption = currentMeal.mealOption as 'A' | 'B';
+                      isCurrentlyViewing = true;
+                    } else {
+                      // We're not currently viewing this meal group, default to Meal A
+                      countedOption = 'A';
+                    }
+                  }
+                  
+                  return (
+                    <div key={key} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-dark dark:text-gray-light">
+                        {firstMeal.name || `Meal ${groupIndex + 1}`}
+                      </span>
+                      <div className="flex items-center space-x-2">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          countedOption === 'A' 
+                            ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' 
+                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                        }`}>
+                          A
+                        </span>
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          countedOption === 'B' 
+                            ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' 
+                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                        }`}>
+                          B
+                        </span>
+                        {isCurrentlyViewing && (
+                          <span className="text-xs text-primary dark:text-primary-light font-medium">
+                            (viewing)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+              })}
             </div>
           </div>
         </div>

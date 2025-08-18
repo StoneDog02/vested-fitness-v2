@@ -20,6 +20,7 @@ interface Meal {
 interface MealOptionsCardProps {
   meals: Meal[];
   onMealSelect: (meal: Meal) => void;
+  onMealOptionSelect?: (groupKey: string, option: 'A' | 'B') => void;
   selectedMealId?: string | number;
   isDaySubmitted?: boolean;
   isActivationDay?: boolean;
@@ -32,6 +33,7 @@ interface MealOptionsCardProps {
 export default function MealOptionsCard({
   meals,
   onMealSelect,
+  onMealOptionSelect,
   selectedMealId,
   isDaySubmitted = false,
   isActivationDay = false,
@@ -55,6 +57,12 @@ export default function MealOptionsCard({
 
   const handleOptionSelect = (groupKey: string, option: 'A' | 'B') => {
     setSelectedOptionsByGroup(prev => ({ ...prev, [groupKey]: option }));
+    
+    // Notify parent component about the meal option selection for macro calculation
+    if (onMealOptionSelect) {
+      onMealOptionSelect(groupKey, option);
+    }
+    
     const groupMeals = mealGroups[groupKey] || [];
     const selectedMeal = groupMeals.find(m => m.mealOption === option) || groupMeals[0];
     if (selectedMeal) {

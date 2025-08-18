@@ -339,6 +339,9 @@ export default function Meals() {
   const [currentDayMealPlan, setCurrentDayMealPlan] = useState(todaysMealPlan);
   const [isLoadingMeals, setIsLoadingMeals] = useState(false);
   const [isActivationDay, setIsActivationDay] = useState(false);
+  
+  // Track client's selected meal options for dynamic macro calculation
+  const [selectedMealOptions, setSelectedMealOptions] = useState<Record<string, 'A' | 'B'>>({});
 
   // Use refs to prevent unnecessary re-renders
   const isInitializedRef = useRef(false);
@@ -501,6 +504,37 @@ export default function Meals() {
     }
   }, [currentDateApi, weekCompletions, dayOffset, isHydrated, fetchCompletedMealsForToday]);
 
+  // Initialize selected meal options when meal plan changes
+  useEffect(() => {
+    if (currentDayMealPlan?.meals) {
+      const initialOptions: Record<string, 'A' | 'B'> = {};
+      
+      // Group meals by name and time
+      const mealGroups = currentDayMealPlan.meals.reduce((groups: Record<string, any[]>, meal: any) => {
+        const key = `${meal.name}-${meal.time}`;
+        if (!groups[key]) {
+          groups[key] = [];
+        }
+        groups[key].push(meal);
+        return groups;
+      }, {});
+      
+      // Set default options (A for meals with A option, B for meals with only B option)
+      Object.entries(mealGroups).forEach(([groupKey, groupMeals]) => {
+        const typedGroupMeals = groupMeals as any[];
+        if (typedGroupMeals.length === 1) {
+          // Single meal option
+          initialOptions[groupKey] = typedGroupMeals[0].mealOption || 'A';
+        } else if (typedGroupMeals.length > 1) {
+          // Multiple meal options (A/B), default to A
+          initialOptions[groupKey] = 'A';
+        }
+      });
+      
+      setSelectedMealOptions(initialOptions);
+    }
+  }, [currentDayMealPlan]);
+
   // --- Compliance Calendar Backend Integration --- STABLE VERSION
   useEffect(() => {
     let isCancelled = false;
@@ -622,6 +656,11 @@ export default function Meals() {
     }
   }, [checkedMeals, addCheckedMeal, removeCheckedMeal]);
 
+  // Function to handle client's meal option selections for dynamic macro calculation
+  const handleMealOptionSelect = useCallback((groupKey: string, option: 'A' | 'B') => {
+    setSelectedMealOptions(prev => ({ ...prev, [groupKey]: option }));
+  }, []);
+
   // Handle meal submission - OPTIMISTIC UI with fetcher
   const handleSubmitMeals = useCallback(async () => {
     if (isSubmitting || isDaySubmitted || isActivationDay) return; // Prevent double submission and activation day submission
@@ -717,7 +756,7 @@ export default function Meals() {
     }
   }, [completedUniqueMeals, totalUniqueMeals, isHydrated, clearCorruptedData]);
   
-  // Calculate macros based on unique meal groups to avoid double-counting A/B options
+  // Calculate macros based on client's selected meal options to avoid double-counting A/B options
   const calculateMacrosForUniqueMeals = (meals: any[], completedUniqueMealGroups: string[]) => {
     let totalCalories = 0;
     let totalProtein = 0;
@@ -739,27 +778,41 @@ export default function Meals() {
       return groups;
     }, {});
 
-    // Calculate totals and completed macros
+    // Calculate totals and completed macros based on client's selected options
     Object.entries(mealGroups).forEach(([groupKey, groupMeals]) => {
       const isGroupCompleted = completedUniqueMealGroups.includes(groupKey);
       
-      // For totals, only count the first meal in each group (avoid double-counting)
-      const firstMeal = groupMeals[0];
-      firstMeal.foods.forEach((food: any) => {
-        totalCalories += food.calories;
-        totalProtein += food.protein;
-        totalCarbs += food.carbs;
-        totalFat += food.fat;
-      });
+      // Determine which meal option to count based on client's selection
+      let mealToCount: any;
+      if (groupMeals.length === 1) {
+        // Only one meal option, count it
+        mealToCount = groupMeals[0];
+      } else if (groupMeals.length > 1) {
+        // Multiple meal options (A/B), use client's selection or default to A
+        const clientSelectedOption = selectedMealOptions[groupKey] || 'A';
+        mealToCount = groupMeals.find(m => m.mealOption === clientSelectedOption) || groupMeals[0];
+      } else {
+        mealToCount = groupMeals[0];
+      }
       
-      // For completed, only count if the group is completed
-      if (isGroupCompleted) {
-        firstMeal.foods.forEach((food: any) => {
-          completedCalories += food.calories;
-          completedProtein += food.protein;
-          completedCarbs += food.carbs;
-          completedFat += food.fat;
+      if (mealToCount) {
+        // For totals, count the selected meal option
+        mealToCount.foods.forEach((food: any) => {
+          totalCalories += food.calories;
+          totalProtein += food.protein;
+          totalCarbs += food.carbs;
+          totalFat += food.fat;
         });
+        
+        // For completed, only count if the group is completed
+        if (isGroupCompleted) {
+          mealToCount.foods.forEach((food: any) => {
+            completedCalories += food.calories;
+            completedProtein += food.protein;
+            completedCarbs += food.carbs;
+            completedFat += food.fat;
+          });
+        }
       }
     });
 
@@ -920,6 +973,7 @@ export default function Meals() {
                     // When a meal option is selected, we don't need to do anything special
                     // The toggleMealCheck function will handle the completion tracking
                   }}
+                  onMealOptionSelect={handleMealOptionSelect}
                   isDaySubmitted={isDaySubmitted}
                   isActivationDay={isActivationDay}
                   isHydrated={isHydrated}
@@ -1085,6 +1139,73 @@ export default function Meals() {
                     colorClass="bg-yellow-500"
                     unit="g"
                   />
+                </div>
+                
+                {/* Meal Option Breakdown */}
+                <div className="bg-gray-lightest dark:bg-secondary-light/20 rounded-xl p-4 border border-gray-light dark:border-davyGray">
+                  <h4 className="text-sm font-semibold text-secondary dark:text-alabaster mb-3 text-center">
+                    Current Meal Selections
+                  </h4>
+                  <div className="space-y-2">
+                    {currentDayMealPlan?.meals ? (() => {
+                      // Group meals by name and time
+                      const mealGroups = currentDayMealPlan.meals.reduce((groups: Record<string, any[]>, meal: any) => {
+                        const key = `${meal.name}-${meal.time}`;
+                        if (!groups[key]) {
+                          groups[key] = [];
+                        }
+                        groups[key].push(meal);
+                        return groups;
+                      }, {});
+                      
+                      return Object.entries(mealGroups).map(([groupKey, groupMeals], groupIndex) => {
+                        const typedGroupMeals = groupMeals as any[];
+                        const firstMeal = typedGroupMeals[0];
+                        const hasMealB = typedGroupMeals.some((meal: any) => meal.mealOption === 'B');
+                        
+                        if (typedGroupMeals.length === 1) {
+                          // Single meal option
+                          return (
+                            <div key={groupKey} className="flex items-center justify-between text-sm">
+                              <span className="text-gray-dark dark:text-gray-light">
+                                {firstMeal.name || `Meal ${groupIndex + 1}`}
+                              </span>
+                              <span className="bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-2 py-1 rounded text-xs font-medium">
+                                {firstMeal.mealOption || 'A'}
+                              </span>
+                            </div>
+                          );
+                        } else {
+                          // Multiple meal options (A/B) - show which one is being counted
+                          const selectedOption = selectedMealOptions[groupKey] || 'A';
+                          
+                          return (
+                            <div key={groupKey} className="flex items-center justify-between text-sm">
+                              <span className="text-gray-dark dark:text-gray-light">
+                                {firstMeal.name || `Meal ${groupIndex + 1}`}
+                              </span>
+                              <div className="flex items-center space-x-2">
+                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                  selectedOption === 'A' 
+                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' 
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                                }`}>
+                                  A
+                                </span>
+                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                  selectedOption === 'B' 
+                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' 
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                                }`}>
+                                  B
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+                      });
+                    })() : null}
+                  </div>
                 </div>
               </div>
             </Card>

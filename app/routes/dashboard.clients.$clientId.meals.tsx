@@ -230,7 +230,7 @@ export const loader = async ({
   const allMealIds = (allMealsRaw || []).map((m: any) => m.id);
   const { data: allFoodsRaw } = await supabase
     .from("foods")
-    .select("id, name, portion, calories, protein, carbs, fat, meal_id, sequence_order")
+    .select("id, name, portion, calories, protein, carbs, fat, meal_id, sequence_order, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)")
     .in("meal_id", allMealIds.length > 0 ? allMealIds : [""])
     .order("sequence_order", { ascending: true })
     .order("id", { ascending: true });
@@ -239,7 +239,143 @@ export const loader = async ({
   const foodsByMeal: Record<string, any[]> = {};
   (allFoodsRaw || []).forEach((food: any) => {
     if (!foodsByMeal[food.meal_id]) foodsByMeal[food.meal_id] = [];
-    foodsByMeal[food.meal_id].push(food);
+    
+    // Use food library data when available, fallback to direct food data
+    const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
+    const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
+    const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) || 0 : Number(food.fat) || 0;
+    // Always calculate calories from macros and ensure no NaN
+    const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
+    
+    foodsByMeal[food.meal_id].push({
+      ...food,
+      calories: isFinite(calories) ? calories : 0,
+      protein: isFinite(protein) ? Math.round(protein) : 0,
+      carbs: isFinite(carbs) ? Math.round(carbs) : 0,
+      fat: isFinite(fat) ? Math.round(fat) : 0,
+    });
+  });
+
+  // Debug: Log what we're getting
+  console.log('DEBUG - All meal IDs:', allMealIds);
+  console.log('DEBUG - All foods raw:', allFoodsRaw);
+  console.log('DEBUG - Foods by meal:', foodsByMeal);
+
+  // For client meal plans, also fetch foods from the template if it exists
+  let templateFoodsRaw: any[] = [];
+  if (mealPlanIds.length > 0) {
+    // Get template IDs for client meal plans
+    const { data: clientPlans } = await supabase
+      .from("meal_plans")
+      .select("template_id")
+      .in("id", mealPlanIds)
+      .not("template_id", "is", null);
+    
+    if (clientPlans && clientPlans.length > 0) {
+      const templateIds = clientPlans.map(p => p.template_id).filter(Boolean);
+      if (templateIds.length > 0) {
+        // Get template meal IDs
+        const { data: templateMeals } = await supabase
+          .from("meals")
+          .select("id")
+          .in("meal_plan_id", templateIds);
+        
+        if (templateMeals && templateMeals.length > 0) {
+          const templateMealIds = templateMeals.map(m => m.id);
+          // Get template foods with food library data
+          const { data: templateFoods } = await supabase
+            .from("foods")
+            .select("id, name, portion, calories, protein, carbs, fat, meal_id, sequence_order, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)")
+            .in("meal_id", templateMealIds)
+            .order("sequence_order", { ascending: true })
+            .order("id", { ascending: true });
+          
+          if (templateFoods) {
+            templateFoodsRaw = templateFoods;
+            console.log('DEBUG - Raw template foods from database:', templateFoods);
+            console.log('DEBUG - Template food with food library:', templateFoods.find(f => f.food_library_id));
+            console.log('DEBUG - Template food sample with all fields:', templateFoods[0]);
+            console.log('DEBUG - Template foods with calories > 0:', templateFoods.filter(f => f.calories > 0));
+          }
+        }
+      }
+    }
+  }
+
+  // Create a mapping of template meal IDs to client meal IDs for proper food association
+  const templateToClientMealMap: Record<string, string> = {};
+  if (mealPlanIds.length > 0) {
+    // Get template IDs and their corresponding client meal plan IDs
+    const { data: clientPlans } = await supabase
+      .from("meal_plans")
+      .select("id, template_id")
+      .in("id", mealPlanIds)
+      .not("template_id", "is", null);
+    
+    if (clientPlans && clientPlans.length > 0) {
+      for (const clientPlan of clientPlans) {
+        if (clientPlan.template_id) {
+          // Get template meals and client meals for this plan
+          const [templateMeals, clientMeals] = await Promise.all([
+            supabase
+              .from("meals")
+              .select("id, name, time, sequence_order, meal_option")
+              .eq("meal_plan_id", clientPlan.template_id)
+              .order("sequence_order", { ascending: true }),
+            supabase
+              .from("meals")
+              .select("id, name, time, sequence_order, meal_option")
+              .eq("meal_plan_id", clientPlan.id)
+              .order("sequence_order", { ascending: true })
+          ]);
+          
+          if (templateMeals.data && clientMeals.data) {
+            // Map template meal IDs to client meal IDs based on name, time, and meal_option
+            templateMeals.data.forEach(templateMeal => {
+              const matchingClientMeal = clientMeals.data.find(clientMeal => 
+                clientMeal.name === templateMeal.name &&
+                clientMeal.time === templateMeal.time &&
+                clientMeal.meal_option === templateMeal.meal_option
+              );
+              if (matchingClientMeal) {
+                templateToClientMealMap[templateMeal.id] = matchingClientMeal.id;
+              }
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Process template foods and associate them with client meals (without duplication)
+  Object.entries(templateToClientMealMap).forEach(([templateMealId, clientMealId]) => {
+    // Find template foods for this template meal
+    const templateFoods = templateFoodsRaw.filter(food => food.meal_id === templateMealId);
+    
+    if (templateFoods.length > 0) {
+      // Process template foods and add them to client meal (only if client meal doesn't already have foods)
+      if (!foodsByMeal[clientMealId] || foodsByMeal[clientMealId].length === 0) {
+        if (!foodsByMeal[clientMealId]) foodsByMeal[clientMealId] = [];
+        
+        templateFoods.forEach((food: any) => {
+          // Use food library data when available, fallback to direct food data
+          const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
+          const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
+          const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.fat) || 0 : Number(food.fat) || 0;
+          // Always calculate calories from macros and ensure no NaN
+          const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
+          
+          foodsByMeal[clientMealId].push({
+            ...food,
+            meal_id: clientMealId, // Update meal_id to client meal
+            calories: isFinite(calories) ? calories : 0,
+            protein: isFinite(protein) ? Math.round(protein) : 0,
+            carbs: isFinite(carbs) ? Math.round(carbs) : 0,
+            fat: isFinite(fat) ? Math.round(fat) : 0,
+          });
+        });
+      }
+    }
   });
 
   // Group meals by plan
@@ -251,6 +387,33 @@ export const loader = async ({
       foods: foodsByMeal[meal.id] || [],
       mealOption: meal.meal_option || 'A'
     });
+  });
+
+  // Debug: Log what meals we're getting
+  console.log('DEBUG - All meals raw:', allMealsRaw);
+  console.log('DEBUG - Meals by plan:', mealsByPlan);
+  console.log('DEBUG - Foods by meal mapping:', foodsByMeal);
+  console.log('DEBUG - Template foods raw:', templateFoodsRaw);
+  console.log('DEBUG - Template to client meal map:', templateToClientMealMap);
+  
+  // Additional debugging for food processing
+  console.log('DEBUG - Sample processed food:', Object.values(foodsByMeal)[0]?.[0]);
+  console.log('DEBUG - Food library data sample:', templateFoodsRaw[0]?.food_library);
+  console.log('DEBUG - Client foods sample:', allFoodsRaw?.[0]);
+  
+  // Debug: Check for duplicate foods in meals
+  Object.entries(foodsByMeal).forEach(([mealId, foods]) => {
+    if (foods.length > 0) {
+      const foodNames = foods.map(f => f.name);
+      const uniqueNames = [...new Set(foodNames)];
+      if (foodNames.length !== uniqueNames.length) {
+        console.warn(`DEBUG - DUPLICATE FOODS DETECTED in meal ${mealId}:`, {
+          totalFoods: foods.length,
+          uniqueFoods: uniqueNames.length,
+          duplicates: foodNames.filter((name, index) => foodNames.indexOf(name) !== index)
+        });
+      }
+    }
   });
 
   // Attach meals to plans
@@ -1174,6 +1337,31 @@ export default function ClientMeals() {
                             <button
                               className="text-green-600 hover:text-green-700 text-sm hover:underline flex items-center gap-1"
                               onClick={() => {
+                                console.log('Original plan data:', plan);
+                                console.log('Plan meals:', plan.meals);
+                                console.log('Sample food from plan:', plan.meals[0]?.foods[0]);
+                                console.log('Meal options in plan:', plan.meals.map(m => ({ name: m.name, time: m.time, mealOption: m.mealOption, foodsCount: m.foods?.length || 0 })));
+                                
+                                // Debug individual meal foods
+                                plan.meals.forEach((meal, mealIdx) => {
+                                  console.log(`Plan Meal ${mealIdx} (${meal.mealOption}):`, {
+                                    id: meal.id,
+                                    name: meal.name,
+                                    time: meal.time,
+                                    mealOption: meal.mealOption,
+                                    foodsCount: meal.foods?.length || 0
+                                  });
+                                  meal.foods?.forEach((food, foodIdx) => {
+                                    console.log(`  Food ${foodIdx}:`, {
+                                      name: food.name,
+                                      calories: food.calories,
+                                      protein: food.protein,
+                                      carbs: food.carbs,
+                                      fat: food.fat
+                                    });
+                                  });
+                                });
+                                
                                 setSelectedPlan({
                                   id: plan.id,
                                   title: plan.title,
@@ -1845,6 +2033,31 @@ export default function ClientMeals() {
                             <button
                               className="text-green-600 hover:text-green-700 text-sm hover:underline flex items-center gap-1"
                               onClick={() => {
+                                console.log('Original plan data:', plan);
+                                console.log('Plan meals:', plan.meals);
+                                console.log('Sample food from plan:', plan.meals[0]?.foods[0]);
+                                console.log('Meal options in plan:', plan.meals.map(m => ({ name: m.name, time: m.time, mealOption: m.mealOption, foodsCount: m.foods?.length || 0 })));
+                                
+                                // Debug individual meal foods
+                                plan.meals.forEach((meal, mealIdx) => {
+                                  console.log(`Plan Meal ${mealIdx} (${meal.mealOption}):`, {
+                                    id: meal.id,
+                                    name: meal.name,
+                                    time: meal.time,
+                                    mealOption: meal.mealOption,
+                                    foodsCount: meal.foods?.length || 0
+                                  });
+                                  meal.foods?.forEach((food, foodIdx) => {
+                                    console.log(`  Food ${foodIdx}:`, {
+                                      name: food.name,
+                                      calories: food.calories,
+                                      protein: food.protein,
+                                      carbs: food.carbs,
+                                      fat: food.fat
+                                    });
+                                  });
+                                });
+                                
                                 setSelectedPlan({
                                   id: plan.id,
                                   title: plan.title,
