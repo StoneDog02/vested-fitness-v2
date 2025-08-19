@@ -3,7 +3,8 @@ import Modal from "~/components/ui/Modal";
 import Button from "~/components/ui/Button";
 import type { MealPlan } from "~/routes/dashboard.clients.$clientId.meals";
 import { useFetcher } from "@remix-run/react";
-import { TrashIcon } from "@heroicons/react/24/outline";
+import { TrashIcon, EyeIcon } from "@heroicons/react/24/outline";
+import ViewMealPlanModal from "./ViewMealPlanModal";
 
 // Helper function to truncate meal plan descriptions
 const truncateDescription = (description: string, maxLength: number = 50) => {
@@ -31,6 +32,7 @@ export default function ViewMealPlanLibraryModal({
   const [libraryPlansPage, setLibraryPlansPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [viewMealPlan, setViewMealPlan] = useState<MealPlan | null>(null);
 
   // Handle template deletion
   useEffect(() => {
@@ -121,6 +123,15 @@ export default function ViewMealPlanLibraryModal({
                       {plan.title}
                     </h3>
                     <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-xs font-semibold flex items-center gap-1"
+                        title="View Template"
+                        onClick={() => setViewMealPlan(plan)}
+                      >
+                        <EyeIcon className="h-3 w-3" />
+                        View
+                      </button>
                       <fetcher.Form method="post">
                         <input type="hidden" name="intent" value="useTemplate" />
                         <input type="hidden" name="templateId" value={plan.id} />
@@ -179,6 +190,15 @@ export default function ViewMealPlanLibraryModal({
           )}
         </div>
       </div>
+      
+      {/* View Meal Plan Modal */}
+      {viewMealPlan && (
+        <ViewMealPlanModal
+          isOpen={!!viewMealPlan}
+          onClose={() => setViewMealPlan(null)}
+          mealPlan={viewMealPlan}
+        />
+      )}
     </div>
   );
 } 

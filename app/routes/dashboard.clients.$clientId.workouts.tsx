@@ -358,17 +358,100 @@ export const loader = async ({
   );
 
   // Library plans are now from workout_plans with is_template = true
-  const libraryPlans = (libraryPlansRaw?.data || []).map((plan: any) => ({
-    id: plan.id,
-    title: plan.title,
-    description: plan.description,
-    instructions: plan.instructions,
-    builderMode: plan.builder_mode,
-    workoutDaysPerWeek: plan.workout_days_per_week,
-    createdAt: plan.created_at,
-    isTemplate: true,
-    days: [] // Templates don't have days in the loader
-  }));
+  // Load full workout data for library plans too (needed for view functionality)
+  const libraryPlans = await Promise.all(
+    (libraryPlansRaw?.data || []).map(async (plan: any) => {
+      // Get workout days for this template plan
+      const { data: workoutDays } = await supabase
+        .from("workout_days")
+        .select(`
+          id,
+          day_of_week,
+          is_rest,
+          workout_name,
+          workout_type
+        `)
+        .eq("workout_plan_id", plan.id)
+        .order("day_of_week", { ascending: true });
+
+      // Get exercises for each workout day
+      const days = await Promise.all(
+        ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map(async (day) => {
+          const dayData = workoutDays?.find((d: any) => d.day_of_week === day);
+          if (!dayData || dayData.is_rest) {
+            return { day, isRest: true, workout: null };
+          }
+
+          // Get exercises for this day
+          const { data: exercises } = await supabase
+            .from("workout_exercises")
+            .select(`
+              id,
+              exercise_name,
+              exercise_description,
+              video_url,
+              sets_data,
+              group_type,
+              sequence_order,
+              group_notes
+            `)
+            .eq("workout_day_id", dayData.id)
+            .order("id", { ascending: true });
+
+          // Convert exercises to the expected format
+          const exerciseGroups = (exercises || []).map((ex: any) => ({
+            id: ex.id,
+            name: ex.exercise_name,
+            description: ex.exercise_description,
+            videoUrl: ex.video_url,
+            sets: ex.sets_data?.length || 3,
+            reps: ex.sets_data?.[0]?.reps || 10,
+            notes: ex.exercise_description,
+            groupType: ex.group_type,
+            sequenceOrder: ex.sequence_order,
+            groupNotes: ex.group_notes
+          }));
+
+          // Group exercises by group type
+          const groups = exerciseGroups.reduce((acc: any[], exercise: any) => {
+            const existingGroup = acc.find(g => g.type === exercise.groupType);
+            if (existingGroup) {
+              existingGroup.exercises.push(exercise);
+            } else {
+              acc.push({
+                type: exercise.groupType,
+                exercises: [exercise],
+                notes: exercise.groupNotes
+              });
+            }
+            return acc;
+          }, []);
+
+          return {
+            day,
+            isRest: false,
+            workout: {
+              title: dayData.workout_name,
+              type: dayData.workout_type,
+              exercises: groups
+            }
+          };
+        })
+      );
+
+      return {
+        id: plan.id,
+        title: plan.title,
+        description: plan.description,
+        instructions: plan.instructions,
+        builderMode: plan.builder_mode,
+        workoutDaysPerWeek: plan.workout_days_per_week,
+        createdAt: plan.created_at,
+        isTemplate: true,
+        days
+      };
+    })
+  );
 
   // Pagination info
   const workoutPlansTotal = plansCountRaw.count || 0;

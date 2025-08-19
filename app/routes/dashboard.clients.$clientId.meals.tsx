@@ -303,20 +303,71 @@ export const loader = async ({
   );
 
   // Library plans are from meal_plans with is_template = true
-  const libraryPlans = (libraryPlansRaw?.data || []).map((plan: any) => ({
-    id: plan.id,
-    title: plan.title,
-    description: plan.description,
-    created_at: plan.created_at,
-    is_template: true,
-    meals: [] // Templates don't have meals in the loader
-  }));
+  // Load full meal data for library plans too (needed for view functionality)
+  const libraryPlans = await Promise.all(
+    (libraryPlansRaw?.data || []).map(async (plan: any) => {
+      // Get meals for this template plan
+      const { data: mealsRaw } = await supabase
+        .from("meals")
+        .select("id, name, time, sequence_order, meal_option")
+        .eq("meal_plan_id", plan.id)
+        .order("sequence_order", { ascending: true });
 
-  // Debug: Log what we're getting
-  console.log('DEBUG - Client meal instances:', mealPlanIds);
-  console.log('DEBUG - Client meals data:', mealPlans);
-  console.log('DEBUG - Library plan IDs:', libraryPlanIds);
-  console.log('DEBUG - Library meals data:', libraryPlans);
+      if (mealsRaw && mealsRaw.length > 0) {
+        // Batch fetch all foods for all meals in a single query
+        const mealIds = mealsRaw.map(m => m.id);
+        const { data: foods } = await supabase
+          .from("foods")
+          .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+          .in("meal_id", mealIds);
+
+        // Process foods and map them to meals
+        const foodsData = foods || [];
+        
+        const meals = mealsRaw.map(meal => {
+          const mealFoods = foodsData.filter(f => f.meal_id === meal.id);
+          
+          return {
+            id: meal.id,
+            name: meal.name,
+            time: meal.time,
+            sequence_order: meal.sequence_order || 0,
+            mealOption: meal.meal_option || 'A',
+            foods: mealFoods.map(food => ({
+              id: food.id,
+              name: food.name,
+              portion: food.portion,
+              calories: food.calories || 0,
+              protein: food.protein || 0,
+              carbs: food.carbs || 0,
+              fat: food.fat || 0,
+              sequence_order: 0 // Default since foods table doesn't have this
+            }))
+          };
+        });
+
+        return {
+          id: plan.id,
+          title: plan.title,
+          description: plan.description,
+          created_at: plan.created_at,
+          is_template: true,
+          meals
+        };
+      } else {
+        return {
+          id: plan.id,
+          title: plan.title,
+          description: plan.description,
+          created_at: plan.created_at,
+          is_template: true,
+          meals: []
+        };
+      }
+    })
+  );
+
+
 
   // Calculate compliance data for the week
   const complianceData: number[] = [];

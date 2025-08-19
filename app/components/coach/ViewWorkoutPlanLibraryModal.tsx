@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useFetcher } from "@remix-run/react";
-import { TrashIcon } from "@heroicons/react/24/outline";
+import { TrashIcon, EyeIcon } from "@heroicons/react/24/outline";
+import ViewWorkoutPlanModal from "./ViewWorkoutPlanModal";
 
 // Define the type for a workout plan template
 export type WorkoutPlanLibrary = {
@@ -50,6 +51,7 @@ export default function ViewWorkoutPlanLibraryModal({
   const [libraryPlansPage, setLibraryPlansPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [viewWorkoutPlan, setViewWorkoutPlan] = useState<WorkoutPlanLibrary | null>(null);
 
   // Handle template deletion
   useEffect(() => {
@@ -140,6 +142,15 @@ export default function ViewWorkoutPlanLibraryModal({
                       {plan.title}
                     </h3>
                     <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-xs font-semibold flex items-center gap-1"
+                        title="View Template"
+                        onClick={() => setViewWorkoutPlan(plan)}
+                      >
+                        <EyeIcon className="h-3 w-3" />
+                        View
+                      </button>
                       <fetcher.Form method="post">
                         <input type="hidden" name="intent" value="useTemplate" />
                         <input type="hidden" name="templateId" value={plan.id} />
@@ -206,6 +217,15 @@ export default function ViewWorkoutPlanLibraryModal({
           )}
         </div>
       </div>
+      
+      {/* View Workout Plan Modal */}
+      {viewWorkoutPlan && (
+        <ViewWorkoutPlanModal
+          isOpen={!!viewWorkoutPlan}
+          onClose={() => setViewWorkoutPlan(null)}
+          workoutPlan={viewWorkoutPlan}
+        />
+      )}
     </div>
   );
 } 
