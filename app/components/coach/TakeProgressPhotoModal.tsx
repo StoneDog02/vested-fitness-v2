@@ -76,7 +76,7 @@ export default function TakeProgressPhotoModal({
     <Modal
       isOpen={isOpen}
       onClose={handleCancel}
-      title="Take Progress Photo"
+      title="Take or Upload Progress Photo"
       size="lg"
     >
       {isUploading ? (

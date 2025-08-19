@@ -16,10 +16,13 @@ export default function PhotoCapture({
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<'capture' | 'upload' | 'review'>('capture');
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const startCamera = useCallback(async () => {
     try {
@@ -78,10 +81,36 @@ export default function PhotoCapture({
       if (blob) {
         const photoUrl = URL.createObjectURL(blob);
         setCapturedPhoto(photoUrl);
+        setMode('review');
         stopCamera();
       }
     }, 'image/jpeg', 0.9);
   }, [stopCamera]);
+
+  const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setError('Please select an image file.');
+        return;
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError('File size must be less than 10MB.');
+        return;
+      }
+
+      // Convert file to blob and create preview
+      const blob = new Blob([file], { type: file.type });
+      const photoUrl = URL.createObjectURL(blob);
+      setCapturedPhoto(photoUrl);
+      setSelectedFileName(file.name);
+      setMode('review');
+      setError(null);
+    }
+  }, []);
 
   const retakePhoto = useCallback(() => {
     if (capturedPhoto) {
@@ -89,6 +118,8 @@ export default function PhotoCapture({
       setCapturedPhoto(null);
     }
     setNotes('');
+    setSelectedFileName(null);
+    setMode('capture');
     startCamera();
   }, [capturedPhoto, startCamera]);
 
@@ -111,20 +142,35 @@ export default function PhotoCapture({
     if (capturedPhoto) {
       URL.revokeObjectURL(capturedPhoto);
     }
+    setSelectedFileName(null);
     stopCamera();
     onCancel();
   }, [capturedPhoto, stopCamera, onCancel]);
 
-  // Start camera when component mounts
-  React.useEffect(() => {
+  const switchToUpload = useCallback(() => {
+    stopCamera();
+    setMode('upload');
+    setError(null);
+  }, [stopCamera]);
+
+  const switchToCapture = useCallback(() => {
+    setMode('capture');
+    setError(null);
     startCamera();
+  }, [startCamera]);
+
+  // Start camera when component mounts in capture mode
+  React.useEffect(() => {
+    if (mode === 'capture') {
+      startCamera();
+    }
     return () => {
       stopCamera();
       if (capturedPhoto) {
         URL.revokeObjectURL(capturedPhoto);
       }
     };
-  }, [startCamera, stopCamera, capturedPhoto]);
+  }, [startCamera, stopCamera, capturedPhoto, mode]);
 
   if (error) {
     return (
@@ -136,7 +182,7 @@ export default function PhotoCapture({
           <p className="text-sm">{error}</p>
         </div>
         <div className="flex space-x-3">
-          <Button variant="secondary" onClick={startCamera}>
+          <Button variant="secondary" onClick={mode === 'capture' ? startCamera : () => setMode('upload')}>
             Try Again
           </Button>
           <Button variant="secondary" onClick={handleCancel}>
@@ -147,7 +193,7 @@ export default function PhotoCapture({
     );
   }
 
-  if (capturedPhoto) {
+  if (mode === 'review' && capturedPhoto) {
     return (
       <div className="flex flex-col space-y-4">
         <div className="text-center">
@@ -165,6 +211,11 @@ export default function PhotoCapture({
             alt="Captured preview" 
             className="w-full h-96 object-contain"
           />
+          {selectedFileName && (
+            <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+              {selectedFileName}
+            </div>
+          )}
         </div>
 
         <div>
@@ -183,10 +234,60 @@ export default function PhotoCapture({
 
         <div className="flex space-x-3">
           <Button variant="secondary" onClick={retakePhoto} className="flex-1">
-            Retake Photo
+            Choose Different Photo
           </Button>
           <Button variant="primary" onClick={savePhoto} className="flex-1">
             Save Photo
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === 'upload') {
+    return (
+      <div className="flex flex-col space-y-4">
+        <div className="text-center">
+          <h3 className="text-lg font-medium text-secondary dark:text-alabaster mb-2">
+            Upload Progress Photo
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {clientName ? `Upload a progress photo for ${clientName}` : 'Select a photo from your device'}
+          </p>
+        </div>
+
+        <div className="border-2 border-dashed border-gray-light dark:border-davyGray rounded-lg p-8 text-center hover:border-primary dark:hover:border-primary transition-colors">
+          <svg className="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Click to select a photo from your device
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Supports JPG, PNG, GIF • Max 10MB
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <Button 
+            variant="primary" 
+            onClick={() => fileInputRef.current?.click()}
+            className="mx-auto min-h-[44px] px-6"
+          >
+            Choose Photo
+          </Button>
+        </div>
+
+        <div className="flex space-x-3">
+          <Button variant="secondary" onClick={switchToCapture} className="flex-1">
+            Use Camera
+          </Button>
+          <Button variant="secondary" onClick={handleCancel} className="flex-1">
+            Cancel
           </Button>
         </div>
       </div>
@@ -232,8 +333,8 @@ export default function PhotoCapture({
       </div>
 
       <div className="flex space-x-3">
-        <Button variant="secondary" onClick={handleCancel} className="flex-1">
-          Cancel
+        <Button variant="secondary" onClick={switchToUpload} className="flex-1">
+          Upload Photo
         </Button>
         <Button variant="primary" onClick={capturePhoto} className="flex-1">
           Take Photo
