@@ -350,6 +350,26 @@ export default function Supplements() {
         Supplements
       </h1>
 
+      {/* GET SUPPS Button */}
+      <div className="mb-6 text-right">
+        <a
+          href="https://completenutritionlogan.com/collections/supplements"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex flex-col items-center gap-2"
+        >
+          <Button
+            variant="primary"
+            className="px-8 py-3 text-lg font-semibold"
+          >
+            GET SUPPS
+          </Button>
+          <span className="text-xs font-medium text-gray-600 dark:text-gray-400 tracking-wider">
+            USE CODE: MIKE15
+          </span>
+        </a>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-2">
           <Card>
