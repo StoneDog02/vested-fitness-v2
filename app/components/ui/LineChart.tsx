@@ -58,9 +58,14 @@ const LineChart: React.FC<LineChartProps> = ({
         <Line
           type="monotone"
           dataKey="weight"
-          stroke="#6366f1"
+          stroke="#84cc16"
           strokeWidth={2}
-          dot={false}
+          dot={{
+            fill: "#84cc16",
+            stroke: "#84cc16",
+            strokeWidth: 2,
+            r: 4
+          }}
         />
         {children}
       </RechartsLineChart>
