@@ -10,7 +10,27 @@ export const USER_TIMEZONE = "America/Denver";
 
 // Helper function to get current date in user timezone
 export function getCurrentDate() {
-  return dayjs().tz(USER_TIMEZONE).startOf("day");
+  try {
+    // Try to use the specified timezone
+    const date = dayjs().tz(USER_TIMEZONE).startOf("day");
+    // Verify the timezone conversion worked correctly
+    if (date.isValid()) {
+      return date;
+    }
+  } catch (error) {
+    console.warn('Timezone conversion failed, falling back to local time:', error);
+  }
+  
+  // Fallback: use local time but ensure it's in Mountain Time
+  // Since we're in Northern Utah, we can calculate the offset manually
+  const now = dayjs();
+  
+  // Get current UTC time and convert to Mountain Time
+  // Mountain Time is UTC-6 (or UTC-7 during DST)
+  // For simplicity, we'll use UTC-6 as a baseline
+  const mountainTime = now.utc().subtract(6, 'hour').startOf("day");
+  
+  return mountainTime;
 }
 
 // Helper function to get current date as ISO string

@@ -196,186 +196,227 @@ export const loader = async ({
   const libraryPlansPageSize = parseInt(url.searchParams.get("libraryPlansPageSize") || "10", 10);
   const libraryPlansOffset = (libraryPlansPage - 1) * libraryPlansPageSize;
 
-  // Parallel fetch paginated plans
-  const [mealPlansRaw, libraryPlansRaw, mealPlansCountRaw, libraryPlansCountRaw] = await Promise.all([
-    // Fetch client meal plan instances (new system)
+  // Fetch paginated plans
+  const [plansRaw, libraryPlansRaw, plansCountRaw, libraryPlansCountRaw, completionsRaw] = await Promise.all([
     supabase
-      .from("meal_plan_instances")
-      .select(`
-        id, 
-        is_active, 
-        created_at, 
-        activated_at, 
-        deactivated_at,
-        meal_plans!inner(
-          id,
-          title,
-          description
-        )
-      `, { count: "exact" })
-      .eq("client_id", client.id)
+      .from("meal_plans")
+      .select("id, title, description, is_active, created_at, activated_at, deactivated_at, is_template", { count: "exact" })
+      .eq("user_id", client.id)
+      .eq("is_template", false)
       .order("created_at", { ascending: false })
       .range(mealPlansOffset, mealPlansOffset + mealPlansPageSize - 1),
-    // Fetch coach's template library (unchanged)
     supabase
       .from("meal_plans")
-      .select("id, title, description, is_active, created_at, activated_at, deactivated_at", { count: "exact" })
-      .eq("is_template", true)
+      .select("id, title, description, created_at", { count: "exact" })
       .eq("user_id", coachId)
+      .eq("is_template", true)
       .order("created_at", { ascending: false })
       .range(libraryPlansOffset, libraryPlansOffset + libraryPlansPageSize - 1),
-    // Count client meal plan instances
-    supabase
-      .from("meal_plan_instances")
-      .select("id", { count: "exact", head: true })
-      .eq("client_id", client.id),
-    // Count coach's templates (unchanged)
     supabase
       .from("meal_plans")
       .select("id", { count: "exact", head: true })
-      .eq("is_template", true)
-      .eq("user_id", coachId),
+      .eq("user_id", client.id)
+      .eq("is_template", false),
+    supabase
+      .from("meal_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", coachId)
+      .eq("is_template", true),
+    supabase
+      .from("meal_completions")
+      .select("completed_at, meal_id")
+      .eq("user_id", client.id)
+      .gte("completed_at", weekStart.toISOString().slice(0, 10))
+      .lt("completed_at", weekEnd.toISOString().slice(0, 10)),
   ]);
 
   // Collect all plan ids for this page
-  const mealPlanIds = (mealPlansRaw.data?.map((p: any) => p.id) || []);
-  const libraryPlanIds = (libraryPlansRaw.data?.map((p: any) => p.id) || []);
+  const mealPlanIds = (plansRaw?.data?.map((p: any) => p.id) || []);
+  const libraryPlanIds = (libraryPlansRaw?.data?.map((p: any) => p.id) || []);
 
-  // For client meal plans, fetch personal meals using the new function
-  let clientMealsData: any[] = [];
-  if (mealPlanIds.length > 0) {
-    // Fetch meals for each instance using the new function
-    for (const instanceId of mealPlanIds) {
-      try {
-        const { data: meals } = await supabase.rpc('get_client_personal_meals', {
-          instance_id_param: instanceId,
-          user_id_param: client.id
-        });
+  // For meal plans, we need to get the meal data
+  const mealPlans = await Promise.all(
+    (plansRaw?.data || []).map(async (plan: any) => {
+      // Get meals for this plan
+      const { data: mealsRaw } = await supabase
+        .from("meals")
+        .select("id, name, time, sequence_order, meal_option")
+        .eq("meal_plan_id", plan.id)
+        .order("sequence_order", { ascending: true });
+
+      if (mealsRaw && mealsRaw.length > 0) {
+        // Batch fetch all foods for all meals in a single query
+        const mealIds = mealsRaw.map(m => m.id);
+        const { data: foods } = await supabase
+          .from("foods")
+          .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+          .in("meal_id", mealIds);
+
+        // Process foods and map them to meals
+        const foodsData = foods || [];
         
-        if (meals) {
-          clientMealsData.push({
-            instance_id: instanceId,
-            meals: meals
-          });
-        }
-      } catch (error) {
-        console.error(`Failed to fetch meals for instance ${instanceId}:`, error);
+        const meals = mealsRaw.map(meal => {
+          const mealFoods = foodsData.filter(f => f.meal_id === meal.id);
+          
+          return {
+            id: meal.id,
+            name: meal.name,
+            time: meal.time,
+            sequence_order: meal.sequence_order || 0,
+            mealOption: meal.meal_option || 'A',
+            foods: mealFoods.map(food => ({
+              id: food.id,
+              name: food.name,
+              portion: food.portion,
+              calories: food.calories || 0,
+              protein: food.protein || 0,
+              carbs: food.carbs || 0,
+              fat: food.fat || 0,
+              sequence_order: 0 // Default since foods table doesn't have this
+            }))
+          };
+        });
+
+        return {
+          id: plan.id,
+          title: plan.title,
+          description: plan.description,
+          isActive: plan.is_active,
+          createdAt: plan.created_at,
+          activatedAt: plan.activated_at,
+          deactivatedAt: plan.deactivated_at,
+          meals
+        };
+      } else {
+        return {
+          id: plan.id,
+          title: plan.title,
+          description: plan.description,
+          isActive: plan.is_active,
+          createdAt: plan.created_at,
+          activatedAt: plan.activated_at,
+          deactivatedAt: plan.deactivated_at,
+          meals: []
+        };
       }
-    }
-  }
+    })
+  );
 
-  // For library plans (templates), fetch meals and foods as before
-  let libraryMealsData: any[] = [];
-  if (libraryPlanIds.length > 0) {
-    // Batch fetch all meals for library plans
-    const { data: libraryMealsRaw } = await supabase
-      .from("meals")
-      .select("id, name, time, sequence_order, meal_plan_id, meal_option")
-      .in("meal_plan_id", libraryPlanIds)
-      .order("sequence_order", { ascending: true })
-      .order("id", { ascending: true });
-
-    // Batch fetch all foods for library meals
-    const libraryMealIds = (libraryMealsRaw || []).map((m: any) => m.id);
-    const { data: libraryFoodsRaw } = await supabase
-      .from("foods")
-      .select("id, name, portion, calories, protein, carbs, fat, meal_id, sequence_order, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)")
-      .in("meal_id", libraryMealIds.length > 0 ? libraryMealIds : [""])
-      .order("sequence_order", { ascending: true })
-      .order("id", { ascending: true });
-
-    // Group foods by meal for library plans
-    const libraryFoodsByMeal: Record<string, any[]> = {};
-    (libraryFoodsRaw || []).forEach((food: any) => {
-      if (!libraryFoodsByMeal[food.meal_id]) libraryFoodsByMeal[food.meal_id] = [];
-      
-      // Use food library data when available, fallback to direct food data
-      const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
-      const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
-      const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.fat) || 0 : Number(food.fat) || 0;
-      // Always calculate calories from macros and ensure no NaN
-      const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
-      
-      libraryFoodsByMeal[food.meal_id].push({
-        ...food,
-        calories: isFinite(calories) ? calories : 0,
-        protein: isFinite(protein) ? Math.round(protein) : 0,
-        carbs: isFinite(carbs) ? Math.round(carbs) : 0,
-        fat: isFinite(fat) ? Math.round(fat) : 0,
-      });
-    });
-
-    // Assemble library meals with foods
-    libraryMealsData = (libraryMealsRaw || []).map(meal => ({
-      id: String(meal.id || ''),
-      name: String(meal.name || ''),
-      time: String(meal.time || ''),
-      sequence_order: Number(meal.sequence_order) || 0,
-      mealOption: meal.meal_option || 'A',
-      foods: libraryFoodsByMeal[String(meal.id)] || []
-    }));
-  }
-
-  // Debug: Log what we're getting
-  console.log('DEBUG - Client meal instances:', mealPlanIds);
-  console.log('DEBUG - Client meals data:', clientMealsData);
-  console.log('DEBUG - Library plan IDs:', libraryPlanIds);
-  console.log('DEBUG - Library meals data:', libraryMealsData);
-
-  // Assemble the final data structure
-  const mealPlans = (mealPlansRaw.data || []).map((instance: any) => {
-    // Find the meals data for this instance
-    const instanceMeals = clientMealsData.find(data => data.instance_id === instance.id);
-    
-    return {
-      id: instance.id,
-      title: instance.meal_plans.title,
-      description: instance.meal_plans.description,
-      isActive: instance.is_active,
-      activatedAt: instance.activated_at,
-      deactivatedAt: instance.deactivated_at,
-      createdAt: instance.created_at,
-      meals: instanceMeals ? instanceMeals.meals.map((meal: any) => ({
-        id: String(meal.meal_id || ''),
-        name: String(meal.meal_name || ''),
-        time: String(meal.meal_time || ''),
-        sequence_order: Number(meal.sequence_order) || 0,
-        mealOption: meal.meal_option || 'A',
-        foods: (meal.foods || []).map((food: any) => ({
-          id: String(food.food_id || ''),
-          name: String(food.name || ''),
-          portion: String(food.portion || ''),
-          calories: Number(food.calories) || 0,
-          protein: Number(food.protein) || 0,
-          carbs: Number(food.carbs) || 0,
-          fat: Number(food.fat) || 0,
-          sequence_order: Number(food.sequence_order) || 0,
-        }))
-      })) : []
-    };
-  });
-
-  const libraryPlans = (libraryPlansRaw.data || []).map((plan: any) => ({
+  // Library plans are from meal_plans with is_template = true
+  const libraryPlans = (libraryPlansRaw?.data || []).map((plan: any) => ({
     id: plan.id,
     title: plan.title,
     description: plan.description,
-    isActive: plan.is_active,
-    activatedAt: plan.activated_at,
-    deactivatedAt: plan.deactivated_at,
-    createdAt: plan.created_at,
-    meals: libraryMealsData.filter(meal => {
-      // Find meals that belong to this plan
-      // Note: We need to match by plan ID, but libraryMealsData doesn't have plan_id
-      // This is a limitation of the current structure - we'll need to fix this
-      return true; // For now, return all meals
-    })
+    created_at: plan.created_at,
+    is_template: true,
+    meals: [] // Templates don't have meals in the loader
   }));
 
-  // Cache the results
+  // Debug: Log what we're getting
+  console.log('DEBUG - Client meal instances:', mealPlanIds);
+  console.log('DEBUG - Client meals data:', mealPlans);
+  console.log('DEBUG - Library plan IDs:', libraryPlanIds);
+  console.log('DEBUG - Library meals data:', libraryPlans);
+
+  // Calculate compliance data for the week
+  const complianceData: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(weekStart);
+    day.setDate(weekStart.getDate() + i);
+    const dayStr = day.toISOString().slice(0, 10);
+    
+    // Check if this day is before the user signed up
+    if (client.created_at) {
+      const signupDate = new Date(client.created_at);
+      signupDate.setHours(0, 0, 0, 0);
+      if (day < signupDate) {
+        complianceData.push(-1); // N/A for days before signup
+        continue;
+      }
+    }
+    
+    // Find the plan active on this day
+    const activePlan = mealPlans.find((plan) => {
+      if (!plan.isActive) return false;
+      
+      const activated = plan.activatedAt ? new Date(plan.activatedAt) : null;
+      const deactivated = plan.deactivatedAt ? new Date(plan.deactivatedAt) : null;
+      
+      return activated && 
+             activated.toISOString().slice(0, 10) <= dayStr && 
+             (!deactivated || deactivated > day);
+    });
+    
+    if (!activePlan) {
+      complianceData.push(0);
+      continue;
+    }
+    
+    // Check if this is the day the plan was first activated
+    const planActivated = activePlan.activatedAt ? new Date(activePlan.activatedAt) : null;
+    const planActivatedStr = planActivated ? planActivated.toISOString().slice(0, 10) : null;
+    const isActivationDay = planActivatedStr === dayStr;
+    
+    // Check if this is the first plan for this client (to handle immediate activation)
+    const isFirstPlan = mealPlans.length === 1 || 
+      mealPlans.every(p => p.id === activePlan.id || !p.activatedAt) ||
+      mealPlans.every(p => p.id === activePlan.id || new Date(p.createdAt) > new Date(activePlan.createdAt));
+    
+    // Check if plan was created today (for immediate activation)
+    const planCreated = new Date(activePlan.createdAt);
+    const planCreatedStr = planCreated.toISOString().slice(0, 10);
+    const isCreatedToday = planCreatedStr === dayStr;
+    
+    if (isActivationDay || (isFirstPlan && planActivatedStr === dayStr) || isCreatedToday) {
+      complianceData.push(-1); // N/A for activation/creation day
+      continue;
+    }
+    
+    // Meals for this plan
+    const meals = activePlan.meals;
+    
+    // Group meals by name and time to handle A/B options as single meals
+    const mealGroups = meals.reduce((groups: Record<string, any[]>, meal: any) => {
+      const key = `${meal.name}-${meal.time}`;
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(meal);
+      return groups;
+    }, {});
+    
+    const uniqueMealGroups = Object.keys(mealGroups);
+    const totalUniqueMeals = uniqueMealGroups.length;
+    
+    // Count completed unique meal groups
+    const completedUniqueMealGroups = uniqueMealGroups.filter(groupKey => {
+      const [mealName, mealTime] = groupKey.split('-');
+      const groupMeals = meals.filter((m: any) => 
+        m.name === mealName && m.time.startsWith(mealTime)
+      );
+      
+      // Check if any meal in this group was completed
+      const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
+      const groupCompletions = (completionsRaw?.data || []).filter((c: any) => {
+        const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
+        const matches = completedDateStr === dayStr && groupMealIds.has(c.meal_id);
+        
+        return matches;
+      });
+      
+      return groupCompletions.length > 0; // If any meal in the group was completed, the group is complete
+    });
+    
+    const completedUniqueMeals = completedUniqueMealGroups.length;
+    const percent = totalUniqueMeals > 0 ? completedUniqueMeals / totalUniqueMeals : 0;
+    complianceData.push(percent);
+  }
+
+  // Assemble the final data structure
   const cacheData = {
     mealPlans,
     libraryPlans,
-    complianceData: [0, 0, 0, 0, 0, 0, 0], // TODO: Calculate compliance from new system
+    complianceData,
     client: {
       id: client.id,
       name: client.name,
@@ -385,8 +426,8 @@ export const loader = async ({
       mealPlans: {
         page: mealPlansPage,
         pageSize: mealPlansPageSize,
-        total: mealPlansCountRaw.count || 0,
-        totalPages: Math.ceil((mealPlansCountRaw.count || 0) / mealPlansPageSize)
+        total: plansCountRaw.count || 0,
+        totalPages: Math.ceil((plansCountRaw.count || 0) / mealPlansPageSize)
       },
       libraryPlans: {
         page: libraryPlansPage,
@@ -507,30 +548,36 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "delete") {
     const planId = formData.get("planId") as string;
     
-    // Check if this is a meal plan instance or a regular meal plan
-    const { data: instance } = await supabase
-      .from("meal_plan_instances")
-      .select("id")
+    // Check if this is a template (templates can only be deleted by the coach who created them)
+    const { data: plan } = await supabase
+      .from("meal_plans")
+      .select("is_template, user_id")
       .eq("id", planId)
       .single();
     
-    if (instance) {
-      // Delete the instance (this will remove the client's personal copy)
-      await supabase.from("meal_plan_instances").delete().eq("id", planId);
-    } else {
-      // Legacy: Delete old meal plan structure
-      const { data: meals } = await supabase
-        .from("meals")
-        .select("id")
-        .eq("meal_plan_id", planId);
-      if (meals) {
-        for (const meal of meals) {
-          await supabase.from("foods").delete().eq("meal_id", meal.id);
-        }
-        await supabase.from("meals").delete().eq("meal_plan_id", planId);
-      }
-      await supabase.from("meal_plans").delete().eq("id", planId);
+    if (!plan) {
+      return json({ error: "Plan not found" }, { status: 404 });
     }
+
+    if (plan.is_template && plan.user_id !== coachId) {
+      return json({ error: "Cannot delete templates created by other coaches" }, { status: 403 });
+    }
+
+    // Delete meals and foods first
+    const { data: meals } = await supabase
+      .from("meals")
+      .select("id")
+      .eq("meal_plan_id", planId);
+    
+    if (meals) {
+      for (const meal of meals) {
+        await supabase.from("foods").delete().eq("meal_id", meal.id);
+      }
+      await supabase.from("meals").delete().eq("meal_plan_id", planId);
+    }
+    
+    // Delete the meal plan
+    await supabase.from("meal_plans").delete().eq("id", planId);
     
     // Clear cache to force fresh data
     if (params.clientId && clientMealsCache[params.clientId]) {
@@ -543,43 +590,20 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const planId = formData.get("planId") as string;
     const activationDate = formData.get("activationDate") as string;
     
-    // Check if this is a meal plan instance
-    const { data: instance } = await supabase
-      .from("meal_plan_instances")
-      .select("id, client_id")
-      .eq("id", planId)
-      .single();
+    // Set deactivated_at for all other active plans for this client
+    await supabase
+      .from("meal_plans")
+      .update({ is_active: false, deactivated_at: new Date().toISOString() })
+      .eq("user_id", client.id)
+      .eq("is_active", true)
+      .eq("is_template", false) // Only affect client plans, not templates
+      .neq("id", planId);
     
-    if (instance) {
-      // Set deactivated_at for all other active instances
-      await supabase
-        .from("meal_plan_instances")
-        .update({ is_active: false, deactivated_at: new Date().toISOString() })
-        .eq("client_id", client.id)
-        .eq("is_active", true)
-        .neq("id", planId);
-      
-      // Set selected instance active with the chosen activation date
-      await supabase
-        .from("meal_plan_instances")
-        .update({ is_active: true, activated_at: activationDate, deactivated_at: null })
-        .eq("id", planId);
-    } else {
-      // Legacy: Handle old meal plan structure
-      // Set deactivated_at for all other active plans
-      await supabase
-        .from("meal_plans")
-        .update({ is_active: false, deactivated_at: new Date().toISOString() })
-        .eq("user_id", client.id)
-        .eq("is_active", true)
-        .neq("id", planId);
-      
-      // Set selected plan active with the chosen activation date
-      await supabase
-        .from("meal_plans")
-        .update({ is_active: true, activated_at: activationDate, deactivated_at: null })
-        .eq("id", planId);
-    }
+    // Set selected plan active with the chosen activation date
+    await supabase
+      .from("meal_plans")
+      .update({ is_active: true, activated_at: activationDate, deactivated_at: null })
+      .eq("id", planId);
     
     // Clear cache to force refresh of compliance data
     if (params.clientId && clientMealsCache[params.clientId]) {
@@ -592,10 +616,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "useTemplate") {
     const templateId = formData.get("templateId") as string;
     
-    // Get template plan
+    // Get template plan and verify it's a template
     const { data: template } = await supabase
       .from("meal_plans")
-      .select("title, description")
+      .select("title, description, is_template")
       .eq("id", templateId)
       .single();
     
@@ -603,19 +627,73 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return json({ error: "Template not found" }, { status: 400 });
     }
 
-    // Create client instance with personal copy using the new function
-    const { data: instanceId, error: instanceError } = await supabase.rpc('copy_template_to_client', {
-      template_id_param: templateId,
-      client_id_param: client.id,
-      coach_id_param: coachId!
-    });
-
-    if (instanceError) {
-      console.error('[MEAL PLAN] Failed to create client instance from template:', instanceError);
-      return json({ error: "Failed to create plan from template" }, { status: 500 });
+    if (!template.is_template) {
+      return json({ error: "Cannot use non-template as template" }, { status: 400 });
     }
 
-    console.log('[MEAL PLAN] Created client instance from template:', instanceId);
+    // Create editable client copy
+    const { data: clientPlan, error: clientError } = await supabase
+      .from("meal_plans")
+      .insert({
+        title: template.title,
+        description: template.description,
+        user_id: client.id,
+        is_template: false, // This makes it editable
+        is_active: true,
+        activated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    
+    if (clientError || !clientPlan) {
+      return json({ error: "Failed to create client meal plan from template" }, { status: 500 });
+    }
+
+    // Copy meals and foods from template to client plan
+    const { data: templateMeals } = await supabase
+      .from("meals")
+      .select("id, name, time, sequence_order, meal_option")
+      .eq("meal_plan_id", templateId)
+      .order("sequence_order");
+
+    if (templateMeals) {
+      for (const templateMeal of templateMeals) {
+        const { data: clientMeal } = await supabase
+          .from("meals")
+          .insert({
+            meal_plan_id: clientPlan.id,
+            name: templateMeal.name,
+            time: templateMeal.time,
+            sequence_order: templateMeal.sequence_order,
+            meal_option: templateMeal.meal_option,
+          })
+          .select()
+          .single();
+
+        if (clientMeal) {
+          // Copy foods for this meal
+          const { data: templateFoods } = await supabase
+            .from("foods")
+            .select("name, portion, calories, protein, carbs, fat, sequence_order")
+            .eq("meal_id", templateMeal.id);
+
+          if (templateFoods) {
+            for (const templateFood of templateFoods) {
+              await supabase.from("foods").insert({
+                meal_id: clientMeal.id,
+                name: templateFood.name,
+                portion: templateFood.portion,
+                calories: templateFood.calories,
+                protein: templateFood.protein,
+                carbs: templateFood.carbs,
+                fat: templateFood.fat,
+                sequence_order: templateFood.sequence_order,
+              });
+            }
+          }
+        }
+      }
+    }
     
     // Clear cache to force fresh data
     if (params.clientId && clientMealsCache[params.clientId]) {
@@ -657,9 +735,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await supabase.from("meals").delete().eq("meal_plan_id", templateId);
     }
     
-    // Also delete any instances that reference this template
-    await supabase.from("meal_plan_instances").delete().eq("template_id", templateId);
-    
     await supabase.from("meal_plans").delete().eq("id", templateId);
     
     return redirect(`${request.url}?deletedTemplate=${templateId}`);
@@ -690,57 +765,57 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }));
 
   if (intent === "edit" && planId) {
-    // Check if this is a meal plan instance
-    const { data: instance } = await supabase
-      .from("meal_plan_instances")
-      .select("id, client_id")
+    // Check if this is a template (templates are immutable)
+    const { data: planCheck } = await supabase
+      .from("meal_plans")
+      .select("is_template")
       .eq("id", planId)
       .single();
-    
-    if (instance) {
-      // Update the client's personal copy using the new function
-      const { error: updateError } = await supabase.rpc('update_client_meals', {
-        instance_id_param: planId,
-        user_id_param: coachId!,
-        new_meals_json: validMeals
-      });
-      
-      if (updateError) {
-        console.error('[MEAL PLAN] Failed to update client meals:', updateError);
-        return json({ error: "Failed to update meal plan" }, { status: 500 });
-      }
-      
-      // Invalidate server cache for this client
-      if (params.clientId && clientMealsCache[params.clientId]) {
-        delete clientMealsCache[params.clientId];
-      }
-      
-      return json({ success: true, message: "Meal plan updated successfully" });
-    } else {
-      // Legacy: Handle old meal plan structure
-      const { data: updatedPlan } = await supabase
-        .from("meal_plans")
-        .update({ title, description })
-        .eq("id", planId)
-        .select()
-        .single();
 
-      if (updatedPlan) {
-        // Delete old meals/foods
-        const { data: oldMeals } = await supabase
-          .from("meals")
-          .select("id")
-          .eq("meal_plan_id", planId);
-        if (oldMeals) {
-          for (const meal of oldMeals) {
-            await supabase.from("foods").delete().eq("meal_id", meal.id);
-          }
-          await supabase.from("meals").delete().eq("meal_plan_id", planId);
-        }
+    if (planCheck?.is_template) {
+      return json({ error: "Cannot edit master templates. Templates are immutable." }, { status: 400 });
+    }
 
-        // Insert new meals and foods
-        for (const [i, meal] of validMeals.entries()) {
-          const { data: mealRow, error: mealError } = await supabase
+    // Update the meal plan title and description
+    const { data: updatedPlan } = await supabase
+      .from("meal_plans")
+      .update({ title, description })
+      .eq("id", planId)
+      .select()
+      .single();
+
+    if (updatedPlan) {
+      // SMART UPDATE: Instead of delete+insert, update existing meals and foods
+      // This prevents duplication while allowing edits
+      
+      // Get current meals for this plan
+      const { data: currentMeals } = await supabase
+        .from("meals")
+        .select("id, name, time, sequence_order")
+        .eq("meal_plan_id", planId)
+        .order("sequence_order");
+
+      // Process each meal in the updated plan
+      for (const [i, meal] of validMeals.entries()) {
+        let mealId;
+        
+        if (currentMeals && currentMeals[i]) {
+          // Update existing meal
+          const { data: updatedMeal } = await supabase
+            .from("meals")
+            .update({
+              name: meal.name,
+              time: meal.time,
+              sequence_order: i,
+              meal_option: meal.mealOption || 'A',
+            })
+            .eq("id", currentMeals[i].id)
+            .select()
+            .single();
+          mealId = updatedMeal?.id;
+        } else {
+          // Create new meal if we have more meals than before
+          const { data: newMeal } = await supabase
             .from("meals")
             .insert({
               meal_plan_id: planId,
@@ -751,16 +826,37 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             })
             .select()
             .single();
+          mealId = newMeal?.id;
+        }
 
-          if (mealError) {
-            console.error('[MEAL PLAN] Failed to update meal:', mealError);
-            return json({ error: "Failed to update meal" }, { status: 500 });
-          }
+        if (mealId) {
+          // Get current foods for this meal
+          const { data: currentFoods } = await supabase
+            .from("foods")
+            .select("id")
+            .eq("meal_id", mealId)
+            .order("sequence_order");
 
-          if (mealRow) {
-            for (const [foodIndex, food] of meal.foods.entries()) {
-              const { error: foodError } = await supabase.from("foods").insert({
-                meal_id: mealRow.id,
+          // Update/create foods for this meal
+          for (const [foodIndex, food] of meal.foods.entries()) {
+            if (currentFoods && currentFoods[foodIndex]) {
+              // Update existing food
+              await supabase
+                .from("foods")
+                .update({
+                  name: food.name,
+                  portion: food.portion,
+                  calories: food.calories,
+                  protein: food.protein,
+                  carbs: food.carbs,
+                  fat: food.fat,
+                  sequence_order: foodIndex,
+                })
+                .eq("id", currentFoods[foodIndex].id);
+            } else {
+              // Create new food if we have more foods than before
+              await supabase.from("foods").insert({
+                meal_id: mealId,
                 name: food.name,
                 portion: food.portion,
                 calories: food.calories,
@@ -769,45 +865,66 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                 fat: food.fat,
                 sequence_order: foodIndex,
               });
-
-              if (foodError) {
-                console.error('[MEAL PLAN] Failed to update food:', foodError);
-                return json({ error: "Failed to update food" }, { status: 500 });
-              }
             }
           }
-        }
 
-        // Invalidate server cache for this client
-        if (params.clientId && clientMealsCache[params.clientId]) {
-          delete clientMealsCache[params.clientId];
+          // Delete excess foods if we have fewer foods than before
+          if (currentFoods && currentFoods.length > meal.foods.length) {
+            const excessFoodIds = currentFoods.slice(meal.foods.length).map(f => f.id);
+            await supabase
+              .from("foods")
+              .delete()
+              .in("id", excessFoodIds);
+          }
+        }
+      }
+
+      // Delete excess meals if we have fewer meals than before
+      if (currentMeals && currentMeals.length > validMeals.length) {
+        const excessMealIds = currentMeals.slice(validMeals.length).map(m => m.id);
+        
+        // First delete foods for excess meals
+        for (const mealId of excessMealIds) {
+          await supabase.from("foods").delete().eq("meal_id", mealId);
         }
         
-        return json({ success: true, message: "Meal plan updated successfully" });
+        // Then delete the excess meals
+        await supabase
+          .from("meals")
+          .delete()
+          .in("id", excessMealIds);
       }
+
+      // Invalidate server cache for this client
+      if (params.clientId && clientMealsCache[params.clientId]) {
+        delete clientMealsCache[params.clientId];
+      }
+      
+      return json({ success: true, message: "Meal plan updated successfully" });
     }
   } else if (intent === "create" || !planId) {
-    // Create new template plan
+    // SIMPLE APPROACH: Create template and client copy in one step
+    
+    // 1. Create immutable master template
     const { data: newTemplate, error: templateError } = await supabase
       .from("meal_plans")
       .insert({
+        title: title,
+        description: description || null,
         user_id: coachId,
-        title,
-        description,
+        is_template: true, // This makes it immutable
         is_active: false,
-        is_template: true
       })
       .select()
       .single();
-
+    
     if (templateError || !newTemplate) {
       return json({ error: "Failed to create template" }, { status: 500 });
     }
 
-    // Insert meals and foods for the template
+    // Insert meals and foods for the master template
     for (const [i, meal] of validMeals.entries()) {
-      // Create meal for template
-      const { data: templateMeal, error: templateMealError } = await supabase
+      const { data: newMeal, error: mealError } = await supabase
         .from("meals")
         .insert({
           meal_plan_id: newTemplate.id,
@@ -818,17 +935,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         })
         .select()
         .single();
-
-      if (templateMealError) {
-        console.error('[MEAL PLAN] Failed to create template meal:', templateMealError);
-        return json({ error: "Failed to create template meal" }, { status: 500 });
+      
+      if (mealError || !newMeal) {
+        console.error(`[ACTION] Meal insert error for ${meal.name}:`, mealError);
+        continue;
       }
-
-      if (templateMeal) {
-        for (const [foodIndex, food] of meal.foods.entries()) {
-          // Add food to template meal
-          const { error: templateFoodError } = await supabase.from("foods").insert({
-            meal_id: templateMeal.id,
+      
+      // Insert foods for this meal
+      for (const [foodIndex, food] of meal.foods.entries()) {
+        const { error: foodError } = await supabase
+          .from("foods")
+          .insert({
+            meal_id: newMeal.id,
             name: food.name,
             portion: food.portion,
             calories: food.calories,
@@ -837,28 +955,68 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             fat: food.fat,
             sequence_order: foodIndex,
           });
-
-          if (templateFoodError) {
-            console.error('[MEAL PLAN] Failed to create template food:', templateFoodError);
-            return json({ error: "Failed to create template food" }, { status: 500 });
-          }
+        
+        if (foodError) {
+          console.error(`[ACTION] Food insert error for ${food.name}:`, foodError);
         }
       }
     }
 
-    // Create client instance with personal copy using the new function
-    const { data: instanceId, error: instanceError } = await supabase.rpc('copy_template_to_client', {
-      template_id_param: newTemplate.id,
-      client_id_param: client.id,
-      coach_id_param: coachId!
-    });
-
-    if (instanceError) {
-      console.error('[MEAL PLAN] Failed to create client instance:', instanceError);
+    // 2. Create editable client copy by copying the template
+    const { data: clientPlan, error: clientError } = await supabase
+      .from("meal_plans")
+      .insert({
+        title: title,
+        description: description || null,
+        user_id: client.id,
+        is_template: false, // This makes it editable
+        is_active: true,
+        activated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    
+    if (clientError || !clientPlan) {
       return json({ error: "Failed to create client meal plan" }, { status: 500 });
     }
 
-    console.log('[MEAL PLAN] Created client instance:', instanceId);
+    // Copy meals and foods to client plan (much simpler than complex queries)
+    for (const [i, meal] of validMeals.entries()) {
+      const { data: clientMeal } = await supabase
+        .from("meals")
+        .insert({
+          meal_plan_id: clientPlan.id,
+          name: meal.name,
+          time: meal.time,
+          sequence_order: i,
+          meal_option: meal.mealOption || 'A',
+        })
+        .select()
+        .single();
+
+      if (clientMeal) {
+        // Copy foods for this meal
+        for (const [foodIndex, food] of meal.foods.entries()) {
+          await supabase.from("foods").insert({
+            meal_id: clientMeal.id,
+            name: food.name,
+            portion: food.portion,
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+            sequence_order: foodIndex,
+          });
+        }
+      }
+    }
+    
+    // Clear cache to force fresh data
+    if (params.clientId && clientMealsCache[params.clientId]) {
+      delete clientMealsCache[params.clientId];
+    }
+    
+    return redirect(request.url);
   }
 
   // Invalidate server cache for this client

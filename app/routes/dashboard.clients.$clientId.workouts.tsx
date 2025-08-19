@@ -221,10 +221,11 @@ export const loader = async ({
         created_at, 
         activated_at, 
         deactivated_at,
-        workout_plans!inner(
+        master_workout_plans!inner(
           id, 
           title, 
-          description, 
+          description,
+          instructions,
           builder_mode, 
           workout_days_per_week
         )
@@ -233,9 +234,8 @@ export const loader = async ({
       .order("created_at", { ascending: false })
       .range(workoutPlansOffset, workoutPlansOffset + workoutPlansPageSize - 1),
     supabase
-      .from("workout_plans")
-      .select("id, title, description, is_active, created_at, activated_at, deactivated_at, builder_mode, workout_days_per_week", { count: "exact" })
-      .eq("is_template", true)
+      .from("master_workout_plans")
+      .select("id, title, description, instructions, builder_mode, workout_days_per_week, created_at", { count: "exact" })
       .eq("user_id", coachId)
       .order("created_at", { ascending: false })
       .range(libraryPlansOffset, libraryPlansOffset + libraryPlansPageSize - 1),
@@ -244,9 +244,8 @@ export const loader = async ({
       .select("id", { count: "exact", head: true })
       .eq("client_id", client.id),
     supabase
-      .from("workout_plans")
+      .from("master_workout_plans")
       .select("id", { count: "exact", head: true })
-      .eq("is_template", true)
       .eq("user_id", coachId),
     supabase
       .from("workout_completions")
@@ -260,7 +259,7 @@ export const loader = async ({
   const workoutPlanIds = (plansRaw?.data?.map((p: any) => p.id) || []);
   const libraryPlanIds = (libraryPlansRaw?.data?.map((p: any) => p.id) || []);
 
-  // For workout plan instances, we need to get the workout data from the template
+  // For workout plan instances, we need to get the workout data from the master template
   const workoutPlans = await Promise.all(
     (plansRaw?.data || []).map(async (instance: any) => {
       // Get the workout data for this instance using the new function
@@ -321,30 +320,30 @@ export const loader = async ({
 
       return {
         id: instance.id,
-        title: instance.workout_plans.title,
-        description: instance.workout_plans.description,
+        title: instance.master_workout_plans.title,
+        description: instance.master_workout_plans.description,
+        instructions: instance.master_workout_plans.instructions,
         is_active: instance.is_active,
         created_at: instance.created_at,
         activated_at: instance.activated_at,
         deactivated_at: instance.deactivated_at,
-        builder_mode: instance.workout_plans.builder_mode,
-        workout_days_per_week: instance.workout_plans.workout_days_per_week,
+        builder_mode: instance.master_workout_plans.builder_mode,
+        workout_days_per_week: instance.master_workout_plans.workout_days_per_week,
         days
       };
     })
   );
 
-  // Library plans remain the same (templates)
+  // Library plans are now from master_workout_plans
   const libraryPlans = (libraryPlansRaw?.data || []).map((plan: any) => ({
     id: plan.id,
     title: plan.title,
     description: plan.description,
-    is_active: plan.is_active,
-    created_at: plan.created_at,
-    activated_at: plan.activated_at,
-    deactivated_at: plan.deactivated_at,
+    instructions: plan.instructions,
     builder_mode: plan.builder_mode,
     workout_days_per_week: plan.workout_days_per_week,
+    created_at: plan.created_at,
+    is_template: true,
     days: [] // Templates don't have days in the loader
   }));
 
@@ -667,14 +666,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "create") {
     // First, create template plan
     const { data: newTemplate, error: templateError } = await supabase
-      .from("workout_plans")
+      .from("master_workout_plans")
       .insert({
-        user_id: coachId,
         title: planName,
         description: description || null,
         instructions: instructions || null,
-        is_active: false,
-        is_template: true,
+        user_id: coachId,
         builder_mode: builderMode,
         workout_days_per_week: workoutDaysPerWeek,
       })
@@ -685,7 +682,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return json({ error: "Failed to create template" }, { status: 500 });
     }
 
-    // Insert workout days and exercises for the template only
+    // Insert workout days and exercises for the master template only
     for (const day of daysOfWeek) {
       const dayPlan = week[day];
       

@@ -124,12 +124,13 @@ export const loader: LoaderFunction = async ({ request }) => {
       }
       if (planToShow) {
         debugPlan = planToShow;
-        // Get the full plan details
+        // Get meals for this plan
         const { data: mealsRaw } = await supabase
           .from("meals")
-          .select("id, name, time, sequence_order, meal_option")
+          .select("id, name, time, sequence_order")
           .eq("meal_plan_id", planToShow.id)
           .order("sequence_order", { ascending: true });
+
         if (mealsRaw && mealsRaw.length > 0) {
           // Batch fetch all foods for all meals in a single query
           const mealIds = mealsRaw.map(m => m.id);
@@ -147,57 +148,41 @@ export const loader: LoaderFunction = async ({ request }) => {
               .gte("completed_at", todayStr)
               .lt("completed_at", tomorrowStr)
           ]);
-          const foodsRaw = foodsRes.data || [];
-          // Group foods by meal_id
-          const foodsByMeal: Record<string, any[]> = {};
-          for (const food of foodsRaw) {
-            const mealId = String(food.meal_id);
-            if (!foodsByMeal[mealId]) foodsByMeal[mealId] = [];
-            // Ensure all values are serializable numbers
-            const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
-            const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
-            const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library ? Number(food.food_library.fat) || 0 : Number(food.fat) || 0;
-            // Always calculate calories from macros and ensure no NaN
-            const calories = Math.round(protein * 4 + carbs * 4 + fat * 9) || 0;
-            foodsByMeal[mealId].push({
-              id: String(food.id || ''),
-              name: String(food.name || ''),
-              portion: String(food.portion || ''),
-              calories: isFinite(calories) ? calories : 0,
-              protein: isFinite(protein) ? Math.round(protein) : 0,
-              carbs: isFinite(carbs) ? Math.round(carbs) : 0,
-              fat: isFinite(fat) ? Math.round(fat) : 0,
-            });
-          }
-          // Assemble meals with foods
-          const meals = mealsRaw.map(meal => ({
-            id: String(meal.id || ''),
-            name: String(meal.name || ''),
-            time: String(meal.time || ''),
-            sequence_order: Number(meal.sequence_order) || 0,
-            mealOption: meal.meal_option || 'A',
-            foods: foodsByMeal[String(meal.id)] || []
-          }));
+
+          // Process foods and map them to meals
+          const foods = foodsRes.data || [];
+          const mealCompletions = completionsRes.data || [];
+          
+          const meals = mealsRaw.map(meal => {
+            const mealFoods = foods.filter(f => f.meal_id === meal.id);
+            const isCompleted = mealCompletions.some(c => c.meal_id === meal.id);
+            
+            return {
+              id: meal.id,
+              name: meal.name,
+              time: meal.time,
+              sequence_order: meal.sequence_order || 0,
+              mealOption: 'A',
+              foods: mealFoods.map(food => ({
+                id: food.id,
+                name: food.name,
+                portion: food.portion,
+                calories: food.calories || 0,
+                protein: food.protein || 0,
+                carbs: food.carbs || 0,
+                fat: food.fat || 0,
+                sequence_order: 0, // Default since foods table doesn't have this
+                isCompleted
+              }))
+            };
+          });
+          
           activeMealPlan = {
             name: planToShow.title,
             description: planToShow.description,
             date: "", // Could add date range formatting here if needed
             meals,
           };
-          // Debug: Log plan, date, and meals
-          // console.log('[MEALS] Selected planToShow:', {
-          //   id: planToShow.id,
-          //   title: planToShow.title,
-          //   activated_at: planToShow.activated_at,
-          //   is_active: planToShow.is_active
-          // });
-          // console.log('[MEALS] todayStr:', todayStr, 'tomorrowStr:', tomorrowStr);
-          // console.log('[MEALS] Meals fetched:', (meals || []).map(m => ({ id: m.id, name: m.name, time: m.time })));
-          // Get meal completions for today if we have an active meal plan
-          let mealCompletions: { meal_id: string, completed_at: string }[] = [];
-          if (completionsRes.data) {
-            mealCompletions = completionsRes.data;
-          }
           const result = {
             user: {
               id: user.id,
@@ -443,14 +428,58 @@ export default function Meals() {
     }
   }, [dayOffset, weekMeals, fetchMealWeek]);
 
-  // Calculate the current date with offset
+  // Calculate the current date with offset - ensure consistent timezone handling
   const today = getCurrentDate();
   const currentDate = today.add(dayOffset, "day");
 
   // Format current date for lookup
   const currentDateFormatted = currentDate.format("ddd, MMM D");
-  // Format for API (YYYY-MM-DD)
-  const currentDateApi = currentDate.format("YYYY-MM-DD");
+  // Format for API (YYYY-MM-DD) - ensure we're using the correct timezone
+  let currentDateApi = currentDate.format("YYYY-MM-DD");
+  
+  // Debug logging to help identify timezone issues
+  console.log('Date Debug:', {
+    today: today.format('YYYY-MM-DD HH:mm:ss'),
+    todayISO: today.toISOString(),
+    currentDate: currentDate.format('YYYY-MM-DD HH:mm:ss'),
+    currentDateApi,
+    dayOffset,
+    browserTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    userTimezone: 'America/Denver'
+  });
+  
+  // Verify the date is reasonable - if it's more than 2 days off from expected, use server date
+  const expectedDate = dayjs().format("YYYY-MM-DD");
+  const dateDiff = Math.abs(dayjs(currentDateApi).diff(dayjs(expectedDate), 'day'));
+  
+  if (dateDiff > 2) {
+    console.warn(`Client date (${currentDateApi}) is ${dateDiff} days off from expected (${expectedDate}). Using server date as fallback.`);
+    // We'll fetch the server date and update currentDateApi
+  }
+  
+  // State for server date fallback
+  const [serverDate, setServerDate] = useState<string | null>(null);
+  
+  // Fetch server date if client date is significantly off
+  useEffect(() => {
+    if (dateDiff > 2 && !serverDate) {
+      fetch('/api/get-current-date')
+        .then(res => res.json())
+        .then(data => {
+          if (data.currentDate) {
+            setServerDate(data.currentDate);
+            console.log(`Server date fallback: ${data.currentDate}`);
+          }
+        })
+        .catch(err => console.error('Failed to fetch server date:', err));
+    }
+  }, [dateDiff, serverDate]);
+  
+  // Use server date if available and client date is off
+  if (serverDate && dateDiff > 2) {
+    currentDateApi = serverDate;
+    console.log(`Using server date fallback: ${currentDateApi}`);
+  }
 
   // Fetch completed meals for today from backend (for real-time updates) - MEMOIZED
   const fetchCompletedMealsForToday = useCallback(async () => {

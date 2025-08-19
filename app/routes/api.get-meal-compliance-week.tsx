@@ -25,9 +25,7 @@ export const loader = async ({ request }: { request: Request }) => {
   const dbStart = performance.now();
   const { data: mealPlansRaw } = await supabase
     .from("meal_plans")
-    .select(
-      "id, title, description, is_active, created_at, activated_at, deactivated_at"
-    )
+    .select("id, title, description, is_active, created_at, activated_at, deactivated_at")
     .eq("user_id", clientId)
     .eq("is_template", false)
     .order("created_at", { ascending: false });
@@ -36,22 +34,42 @@ export const loader = async ({ request }: { request: Request }) => {
   const fetchMealsAndFoods = async (plans: any[]) => {
     return Promise.all(
       (plans || []).map(async (plan) => {
+        // Get meals for this plan
         const { data: mealsRaw } = await supabase
           .from("meals")
-          .select("id, name, time, sequence_order")
+          .select("id, name, time, sequence_order, meal_option")
           .eq("meal_plan_id", plan.id)
           .order("sequence_order", { ascending: true });
-        const meals = (await Promise.all(
-          (mealsRaw || []).map(async (meal) => {
-            const { data: foods } = await supabase
-              .from("foods")
-              .select("name, portion, calories, protein, carbs, fat")
-              .eq("meal_id", meal.id);
-            return { ...meal, foods: foods || [] };
-          })
-        ))
-        // Filter out meals with no foods
-        .filter((meal) => meal.foods && meal.foods.length > 0);
+
+        // Get foods for all meals in one query
+        const mealIds = (mealsRaw || []).map(m => m.id);
+        const { data: foods } = await supabase
+          .from("foods")
+          .select("id, name, portion, calories, protein, carbs, fat, meal_id")
+          .in("meal_id", mealIds);
+
+        // Convert the meals data to the expected format
+        const meals = (mealsRaw || []).map((meal: any) => {
+          const mealFoods = (foods || []).filter(f => f.meal_id === meal.id);
+          
+          return {
+            id: meal.id,
+            name: meal.name,
+            time: meal.time,
+            sequence_order: meal.sequence_order || 0,
+            mealOption: meal.meal_option || 'A',
+            foods: mealFoods.map((food: any) => ({
+              id: food.id,
+              name: food.name,
+              portion: food.portion,
+              calories: Number(food.calories) || 0,
+              protein: Number(food.protein) || 0,
+              carbs: Number(food.carbs) || 0,
+              fat: Number(food.fat) || 0,
+            }))
+          };
+        });
+        
         return {
           id: plan.id,
           title: plan.title,

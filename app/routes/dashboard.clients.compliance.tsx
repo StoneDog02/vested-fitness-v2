@@ -276,7 +276,7 @@ export const loader: LoaderFunction = async ({ request }) => {
               // Check if any meal in this group was completed
               const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
               const groupCompletions = clientMealCompletions.filter((c: any) => 
-                groupMealIds.has(c.id)
+                groupMealIds.has(c.meal_id)
               );
               
               return groupCompletions.length > 0; // If any meal in the group was completed, the group is complete

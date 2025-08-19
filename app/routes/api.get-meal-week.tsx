@@ -131,52 +131,38 @@ export const loader: LoaderFunction = async ({ request }) => {
       // Get meals for this plan
       const { data: mealsRaw } = await supabase
         .from("meals")
-        .select("id, name, time, sequence_order")
+        .select("id, name, time, sequence_order, meal_option")
         .eq("meal_plan_id", activePlan.id)
         .order("sequence_order", { ascending: true });
 
       // Get foods for all meals in one query
-      const mealIds = (mealsRaw || []).map(meal => meal.id);
-      const { data: foodsRaw } = await supabase
+      const mealIds = (mealsRaw || []).map(m => m.id);
+      const { data: foods } = await supabase
         .from("foods")
-        .select(`id, meal_id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+        .select("id, name, portion, calories, protein, carbs, fat, meal_id")
         .in("meal_id", mealIds);
 
-      // Group foods by meal_id
-      const foodsByMealId: Record<string, any[]> = {};
-      (foodsRaw || []).forEach(food => {
-        if (!foodsByMealId[food.meal_id]) {
-          foodsByMealId[food.meal_id] = [];
-        }
+      // Convert the meals data to the expected format
+      const mealsWithFoods = (mealsRaw || []).map((meal: any) => {
+        const mealFoods = (foods || []).filter(f => f.meal_id === meal.id);
         
-        // Calculate macros (same logic as in the loader)
-        const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library 
-          ? Number(food.food_library.protein) 
-          : Number(food.protein) || 0;
-        const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library 
-          ? Number(food.food_library.carbs) 
-          : Number(food.carbs) || 0;
-        const fat = food.food_library && typeof food.food_library === 'object' && 'fat' in food.food_library 
-          ? Number(food.food_library.fat) 
-          : Number(food.fat) || 0;
-        const calories = protein * 4 + carbs * 4 + fat * 9;
-        
-        foodsByMealId[food.meal_id].push({
-          id: food.id,
-          name: food.name,
-          portion: food.portion,
-          calories,
-          protein,
-          carbs,
-          fat,
-        });
+        return {
+          id: meal.id,
+          name: meal.name,
+          time: meal.time,
+          sequence_order: meal.sequence_order || 0,
+          mealOption: meal.meal_option || 'A',
+          foods: mealFoods.map((food: any) => ({
+            id: food.id,
+            name: food.name,
+            portion: food.portion,
+            calories: Number(food.calories) || 0,
+            protein: Number(food.protein) || 0,
+            carbs: Number(food.carbs) || 0,
+            fat: Number(food.fat) || 0,
+          }))
+        };
       });
-
-      // Build the meal plan structure
-      const mealsWithFoods = (mealsRaw || []).map(meal => ({
-        ...meal,
-        foods: foodsByMealId[meal.id] || []
-      })).filter(meal => meal.foods.length > 0);
 
       meals[dateStr] = {
         name: activePlan.title,
