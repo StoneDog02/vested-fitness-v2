@@ -237,20 +237,20 @@ export const loader = async ({
   // For meal plans, we need to get the meal data
   const mealPlans = await Promise.all(
     (plansRaw?.data || []).map(async (plan: any) => {
-      // Get meals for this plan
-      const { data: mealsRaw } = await supabase
-        .from("meals")
-        .select("id, name, time, sequence_order, meal_option")
-        .eq("meal_plan_id", plan.id)
-        .order("sequence_order", { ascending: true });
+              // Get meals for this plan
+        const { data: mealsRaw } = await supabase
+          .from("meals")
+          .select("id, name, time, sequence_order, meal_option")
+          .eq("meal_plan_id", plan.id)
+          .order("sequence_order", { ascending: true });
 
-      if (mealsRaw && mealsRaw.length > 0) {
-        // Batch fetch all foods for all meals in a single query
-        const mealIds = mealsRaw.map(m => m.id);
-        const { data: foods } = await supabase
-          .from("foods")
-          .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
-          .in("meal_id", mealIds);
+        if (mealsRaw && mealsRaw.length > 0) {
+          // Batch fetch all foods for all meals in a single query
+          const mealIds = mealsRaw.map(m => m.id);
+          const { data: foods } = await supabase
+            .from("foods")
+            .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_option, food_library:food_library_id (calories, protein, carbs, fat)`)
+            .in("meal_id", mealIds);
 
         // Process foods and map them to meals
         const foodsData = foods || [];
@@ -272,6 +272,7 @@ export const loader = async ({
               protein: food.protein || 0,
               carbs: food.carbs || 0,
               fat: food.fat || 0,
+              foodOption: food.food_option || 'A',
               sequence_order: 0 // Default since foods table doesn't have this
             }))
           };
@@ -318,7 +319,7 @@ export const loader = async ({
         const mealIds = mealsRaw.map(m => m.id);
         const { data: foods } = await supabase
           .from("foods")
-          .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+          .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_option, food_library:food_library_id (calories, protein, carbs, fat)`)
           .in("meal_id", mealIds);
 
         // Process foods and map them to meals
@@ -341,6 +342,7 @@ export const loader = async ({
               protein: food.protein || 0,
               carbs: food.carbs || 0,
               fat: food.fat || 0,
+              foodOption: food.food_option || 'A',
               sequence_order: 0 // Default since foods table doesn't have this
             }))
           };
@@ -739,6 +741,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                 carbs: templateFood.carbs,
                 fat: templateFood.fat,
                 sequence_order: templateFood.sequence_order,
+                food_option: 'A',
               });
             }
           }
@@ -902,6 +905,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                   carbs: food.carbs,
                   fat: food.fat,
                   sequence_order: foodIndex,
+                  food_option: food.foodOption || 'A',
                 })
                 .eq("id", currentFoods[foodIndex].id);
             } else {
@@ -915,6 +919,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                 carbs: food.carbs,
                 fat: food.fat,
                 sequence_order: foodIndex,
+                food_option: food.foodOption || 'A',
               });
             }
           }
@@ -1005,6 +1010,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             carbs: food.carbs,
             fat: food.fat,
             sequence_order: foodIndex,
+            food_option: food.foodOption || 'A',
           });
         
         if (foodError) {
@@ -1057,6 +1063,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             carbs: food.carbs,
             fat: food.fat,
             sequence_order: foodIndex,
+            food_option: food.foodOption || 'A',
           });
         }
       }
@@ -1084,6 +1091,7 @@ export type Food = {
   protein: number;
   carbs: number;
   fat: number;
+  foodOption?: 'A' | 'B';
 };
 
 export type Meal = {
@@ -1434,31 +1442,6 @@ export default function ClientMeals() {
                             <button
                               className="text-green-600 hover:text-green-700 text-sm hover:underline flex items-center gap-1"
                               onClick={() => {
-                                console.log('Original plan data:', plan);
-                                console.log('Plan meals:', plan.meals);
-                                console.log('Sample food from plan:', plan.meals[0]?.foods[0]);
-                                console.log('Meal options in plan:', plan.meals.map(m => ({ name: m.name, time: m.time, mealOption: m.mealOption, foodsCount: m.foods?.length || 0 })));
-                                
-                                // Debug individual meal foods
-                                plan.meals.forEach((meal, mealIdx) => {
-                                  console.log(`Plan Meal ${mealIdx} (${meal.mealOption}):`, {
-                                    id: meal.id,
-                                    name: meal.name,
-                                    time: meal.time,
-                                    mealOption: meal.mealOption,
-                                    foodsCount: meal.foods?.length || 0
-                                  });
-                                  meal.foods?.forEach((food, foodIdx) => {
-                                    console.log(`  Food ${foodIdx}:`, {
-                                      name: food.name,
-                                      calories: food.calories,
-                                      protein: food.protein,
-                                      carbs: food.carbs,
-                                      fat: food.fat
-                                    });
-                                  });
-                                });
-                                
                                 setSelectedPlan({
                                   id: plan.id,
                                   title: plan.title,
@@ -2034,6 +2017,7 @@ export default function ClientMeals() {
                           typeof food.protein === "number" ? food.protein : 0,
                         carbs: typeof food.carbs === "number" ? food.carbs : 0,
                         fat: typeof food.fat === "number" ? food.fat : 0,
+                        foodOption: food.foodOption || 'A',
                       })),
                     })
                   ),

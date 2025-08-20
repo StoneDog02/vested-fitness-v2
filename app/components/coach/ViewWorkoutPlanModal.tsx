@@ -23,6 +23,7 @@ interface WorkoutPlanData {
   instructions?: string;
   createdAt: string;
   isActive: boolean;
+  builderMode?: 'week' | 'day';
   // Support both old flat structure and new day-based structure
   exercises?: ExerciseData[];
   days?: Array<{

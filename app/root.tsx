@@ -35,18 +35,6 @@ export const links: LinksFunction = () => [
   { rel: "apple-touch-icon", sizes: "180x180", href: "/KAVA-black.png" },
 ];
 
-// This script detects the saved theme from localStorage and applies it immediately to prevent flash
-const themeScript = `
-  (function() {
-    let theme = localStorage.getItem('theme') || 'light';
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  })();
-`;
-
 export async function loader({ request }: LoaderFunctionArgs) {
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
@@ -104,9 +92,8 @@ export default function App() {
         <meta name="theme-color" content="#ffffff" />
         <Meta />
         <Links />
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="transition-colors duration-200 bg-white dark:bg-night text-secondary dark:text-alabaster">
+      <body className="transition-colors duration-200 text-secondary">
         <ThemeProvider>
           <MealCompletionProvider>
             <ToastProvider>

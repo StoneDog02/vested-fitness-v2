@@ -127,7 +127,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         // Get meals for this plan
         const { data: mealsRaw } = await supabase
           .from("meals")
-          .select("id, name, time, sequence_order")
+          .select("id, name, time, sequence_order, meal_option")
           .eq("meal_plan_id", planToShow.id)
           .order("sequence_order", { ascending: true });
 
@@ -162,7 +162,7 @@ export const loader: LoaderFunction = async ({ request }) => {
               name: meal.name,
               time: meal.time,
               sequence_order: meal.sequence_order || 0,
-              mealOption: 'A',
+              mealOption: meal.meal_option || 'A',
               foods: mealFoods.map(food => ({
                 id: food.id,
                 name: food.name,
@@ -176,6 +176,8 @@ export const loader: LoaderFunction = async ({ request }) => {
               }))
             };
           });
+          
+
           
           activeMealPlan = {
             name: planToShow.title,
@@ -437,16 +439,7 @@ export default function Meals() {
   // Format for API (YYYY-MM-DD) - ensure we're using the correct timezone
   let currentDateApi = currentDate.format("YYYY-MM-DD");
   
-  // Debug logging to help identify timezone issues
-  console.log('Date Debug:', {
-    today: today.format('YYYY-MM-DD HH:mm:ss'),
-    todayISO: today.toISOString(),
-    currentDate: currentDate.format('YYYY-MM-DD HH:mm:ss'),
-    currentDateApi,
-    dayOffset,
-    browserTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    userTimezone: 'America/Denver'
-  });
+
   
   // Verify the date is reasonable - if it's more than 2 days off from expected, use server date
   const expectedDate = dayjs().format("YYYY-MM-DD");
@@ -536,6 +529,8 @@ export default function Meals() {
   // Initialize selected meal options when meal plan changes
   useEffect(() => {
     if (currentDayMealPlan?.meals) {
+
+      
       const initialOptions: Record<string, 'A' | 'B'> = {};
       
       // Group meals by name and time
@@ -547,6 +542,8 @@ export default function Meals() {
         groups[key].push(meal);
         return groups;
       }, {});
+      
+
       
       // Set default options (A for meals with A option, B for meals with only B option)
       Object.entries(mealGroups).forEach(([groupKey, groupMeals]) => {

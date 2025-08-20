@@ -125,18 +125,22 @@ function SortableFoodItem({
               />
             </svg>
           </button>
-          <h5 className="text-sm font-semibold text-secondary dark:text-alabaster">
-            Food Item {foodIndex + 1}
-          </h5>
+          <div className="flex items-center space-x-2">
+            <h5 className="text-sm font-semibold text-secondary dark:text-alabaster">
+              Food Item {foodIndex + 1}
+            </h5>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => removeFood(activeMealIndex, foodIndex)}
-          className="text-red-500 hover:text-red-700 text-sm font-medium hover:underline transition-colors duration-200"
-          disabled={foodsLength <= 1}
-        >
-          Remove
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={() => removeFood(activeMealIndex, foodIndex)}
+            className="text-red-500 hover:text-red-700 text-sm font-medium hover:underline transition-colors duration-200"
+            disabled={foodsLength <= 1}
+          >
+            Remove
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-4">
@@ -327,9 +331,11 @@ function DragOverlayItem({ food, foodIndex }: { food: Food; foodIndex: number })
               />
             </svg>
           </div>
-          <h5 className="text-sm font-semibold text-secondary dark:text-alabaster">
-            Food Item {foodIndex + 1}
-          </h5>
+          <div className="flex items-center space-x-2">
+            <h5 className="text-sm font-semibold text-secondary dark:text-alabaster">
+              Food Item {foodIndex + 1}
+            </h5>
+          </div>
         </div>
       </div>
 
@@ -396,33 +402,10 @@ export default function CreateMealPlanForm({
   initialData,
   isLoading = false,
 }: CreateMealPlanFormProps) {
-  // Debug: Log the initial data when editing
+  // Initialize form data when editing
   React.useEffect(() => {
     if (initialData) {
-      console.log('CreateMealPlanForm - initialData received:', initialData);
-      console.log('Meals in initialData:', initialData.meals);
-      console.log('Meal options breakdown:', initialData.meals.map((meal, idx) => ({
-        index: idx,
-        name: meal.name,
-        time: meal.time,
-        mealOption: meal.mealOption,
-        foodsCount: meal.foods?.length || 0,
-        foods: meal.foods
-      })));
-      
-      // Debug individual food items
-      initialData.meals.forEach((meal, mealIdx) => {
-        console.log(`Meal ${mealIdx} (${meal.mealOption}):`, meal);
-        meal.foods?.forEach((food, foodIdx) => {
-          console.log(`  Food ${foodIdx}:`, {
-            name: food.name,
-            calories: food.calories,
-            protein: food.protein,
-            carbs: food.carbs,
-            fat: food.fat
-          });
-        });
-      });
+      // Form data will be initialized from initialData
     }
   }, [initialData]);
 
@@ -455,6 +438,8 @@ export default function CreateMealPlanForm({
 
   // Add state for drag overlay
   const [activeFood, setActiveFood] = useState<{ food: Food; foodIndex: number } | null>(null);
+  
+
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -479,6 +464,7 @@ export default function CreateMealPlanForm({
           protein: 0,
           carbs: 0,
           fat: 0,
+
         },
       ],
       mealOption: 'A',
@@ -505,6 +491,7 @@ export default function CreateMealPlanForm({
           protein: 0,
           carbs: 0,
           fat: 0,
+
         },
       ],
       mealOption: 'B',
@@ -556,6 +543,8 @@ export default function CreateMealPlanForm({
     }));
   };
 
+
+
   const updateFood = (
     mealIndex: number,
     foodIndex: number,
@@ -563,40 +552,30 @@ export default function CreateMealPlanForm({
     value: string | number,
     isBlur?: boolean
   ) => {
-    const updatedMeals = [...formData.meals];
-    if (field === "protein" || field === "carbs" || field === "fat") {
-      if (isBlur) {
-        updatedMeals[mealIndex].foods[foodIndex][field] =
-          value === "" ? 0 : Number(value);
+    setFormData((prev) => {
+      const updatedMeals = [...prev.meals];
+      const updatedFoods = [...updatedMeals[mealIndex].foods];
+      const food = updatedFoods[foodIndex];
+      
+      // Simple approach: always update the current food item
+      if (field === "protein" || field === "carbs" || field === "fat") {
+        if (isBlur) {
+          updatedFoods[foodIndex][field] = value === "" ? 0 : Number(value);
+        } else {
+          updatedFoods[foodIndex][field] = value as string;
+        }
+        // Always recalculate calories
+        const protein = Number(field === "protein" ? value : updatedFoods[foodIndex].protein) || 0;
+        const carbs = Number(field === "carbs" ? value : updatedFoods[foodIndex].carbs) || 0;
+        const fat = Number(field === "fat" ? value : updatedFoods[foodIndex].fat) || 0;
+        updatedFoods[foodIndex].calories = protein * 4 + carbs * 4 + fat * 9;
       } else {
-        updatedMeals[mealIndex].foods[foodIndex][field] = value as string;
+        updatedFoods[foodIndex][field] = value as string;
       }
-      // Always recalculate calories
-      const protein =
-        Number(
-          field === "protein"
-            ? value
-            : updatedMeals[mealIndex].foods[foodIndex].protein
-        ) || 0;
-      const carbs =
-        Number(
-          field === "carbs"
-            ? value
-            : updatedMeals[mealIndex].foods[foodIndex].carbs
-        ) || 0;
-      const fat =
-        Number(
-          field === "fat" ? value : updatedMeals[mealIndex].foods[foodIndex].fat
-        ) || 0;
-      updatedMeals[mealIndex].foods[foodIndex].calories =
-        protein * 4 + carbs * 4 + fat * 9;
-    } else {
-      updatedMeals[mealIndex].foods[foodIndex][field] = value as string;
-    }
-    setFormData((prev) => ({
-      ...prev,
-      meals: updatedMeals,
-    }));
+      
+      updatedMeals[mealIndex].foods = updatedFoods;
+      return { ...prev, meals: updatedMeals };
+    });
   };
 
   const removeFood = (mealIndex: number, foodIndex: number) => {
@@ -605,14 +584,15 @@ export default function CreateMealPlanForm({
 
     // Ensure at least one food item remains
     if (updatedMeals[mealIndex].foods.length === 0) {
-      updatedMeals[mealIndex].foods.push({
-        name: "",
-        portion: "",
-        calories: 0,
-        protein: 0,
-        carbs: 0,
-        fat: 0,
-      });
+              updatedMeals[mealIndex].foods.push({
+          name: "",
+          portion: "",
+          calories: 0,
+          protein: 0,
+          carbs: 0,
+          fat: 0,
+
+        });
     }
 
     setFormData((prev) => ({
@@ -724,32 +704,6 @@ export default function CreateMealPlanForm({
   React.useEffect(() => {
     const newMacros = calculateTotalMacros();
     setMacros(newMacros);
-    
-    // Debug: Log the calculated macros to verify they're correct
-    console.log('CreateMealPlanForm - Recalculated macros:', newMacros);
-    console.log('CreateMealPlanForm - Active meal index:', activeMealIndex);
-    console.log('CreateMealPlanForm - Total meals:', formData.meals.length);
-    
-    // Show which meal options are currently being calculated
-    const currentMeal = formData.meals[activeMealIndex];
-    if (currentMeal) {
-      console.log('CreateMealPlanForm - Currently viewing meal:', {
-        name: currentMeal.name,
-        time: currentMeal.time,
-        mealOption: currentMeal.mealOption,
-        foodsCount: currentMeal.foods?.length || 0
-      });
-    }
-    
-    console.log('CreateMealPlanForm - Meal breakdown:', formData.meals.map((meal, idx) => ({
-      index: idx,
-      name: meal.name,
-      time: meal.time,
-      mealOption: meal.mealOption,
-      foodsCount: meal.foods?.length || 0,
-      totalCalories: meal.foods?.reduce((sum, food) => sum + Number(food.calories), 0) || 0,
-      isActive: idx === activeMealIndex
-    })));
   }, [activeMealIndex, formData.meals]);
 
   // Group meals by name and time to show Meal A/B options together
@@ -1201,9 +1155,11 @@ export default function CreateMealPlanForm({
           {/* Foods List */}
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h4 className="font-semibold text-lg text-secondary dark:text-alabaster">
-                Foods
-              </h4>
+              <div className="flex items-center space-x-3">
+                <h4 className="font-semibold text-lg text-secondary dark:text-alabaster">
+                  Foods
+                </h4>
+              </div>
               <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center space-x-2">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />

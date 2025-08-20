@@ -27,10 +27,12 @@ export default function AnimatedBackground({ className = "" }: AnimatedBackgroun
       <div
         className="animate-wave-gradient"
         style={{
-          background: isDarkMode 
-            ? 'linear-gradient(90deg, rgba(0, 0, 0, 0.1) 0%, rgba(75, 85, 99, 0.2) 20%, rgba(107, 114, 128, 0.3) 40%, rgba(75, 85, 99, 0.25) 60%, rgba(0, 0, 0, 0.05) 80%, rgba(75, 85, 99, 0.15) 100%)'
+          backgroundImage: isDarkMode 
+            ? 'linear-gradient(90deg, rgba(0, 0, 0, 0.1) 0%, rgba(55, 65, 81, 0.2) 20%, rgba(75, 85, 99, 0.3) 40%, rgba(55, 65, 81, 0.25) 60%, rgba(0, 0, 0, 0.05) 80%, rgba(55, 65, 81, 0.15) 100%)'
             : 'linear-gradient(90deg, rgba(0, 0, 0, 0.1) 0%, rgba(0, 204, 3, 0.2) 20%, rgba(50, 225, 50, 0.3) 40%, rgba(0, 204, 3, 0.25) 60%, rgba(0, 0, 0, 0.05) 80%, rgba(0, 204, 3, 0.15) 100%)',
-          backgroundSize: '200% 100%'
+          backgroundSize: '200% 100%',
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'center'
         }}
       ></div>
 

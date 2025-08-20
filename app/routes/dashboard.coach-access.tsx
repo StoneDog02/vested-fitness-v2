@@ -59,8 +59,30 @@ const getChangeColor = (change: number, goal: string) => {
   }
 };
 
+// Type for the loader data
+interface LoaderData {
+  updates: Array<{ id: string; message: string; created_at: string }>;
+  goal: string;
+  checkInNotes: {
+    thisWeek: CheckIn | null;
+    lastWeek: CheckIn | null;
+  };
+  allCheckIns: CheckIn[];
+  allUpdates: Array<{ id: string; message: string; created_at: string }>;
+  weightLogs: Array<{ id: string; weight: number; logged_at: string }>;
+  paginatedCheckIns: CheckIn[];
+  hasMorePaginatedCheckIns: boolean;
+  paginatedUpdates: Array<{ id: string; message: string; created_at: string }>;
+  hasMorePaginatedUpdates: boolean;
+  mealLogs: Array<{ id: string; meal_id: string; completed_at: string }>;
+  paginatedMealLogs: Array<{ id: string; meal_id: string; completed_at: string }>;
+  hasMorePaginatedMealLogs: boolean;
+  clientId: string;
+  clientName: string;
+}
+
 // In-memory cache for coach access data (per user, 30s TTL)
-const coachAccessCache: Record<string, { data: unknown; expires: number }> = {};
+const coachAccessCache: Record<string, { data: LoaderData; expires: number }> = {};
 
 // Type for check-in records
 interface CheckIn {
@@ -79,7 +101,7 @@ const CHECKINS_PER_PAGE = 10;
 const UPDATES_PER_PAGE = 10;
 const MEAL_LOGS_PER_PAGE = 10;
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs): Promise<Response> => {
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
@@ -283,7 +305,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function CoachAccess() {
   const toast = useToast();
-  const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [], paginatedCheckIns = [], hasMorePaginatedCheckIns = false, paginatedUpdates = [], hasMorePaginatedUpdates = false, mealLogs = [], paginatedMealLogs = [], hasMorePaginatedMealLogs = false, clientId, clientName } = useLoaderData<typeof loader>();
+  const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [], paginatedCheckIns = [], hasMorePaginatedCheckIns = false, paginatedUpdates = [], hasMorePaginatedUpdates = false, mealLogs = [], paginatedMealLogs = [], hasMorePaginatedMealLogs = false, clientId, clientName } = useLoaderData<LoaderData>();
   const fetcher = useFetcher();
   const [showUpdateHistory, setShowUpdateHistory] = useState(false);
   const [showCheckInHistory, setShowCheckInHistory] = useState(false);
@@ -442,6 +464,11 @@ export default function CoachAccess() {
   };
 
   const handleSubmitCheckInForm = async (responses: Record<string, any>) => {
+    if (!currentFormInstance) {
+      toast.error("Error", "No form instance found");
+      return;
+    }
+
     try {
       const formData = new FormData();
       formData.append("instanceId", currentFormInstance.id);
@@ -641,13 +668,13 @@ export default function CoachAccess() {
                           ? `${checkInNotes.lastWeek.notes.substring(0, 50)}...` 
                           : checkInNotes.lastWeek.notes}
                       </p>
-                      {(checkInNotes.lastWeek.video_url || checkInNotes.lastWeek.audio_url) && (
-                        <button
-                          onClick={() => {
-                            const videoUrl = checkInNotes.lastWeek.video_url;
-                            const audioUrl = checkInNotes.lastWeek.audio_url;
-                            const recordingType = checkInNotes.lastWeek.recording_type;
-                            const transcript = checkInNotes.lastWeek.transcript;
+                                              {(checkInNotes.lastWeek && (checkInNotes.lastWeek.video_url || checkInNotes.lastWeek.audio_url)) && (
+                          <button
+                            onClick={() => {
+                              const videoUrl = checkInNotes.lastWeek!.video_url;
+                              const audioUrl = checkInNotes.lastWeek!.audio_url;
+                              const recordingType = checkInNotes.lastWeek!.recording_type;
+                              const transcript = checkInNotes.lastWeek!.transcript;
                             if (videoUrl || audioUrl) {
                               setCurrentMedia({
                                 videoUrl,
@@ -689,13 +716,13 @@ export default function CoachAccess() {
                           ? `${checkInNotes.thisWeek.notes.substring(0, 50)}...` 
                           : checkInNotes.thisWeek.notes}
                       </p>
-                      {(checkInNotes.thisWeek.video_url || checkInNotes.thisWeek.audio_url) && (
+                                              {(checkInNotes.thisWeek && (checkInNotes.thisWeek.video_url || checkInNotes.thisWeek.audio_url)) && (
                           <button
                             onClick={() => {
-                              const videoUrl = checkInNotes.thisWeek.video_url;
-                              const audioUrl = checkInNotes.thisWeek.audio_url;
-                              const recordingType = checkInNotes.thisWeek.recording_type;
-                              const transcript = checkInNotes.thisWeek.transcript;
+                              const videoUrl = checkInNotes.thisWeek!.video_url;
+                              const audioUrl = checkInNotes.thisWeek!.audio_url;
+                              const recordingType = checkInNotes.thisWeek!.recording_type;
+                              const transcript = checkInNotes.thisWeek!.transcript;
                               if (videoUrl || audioUrl) {
                                 setCurrentMedia({
                                   videoUrl,
@@ -893,7 +920,16 @@ export default function CoachAccess() {
             setShowCheckInForm(false);
             setCurrentFormInstance(null);
           }}
-          formInstance={currentFormInstance}
+          formInstance={{
+            id: currentFormInstance.id,
+            form_id: currentFormInstance.id, // Use id as form_id for now
+            client_id: clientId || '',
+            coach_id: '', // This would need to be fetched if needed
+            sent_at: currentFormInstance.sent_at,
+            expires_at: currentFormInstance.expires_at,
+            status: 'sent' as const,
+            questions: [] // Empty questions array for now
+          }}
           onSubmit={handleSubmitCheckInForm}
         />
       )}

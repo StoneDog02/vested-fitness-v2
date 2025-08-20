@@ -10,14 +10,19 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Try to get theme from localStorage, default to light
-  const [theme, setTheme] = useState<ThemeMode>(() => {
+  // Start with light theme to prevent hydration mismatch
+  // Theme will be detected and applied after hydration
+  const [theme, setTheme] = useState<ThemeMode>("light");
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  // Detect theme after hydration to prevent server/client mismatch
+  useEffect(() => {
     if (typeof window !== "undefined") {
       const savedTheme = localStorage.getItem("theme") as ThemeMode | null;
-      return savedTheme || "light";
+      setTheme(savedTheme || "light");
+      setIsHydrated(true);
     }
-    return "light";
-  });
+  }, []);
 
   // Toggle between light and dark
   const toggleTheme = () => {
@@ -26,17 +31,21 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // Update localStorage and document class when theme changes
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && isHydrated) {
       localStorage.setItem("theme", theme);
 
       // Apply or remove dark mode class to document
       if (theme === "dark") {
         document.documentElement.classList.add("dark");
+        document.body.classList.add("bg-night", "text-alabaster");
+        document.body.classList.remove("bg-white");
       } else {
         document.documentElement.classList.remove("dark");
+        document.body.classList.remove("bg-night", "text-alabaster");
+        document.body.classList.add("bg-white");
       }
     }
-  }, [theme]);
+  }, [theme, isHydrated]);
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>

@@ -11,7 +11,7 @@ interface ViewMealPlanModalProps {
     createdAt: string;
     isActive: boolean;
     meals: {
-      id: number;
+      id: string | number;
       name: string;
       time: string;
       mealOption?: 'A' | 'B';

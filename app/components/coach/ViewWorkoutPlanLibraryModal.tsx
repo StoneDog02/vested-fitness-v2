@@ -10,6 +10,7 @@ export type WorkoutPlanLibrary = {
   description: string;
   instructions?: string;
   createdAt: string;
+  isActive: boolean;
   builderMode?: 'week' | 'day';
   workoutDaysPerWeek?: number;
   days: Array<{

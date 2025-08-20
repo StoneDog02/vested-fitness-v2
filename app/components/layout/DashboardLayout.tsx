@@ -8,6 +8,7 @@ import AnimatedBackground from "~/components/ui/AnimatedBackground";
 interface NavItem {
   name: string;
   path: string;
+  subItems?: NavItem[];
 }
 
 interface DashboardLayoutProps {
