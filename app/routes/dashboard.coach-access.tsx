@@ -326,16 +326,34 @@ export default function CoachAccess() {
   // Check-in form state
   const [pendingForms, setPendingForms] = useState<Array<{
     id: string;
+    form_id: string;
     form: { title: string; description?: string };
     sent_at: string;
     expires_at?: string;
+    questions: Array<{
+      id: string;
+      question_text: string;
+      question_type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+      is_required: boolean;
+      options?: string[];
+      order_index: number;
+    }>;
   }>>([]);
   const [showCheckInForm, setShowCheckInForm] = useState(false);
   const [currentFormInstance, setCurrentFormInstance] = useState<{
     id: string;
+    form_id: string;
     form: { title: string; description?: string };
     sent_at: string;
     expires_at?: string;
+    questions: Array<{
+      id: string;
+      question_text: string;
+      question_type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+      is_required: boolean;
+      options?: string[];
+      order_index: number;
+    }>;
   } | null>(null);
 
   // Pagination state for check-ins
@@ -440,6 +458,14 @@ export default function CoachAccess() {
     }
   }, [checkInFetcher.data, checkInFetcher.state, updateFetcher.data, updateFetcher.state]);
 
+  // Log when form instance changes for debugging
+  useEffect(() => {
+    if (currentFormInstance) {
+      console.log('Current form instance updated:', currentFormInstance);
+      console.log('Questions count:', currentFormInstance.questions?.length || 0);
+    }
+  }, [currentFormInstance]);
+
   const handleLoadMoreCheckIns = () => {
     const nextPage = checkInPage + 1;
     setCheckInPage(nextPage);
@@ -455,10 +481,21 @@ export default function CoachAccess() {
   // Check-in form handlers
   const handleOpenCheckInForm = (formInstance: {
     id: string;
+    form_id: string;
     form: { title: string; description?: string };
     sent_at: string;
     expires_at?: string;
+    questions: Array<{
+      id: string;
+      question_text: string;
+      question_type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+      is_required: boolean;
+      options?: string[];
+      order_index: number;
+    }>;
   }) => {
+    console.log('Opening form instance:', formInstance);
+    console.log('Questions count:', formInstance.questions?.length || 0);
     setCurrentFormInstance(formInstance);
     setShowCheckInForm(true);
   };
@@ -922,13 +959,13 @@ export default function CoachAccess() {
           }}
           formInstance={{
             id: currentFormInstance.id,
-            form_id: currentFormInstance.id, // Use id as form_id for now
+            form_id: currentFormInstance.form_id, // Use the actual form_id, not the instance id
             client_id: clientId || '',
             coach_id: '', // This would need to be fetched if needed
             sent_at: currentFormInstance.sent_at,
             expires_at: currentFormInstance.expires_at,
             status: 'sent' as const,
-            questions: [] // Empty questions array for now
+            questions: currentFormInstance.questions // Pass questions
           }}
           onSubmit={handleSubmitCheckInForm}
         />

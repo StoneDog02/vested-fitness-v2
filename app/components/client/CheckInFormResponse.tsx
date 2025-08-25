@@ -40,9 +40,23 @@ export default function CheckInFormResponse({
   formInstance,
   onSubmit,
 }: CheckInFormResponseProps) {
+  console.log('CheckInFormResponse received formInstance:', formInstance);
+  console.log('Questions received:', formInstance.questions);
+  console.log('Questions length:', formInstance.questions?.length || 0);
+  
   const [responses, setResponses] = useState<Record<string, any>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Log questions when they change
+  React.useEffect(() => {
+    console.log('About to render questions:', formInstance.questions);
+    if (formInstance.questions) {
+      formInstance.questions.forEach((question, index) => {
+        console.log('Question', index, ':', question);
+      });
+    }
+  }, [formInstance.questions]);
 
   const handleResponseChange = (questionId: string, value: any) => {
     setResponses(prev => ({
@@ -246,22 +260,24 @@ export default function CheckInFormResponse({
           )}
 
           <div className="space-y-6">
-            {formInstance.questions?.map((question, index) => (
-              <div key={question.id} className="space-y-2">
-                <label className="block text-sm font-medium text-secondary dark:text-alabaster">
-                  {index + 1}. {question.question_text}
-                  {question.is_required && (
-                    <span className="text-red-500 ml-1">*</span>
+            {formInstance.questions?.map((question, index) => {
+              return (
+                <div key={question.id} className="space-y-2">
+                  <label className="block text-sm font-medium text-secondary dark:text-alabaster">
+                    {index + 1}. {question.question_text}
+                    {question.is_required && (
+                      <span className="text-red-500 ml-1">*</span>
+                    )}
+                  </label>
+                  
+                  {renderQuestion(question)}
+                  
+                  {errors[question.id] && (
+                    <p className="text-red-500 text-sm">{errors[question.id]}</p>
                   )}
-                </label>
-                
-                {renderQuestion(question)}
-                
-                {errors[question.id] && (
-                  <p className="text-red-500 text-sm">{errors[question.id]}</p>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
 
           <div className="flex justify-end space-x-3 pt-4 border-t border-gray-light dark:border-davyGray">
