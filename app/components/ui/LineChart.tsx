@@ -58,11 +58,11 @@ const LineChart: React.FC<LineChartProps> = ({
         <Line
           type="monotone"
           dataKey="weight"
-          stroke="#84cc16"
+          stroke="#00CC03"
           strokeWidth={2}
           dot={{
-            fill: "#84cc16",
-            stroke: "#84cc16",
+            fill: "#00CC03",
+            stroke: "#00CC03",
             strokeWidth: 2,
             r: 4
           }}
