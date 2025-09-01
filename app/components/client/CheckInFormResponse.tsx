@@ -40,23 +40,9 @@ export default function CheckInFormResponse({
   formInstance,
   onSubmit,
 }: CheckInFormResponseProps) {
-  console.log('CheckInFormResponse received formInstance:', formInstance);
-  console.log('Questions received:', formInstance.questions);
-  console.log('Questions length:', formInstance.questions?.length || 0);
-  
   const [responses, setResponses] = useState<Record<string, any>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // Log questions when they change
-  React.useEffect(() => {
-    console.log('About to render questions:', formInstance.questions);
-    if (formInstance.questions) {
-      formInstance.questions.forEach((question, index) => {
-        console.log('Question', index, ':', question);
-      });
-    }
-  }, [formInstance.questions]);
 
   const handleResponseChange = (questionId: string, value: any) => {
     setResponses(prev => ({

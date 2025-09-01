@@ -458,14 +458,6 @@ export default function CoachAccess() {
     }
   }, [checkInFetcher.data, checkInFetcher.state, updateFetcher.data, updateFetcher.state]);
 
-  // Log when form instance changes for debugging
-  useEffect(() => {
-    if (currentFormInstance) {
-      console.log('Current form instance updated:', currentFormInstance);
-      console.log('Questions count:', currentFormInstance.questions?.length || 0);
-    }
-  }, [currentFormInstance]);
-
   const handleLoadMoreCheckIns = () => {
     const nextPage = checkInPage + 1;
     setCheckInPage(nextPage);
@@ -494,8 +486,6 @@ export default function CoachAccess() {
       order_index: number;
     }>;
   }) => {
-    console.log('Opening form instance:', formInstance);
-    console.log('Questions count:', formInstance.questions?.length || 0);
     setCurrentFormInstance(formInstance);
     setShowCheckInForm(true);
   };
@@ -636,39 +626,54 @@ export default function CoachAccess() {
           <Card title="Check-In Forms">
             <div className="space-y-3">
               {pendingForms.length > 0 ? (
-                pendingForms.map((form) => (
-                  <div
-                    key={form.id}
-                    className="border border-gray-light dark:border-davyGray rounded-lg p-3 bg-blue-50 dark:bg-blue-900/20"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h4 className="font-medium text-secondary dark:text-alabaster">
-                          {form.form.title}
-                        </h4>
-                        {form.form.description && (
-                          <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                            {form.form.description}
-                          </p>
-                        )}
-                        <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
-                          Sent: {new Date(form.sent_at).toLocaleDateString()}
-                          {form.expires_at && (
-                            <span className="ml-2">
-                              • Expires: {new Date(form.expires_at).toLocaleDateString()}
-                            </span>
+                pendingForms.map((form, index) => {
+                  // Check if this is a duplicate form (same form_id as previous)
+                  const isDuplicate = index > 0 && 
+                    pendingForms[index - 1].form_id === form.form_id;
+                  
+                  return (
+                    <div
+                      key={form.id}
+                      className={`border border-gray-light dark:border-davyGray rounded-lg p-3 ${
+                        isDuplicate 
+                          ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800' 
+                          : 'bg-blue-50 dark:bg-blue-900/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-secondary dark:text-alabaster">
+                            {form.form.title}
+                            {isDuplicate && (
+                              <span className="ml-2 text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/30 px-2 py-1 rounded">
+                                Updated
+                              </span>
+                            )}
+                          </h4>
+                          {form.form.description && (
+                            <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                              {form.form.description}
+                            </p>
                           )}
+                          <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
+                            Sent: {new Date(form.sent_at).toLocaleDateString()}
+                            {form.expires_at && (
+                              <span className="ml-2">
+                                • Expires: {new Date(form.expires_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
                         </div>
+                        <button
+                          onClick={() => handleOpenCheckInForm(form)}
+                          className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors text-sm font-medium"
+                        >
+                          Fill Out Form
+                        </button>
                       </div>
-                      <button
-                        onClick={() => handleOpenCheckInForm(form)}
-                        className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors text-sm font-medium"
-                      >
-                        Fill Out Form
-                      </button>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="text-center py-4 text-gray-500 dark:text-gray-400">
                   <p className="text-sm">No pending check-in forms</p>

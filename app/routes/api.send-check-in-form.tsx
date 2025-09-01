@@ -98,19 +98,6 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "Client not found or not accessible" }, { status: 404 });
     }
 
-    // Check if there's already a pending instance for this form and client
-    const { data: existingInstance } = await supabase
-      .from("check_in_form_instances")
-      .select("id")
-      .eq("form_id", formId)
-      .eq("client_id", clientId)
-      .eq("status", "sent")
-      .single();
-
-    if (existingInstance) {
-      return json({ error: "This form has already been sent to this client" }, { status: 400 });
-    }
-
     // Calculate expiration date
     const expiresAt = expiresInDays 
       ? new Date(Date.now() + parseInt(expiresInDays) * 24 * 60 * 60 * 1000).toISOString()
