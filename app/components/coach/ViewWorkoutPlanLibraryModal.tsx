@@ -53,6 +53,7 @@ export default function ViewWorkoutPlanLibraryModal({
   const [hasMore, setHasMore] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewWorkoutPlan, setViewWorkoutPlan] = useState<WorkoutPlanLibrary | null>(null);
+  const [submittingTemplateId, setSubmittingTemplateId] = useState<string | null>(null);
 
   // Handle template deletion
   useEffect(() => {
@@ -71,6 +72,35 @@ export default function ViewWorkoutPlanLibraryModal({
       }
     }
   }, [fetcher.state, fetcher.data, onTemplateDeleted]);
+
+  // Handle successful template usage - auto close modal
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data && submittingTemplateId) {
+      // Check if the submission was successful (no error in data)
+      if (!fetcher.data.error) {
+        // Auto close the modal after successful template usage
+        onClose();
+        setSubmittingTemplateId(null);
+      } else {
+        // If there was an error, clear the submitting state
+        setSubmittingTemplateId(null);
+      }
+    }
+  }, [fetcher.state, fetcher.data, submittingTemplateId, onClose]);
+
+  // Track when a template is being submitted
+  useEffect(() => {
+    if (fetcher.state === "submitting") {
+      const formData = fetcher.formData;
+      if (formData) {
+        const intent = formData.get("intent");
+        const templateId = formData.get("templateId");
+        if (intent === "useTemplate" && templateId) {
+          setSubmittingTemplateId(templateId as string);
+        }
+      }
+    }
+  }, [fetcher.state, fetcher.formData]);
 
   // Load more plans when scrolled to bottom
   useEffect(() => {
@@ -109,6 +139,7 @@ export default function ViewWorkoutPlanLibraryModal({
       setLibraryPlans(initialLibraryPlans);
       setLibraryPlansPage(1);
       setHasMore(true);
+      setSubmittingTemplateId(null);
     }
   }, [isOpen, initialLibraryPlans]);
 
@@ -124,6 +155,7 @@ export default function ViewWorkoutPlanLibraryModal({
             onClick={onClose}
             aria-label="Close"
             type="button"
+            disabled={fetcher.state === "submitting"}
           >
             ×
           </button>
@@ -132,81 +164,103 @@ export default function ViewWorkoutPlanLibraryModal({
           {libraryPlans.length === 0 ? (
             <div className="text-gray-500 dark:text-gray-400">No workout plans in library.</div>
           ) : (
-            libraryPlans.map((plan) => (
-              <div
-                key={plan.id}
-                className="p-4 border border-gray-light dark:border-davyGray dark:bg-night/50 rounded-lg"
-              >
-                <div className="flex-1">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-medium text-secondary dark:text-alabaster">
-                      {plan.title}
-                    </h3>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-xs font-semibold flex items-center gap-1"
-                        title="View Template"
-                        onClick={() => setViewWorkoutPlan(plan)}
-                      >
-                        <EyeIcon className="h-3 w-3" />
-                        View
-                      </button>
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="intent" value="useTemplate" />
-                        <input type="hidden" name="templateId" value={plan.id} />
+            libraryPlans.map((plan) => {
+              const isSubmitting = submittingTemplateId === plan.id;
+              const isDisabled = fetcher.state === "submitting";
+              
+              return (
+                <div
+                  key={plan.id}
+                  className="p-4 border border-gray-light dark:border-davyGray dark:bg-night/50 rounded-lg"
+                >
+                  <div className="flex-1">
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-medium text-secondary dark:text-alabaster">
+                        {plan.title}
+                      </h3>
+                      <div className="flex gap-2">
                         <button
-                          type="submit"
-                          className="bg-primary hover:bg-primary/80 text-white px-3 py-1 rounded text-xs font-semibold"
-                          title="Use Template"
+                          type="button"
+                          className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-xs font-semibold flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="View Template"
+                          onClick={() => setViewWorkoutPlan(plan)}
+                          disabled={isDisabled}
                         >
-                          Use Template
+                          <EyeIcon className="h-3 w-3" />
+                          View
                         </button>
-                      </fetcher.Form>
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="intent" value="deleteTemplate" />
-                        <input type="hidden" name="templateId" value={plan.id} />
-                        <button
-                          type="submit"
-                          className="text-red-500 hover:text-red-600 p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/20"
-                          title="Delete Template"
-                          onClick={(e) => {
-                            if (!confirm("Are you sure you want to delete this template? This action cannot be undone.")) {
-                              e.preventDefault();
-                            }
-                          }}
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                        </button>
-                      </fetcher.Form>
+                        <fetcher.Form method="post">
+                          <input type="hidden" name="intent" value="useTemplate" />
+                          <input type="hidden" name="templateId" value={plan.id} />
+                          <button
+                            type="submit"
+                            className={`px-3 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all duration-200 ${
+                              isSubmitting 
+                                ? "bg-primary/70 text-white cursor-not-allowed" 
+                                : "bg-primary hover:bg-primary/80 text-white"
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            title="Use Template"
+                            disabled={isDisabled}
+                          >
+                            {isSubmitting ? (
+                              <>
+                                <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Creating...
+                              </>
+                            ) : (
+                              "Use Template"
+                            )}
+                          </button>
+                        </fetcher.Form>
+                        <fetcher.Form method="post">
+                          <input type="hidden" name="intent" value="deleteTemplate" />
+                          <input type="hidden" name="templateId" value={plan.id} />
+                          <button
+                            type="submit"
+                            className="text-red-500 hover:text-red-600 p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Delete Template"
+                            disabled={isDisabled}
+                            onClick={(e) => {
+                              if (!confirm("Are you sure you want to delete this template? This action cannot be undone.")) {
+                                e.preventDefault();
+                              }
+                            }}
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </fetcher.Form>
+                      </div>
                     </div>
-                  </div>
-                  <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                    {plan.description}
-                  </p>
-                  {plan.instructions && (
-                    <div className="text-sm text-gray-dark dark:text-gray-light mt-2">
-                      Instructions: {plan.instructions}
+                    <p className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                      {plan.description}
+                    </p>
+                    {plan.instructions && (
+                      <div className="text-sm text-gray-dark dark:text-gray-light mt-2">
+                        Instructions: {plan.instructions}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
+                      Created: {new Date(plan.createdAt).toLocaleDateString(undefined, {
+                        month: "2-digit",
+                        day: "2-digit",
+                        year: "numeric",
+                      })}
                     </div>
-                  )}
-                  <div className="text-xs text-gray-dark dark:text-gray-light mt-2">
-                    Created: {new Date(plan.createdAt).toLocaleDateString(undefined, {
-                      month: "2-digit",
-                      day: "2-digit",
-                      year: "numeric",
-                    })}
-                  </div>
-                  <div className="mt-3">
-                    <div className="text-sm text-gray-dark dark:text-gray-light">
-                      {plan.builderMode === 'day' 
-                        ? `${plan.workoutDaysPerWeek || plan.days.filter((d) => !d.isRest).length} workout template${(plan.workoutDaysPerWeek || plan.days.filter((d) => !d.isRest).length) !== 1 ? 's' : ''}`
-                        : `${plan.days.filter((d) => !d.isRest).length} workout day${plan.days.filter((d) => !d.isRest).length !== 1 ? "s" : ""}`
-                      }
+                    <div className="mt-3">
+                      <div className="text-sm text-gray-dark dark:text-gray-light">
+                        {plan.builderMode === 'day' 
+                          ? `${plan.workoutDaysPerWeek || plan.days.filter((d) => !d.isRest).length} workout template${(plan.workoutDaysPerWeek || plan.days.filter((d) => !d.isRest).length) !== 1 ? 's' : ''}`
+                          : `${plan.days.filter((d) => !d.isRest).length} workout day${plan.days.filter((d) => !d.isRest).length !== 1 ? "s" : ""}`
+                        }
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
           {hasMore && fetcher.state === "loading" && (
             <div className="flex justify-center py-4">
