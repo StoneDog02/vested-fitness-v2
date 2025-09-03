@@ -7,7 +7,7 @@ import type { Database } from "~/lib/supabase";
 import React, { useEffect, useState, useRef } from "react";
 import Card from "~/components/ui/Card";
 import CreateMealPlanModal from "~/components/coach/CreateMealPlanModal";
-import ViewMealPlanLibraryModal from "~/components/coach/ViewMealPlanLibraryModal";
+import ViewMealPlanLibraryModal, { type MealPlanLibrary } from "~/components/coach/ViewMealPlanLibraryModal";
 import {
   PencilIcon,
   TrashIcon,
@@ -333,7 +333,7 @@ export const loader = async ({
             name: meal.name,
             time: meal.time,
             sequence_order: meal.sequence_order || 0,
-            mealOption: meal.meal_option || 'A',
+            meal_option: meal.meal_option || 'A',
             foods: mealFoods.map(food => ({
               id: food.id,
               name: food.name,
@@ -342,7 +342,7 @@ export const loader = async ({
               protein: food.protein || 0,
               carbs: food.carbs || 0,
               fat: food.fat || 0,
-              foodOption: food.food_option || 'A',
+              food_option: food.food_option || 'A',
               sequence_order: 0 // Default since foods table doesn't have this
             }))
           };
@@ -352,8 +352,8 @@ export const loader = async ({
           id: plan.id,
           title: plan.title,
           description: plan.description,
-          created_at: plan.created_at,
-          is_template: true,
+          createdAt: plan.created_at,
+          isActive: false, // Library plans are not active
           meals
         };
       } else {
@@ -684,6 +684,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return json({ error: "Cannot use non-template as template" }, { status: 400 });
     }
 
+    // Check if this is the client's first meal plan
+    const { data: existingPlans } = await supabase
+      .from("meal_plans")
+      .select("id")
+      .eq("user_id", client.id)
+      .eq("is_template", false);
+
+    const isFirstPlan = !existingPlans || existingPlans.length === 0;
+
     // Create editable client copy
     const { data: clientPlan, error: clientError } = await supabase
       .from("meal_plans")
@@ -692,8 +701,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         description: template.description,
         user_id: client.id,
         is_template: false, // This makes it editable
-        is_active: true,
-        activated_at: new Date().toISOString(),
+        is_active: isFirstPlan, // Only activate if this is the first plan
+        activated_at: isFirstPlan ? new Date().toISOString() : null, // Only set activation date if activating
       })
       .select()
       .single();
@@ -754,7 +763,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       delete clientMealsCache[params.clientId];
     }
     
-    return redirect(request.url);
+    return json({ success: true, planId: clientPlan.id });
   }
 
   if (intent === "deleteTemplate") {
@@ -1116,7 +1125,7 @@ export type MealPlan = {
 export default function ClientMeals() {
   const loaderData = useLoaderData<{
     mealPlans: MealPlan[];
-    libraryPlans: MealPlan[];
+    libraryPlans: MealPlanLibrary[];
     client: { name: string, id: string, created_at?: string } | null;
     complianceData: number[];
     mealPlansHasMore?: boolean;

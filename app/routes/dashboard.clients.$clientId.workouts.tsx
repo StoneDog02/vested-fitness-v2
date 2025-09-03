@@ -659,11 +659,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return json({ error: "Template not found" }, { status: 400 });
     }
 
+    // Check if this is the client's first workout plan
+    const { data: existingPlans } = await supabase
+      .from("workout_plans")
+      .select("id")
+      .eq("user_id", client.id)
+      .eq("is_template", false);
+
+    const isFirstPlan = !existingPlans || existingPlans.length === 0;
+
     // Create client instance with personal copy using the new function
     const { data: instanceId, error: instanceError } = await supabase.rpc('copy_workout_template_to_client', {
       template_id_param: templateId,
       client_id_param: client.id,
-      coach_id_param: coachId!
+      coach_id_param: coachId!,
+      should_activate: isFirstPlan // Pass flag to indicate if this should be auto-activated
     });
 
     if (instanceError) {
@@ -678,7 +688,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       delete clientWorkoutsCache[params.clientId];
     }
     
-    return redirect(request.url);
+    return json({ success: true, planId: instanceId });
   }
 
   if (intent === "deleteTemplate") {

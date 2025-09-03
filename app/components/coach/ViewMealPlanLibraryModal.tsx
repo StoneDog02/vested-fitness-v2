@@ -81,11 +81,13 @@ export default function ViewMealPlanLibraryModal({
   // Handle successful template usage - auto close modal
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data && submittingTemplateId) {
-      // Check if the submission was successful (no error in data)
-      if (!fetcher.data.error) {
+      // Check if the submission was successful
+      if (fetcher.data.success || !fetcher.data.error) {
         // Auto close the modal after successful template usage
         onClose();
         setSubmittingTemplateId(null);
+        // Refresh the page to show the new plan
+        window.location.reload();
       } else {
         // If there was an error, clear the submitting state
         setSubmittingTemplateId(null);
