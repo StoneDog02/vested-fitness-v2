@@ -1259,16 +1259,30 @@ export default function ClientWorkouts() {
   // Reset on open
   useEffect(() => {
     if (isHistoryModalOpen) {
-      setHistoryWorkoutPlans(workoutPlans);
+      // Apply the same sorting logic to history plans
+      const sortedHistoryPlans = [...workoutPlans].sort((a, b) => {
+        // If one is active and the other isn't, active comes first
+        if (a.isActive && !b.isActive) return -1;
+        if (!a.isActive && b.isActive) return 1;
+        
+        // If both are active or both are inactive, sort by creation date (most recent first)
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+      setHistoryWorkoutPlans(sortedHistoryPlans);
       setWorkoutPlansPage(1);
       setHasMoreWorkoutPlans(loaderWorkoutPlansHasMore ?? true);
     }
   }, [isHistoryModalOpen, workoutPlans, loaderWorkoutPlansHasMore]);
 
-  // For visible plans, just show all plans (or filter as needed)
-  const sortedPlans = [...workoutPlans].sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt)
-  );
+  // Sort plans: active plan first, then by creation date (most recent first)
+  const sortedPlans = [...workoutPlans].sort((a, b) => {
+    // If one is active and the other isn't, active comes first
+    if (a.isActive && !b.isActive) return -1;
+    if (!a.isActive && b.isActive) return 1;
+    
+    // If both are active or both are inactive, sort by creation date (most recent first)
+    return b.createdAt.localeCompare(a.createdAt);
+  });
   
 
 

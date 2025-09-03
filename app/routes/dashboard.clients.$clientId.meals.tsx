@@ -1346,7 +1346,16 @@ export default function ClientMeals() {
   // Reset on open
   React.useEffect(() => {
     if (isHistoryModalOpen) {
-      setHistoryMealPlans(mealPlans);
+      // Apply the same sorting logic to history plans
+      const sortedHistoryPlans = [...mealPlans].sort((a, b) => {
+        // If one is active and the other isn't, active comes first
+        if (a.isActive && !b.isActive) return -1;
+        if (!a.isActive && b.isActive) return 1;
+        
+        // If both are active or both are inactive, sort by creation date (most recent first)
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+      setHistoryMealPlans(sortedHistoryPlans);
       setMealPlansPage(1);
       setHasMoreMealPlans(loaderMealPlansHasMore ?? true);
     }
@@ -1355,7 +1364,16 @@ export default function ClientMeals() {
   // Keep history data in sync after revalidation (when modal is closed)
   React.useEffect(() => {
     if (!isHistoryModalOpen) {
-      setHistoryMealPlans(mealPlans);
+      // Apply the same sorting logic when keeping history in sync
+      const sortedHistoryPlans = [...mealPlans].sort((a, b) => {
+        // If one is active and the other isn't, active comes first
+        if (a.isActive && !b.isActive) return -1;
+        if (!a.isActive && b.isActive) return 1;
+        
+        // If both are active or both are inactive, sort by creation date (most recent first)
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+      setHistoryMealPlans(sortedHistoryPlans);
     }
   }, [mealPlans, isHistoryModalOpen]);
 
