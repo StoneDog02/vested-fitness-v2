@@ -249,8 +249,9 @@ export const loader = async ({
           const mealIds = mealsRaw.map(m => m.id);
           const { data: foods } = await supabase
             .from("foods")
-            .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_option, food_library:food_library_id (calories, protein, carbs, fat)`)
-            .in("meal_id", mealIds);
+            .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_option, sequence_order, food_library:food_library_id (calories, protein, carbs, fat)`)
+            .in("meal_id", mealIds)
+            .order("sequence_order", { ascending: true });
 
         // Process foods and map them to meals
         const foodsData = foods || [];
@@ -315,12 +316,13 @@ export const loader = async ({
         .order("sequence_order", { ascending: true });
 
       if (mealsRaw && mealsRaw.length > 0) {
-        // Batch fetch all foods for all meals in a single query
-        const mealIds = mealsRaw.map(m => m.id);
-        const { data: foods } = await supabase
-          .from("foods")
-          .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_option, food_library:food_library_id (calories, protein, carbs, fat)`)
-          .in("meal_id", mealIds);
+          // Batch fetch all foods for all meals in a single query
+          const mealIds = mealsRaw.map(m => m.id);
+          const { data: foods } = await supabase
+            .from("foods")
+            .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_option, sequence_order, food_library:food_library_id (calories, protein, carbs, fat)`)
+            .in("meal_id", mealIds)
+            .order("sequence_order", { ascending: true });
 
         // Process foods and map them to meals
         const foodsData = foods || [];
@@ -737,7 +739,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           const { data: templateFoods } = await supabase
             .from("foods")
             .select("name, portion, calories, protein, carbs, fat, sequence_order")
-            .eq("meal_id", templateMeal.id);
+            .eq("meal_id", templateMeal.id)
+            .order("sequence_order", { ascending: true });
 
           if (templateFoods) {
             for (const templateFood of templateFoods) {

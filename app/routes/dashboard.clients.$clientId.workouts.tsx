@@ -298,7 +298,7 @@ export const loader = async ({
               group_notes
             `)
             .eq("workout_day_id", dayData.id)
-            .order("id", { ascending: true });
+            .order("sequence_order", { ascending: true });
 
           // Convert exercises to the expected format
           const exerciseGroups = (exercises || []).map((ex: any) => ({
@@ -396,7 +396,7 @@ export const loader = async ({
               group_notes
             `)
             .eq("workout_day_id", dayData.id)
-            .order("id", { ascending: true });
+            .order("sequence_order", { ascending: true });
 
           // Convert exercises to the expected format
           const exerciseGroups = (exercises || []).map((ex: any) => ({

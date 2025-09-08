@@ -139,8 +139,9 @@ export const loader: LoaderFunction = async ({ request }) => {
       const mealIds = (mealsRaw || []).map(m => m.id);
       const { data: foods } = await supabase
         .from("foods")
-        .select("id, name, portion, calories, protein, carbs, fat, meal_id")
-        .in("meal_id", mealIds);
+        .select("id, name, portion, calories, protein, carbs, fat, meal_id, food_option, sequence_order")
+        .in("meal_id", mealIds)
+        .order("sequence_order", { ascending: true });
 
       // Convert the meals data to the expected format
       const mealsWithFoods = (mealsRaw || []).map((meal: any) => {
@@ -160,6 +161,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             protein: Number(food.protein) || 0,
             carbs: Number(food.carbs) || 0,
             fat: Number(food.fat) || 0,
+            foodOption: food.food_option || 'A',
           }))
         };
       });

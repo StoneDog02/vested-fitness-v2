@@ -45,8 +45,9 @@ export const loader = async ({ request }: { request: Request }) => {
         const mealIds = (mealsRaw || []).map(m => m.id);
         const { data: foods } = await supabase
           .from("foods")
-          .select("id, name, portion, calories, protein, carbs, fat, meal_id")
-          .in("meal_id", mealIds);
+          .select("id, name, portion, calories, protein, carbs, fat, meal_id, sequence_order")
+          .in("meal_id", mealIds)
+          .order("sequence_order", { ascending: true });
 
         // Convert the meals data to the expected format
         const meals = (mealsRaw || []).map((meal: any) => {

@@ -1,27 +1,5 @@
 import React, { useState, useEffect } from "react";
 import Button from "~/components/ui/Button";
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-  DragStartEvent,
-  DragOverlay,
-} from "@dnd-kit/core";
-
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import {
-  useSortable,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 
 interface Food {
   name: string;
@@ -53,8 +31,8 @@ interface CreateMealPlanFormProps {
   isLoading?: boolean;
 }
 
-// Add this new component for sortable food items
-interface SortableFoodItemProps {
+// Simple food item component without drag-and-drop
+interface FoodItemProps {
   food: Food;
   foodIndex: number;
   activeMealIndex: number;
@@ -69,62 +47,18 @@ interface SortableFoodItemProps {
   removeFood: (mealIndex: number, foodIndex: number) => void;
 }
 
-function SortableFoodItem({
+function FoodItem({
   food,
   foodIndex,
   activeMealIndex,
   foodsLength,
   updateFood,
   removeFood,
-}: SortableFoodItemProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: `food-${activeMealIndex}-${foodIndex}` });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition: isDragging ? 'none' : 'all 0.2s ease-out',
-    opacity: isDragging ? 0.4 : 1,
-  };
-
+}: FoodItemProps) {
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`p-5 bg-white dark:bg-night border border-gray-light/50 dark:border-davyGray/30 rounded-xl shadow-soft ${
-        isDragging ? "shadow-large" : ""
-      }`}
-    >
+    <div className="p-5 bg-white dark:bg-night border border-gray-light/50 dark:border-davyGray/30 rounded-xl shadow-soft">
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center space-x-3">
-          <button
-            type="button"
-            {...attributes}
-            {...listeners}
-            className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-grab active:cursor-grabbing transition-colors duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-            aria-label="Drag to reorder food item"
-            title="Drag to reorder"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 8h16M4 16h16"
-              />
-            </svg>
-          </button>
           <div className="flex items-center space-x-2">
             <h5 className="text-sm font-semibold text-secondary dark:text-alabaster">
               Food Item {foodIndex + 1}
@@ -309,92 +243,6 @@ function SortableFoodItem({
   );
 }
 
-// Simplified drag overlay component
-function DragOverlayItem({ food, foodIndex }: { food: Food; foodIndex: number }) {
-  return (
-    <div className="p-5 bg-white dark:bg-night border-2 border-primary/50 dark:border-primary/40 rounded-xl shadow-glow-lg">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 text-primary">
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 8h16M4 16h16"
-              />
-            </svg>
-          </div>
-          <div className="flex items-center space-x-2">
-            <h5 className="text-sm font-semibold text-secondary dark:text-alabaster">
-              Food Item {foodIndex + 1}
-            </h5>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div>
-          <span className="block text-xs font-semibold text-secondary dark:text-alabaster mb-2">
-            Food Name
-          </span>
-          <div className="w-full px-3 py-2.5 border border-gray-light dark:border-davyGray rounded-lg bg-gray-50 dark:bg-gray-700 text-secondary dark:text-alabaster text-sm">
-            {food.name || "Food name"}
-          </div>
-        </div>
-        <div>
-          <span className="block text-xs font-semibold text-secondary dark:text-alabaster mb-2">
-            Portion
-          </span>
-          <div className="w-full px-3 py-2.5 border border-gray-light dark:border-davyGray rounded-lg bg-gray-50 dark:bg-gray-700 text-secondary dark:text-alabaster text-sm">
-            {food.portion || "Portion"}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-4 gap-3">
-        <div>
-          <span className="block text-xs font-semibold text-secondary dark:text-alabaster mb-2">
-            Calories
-          </span>
-          <div className="w-full px-3 py-2.5 border border-gray-light dark:border-davyGray rounded-lg bg-gray-50 dark:bg-gray-700 text-secondary dark:text-alabaster text-sm flex items-center min-h-[42px]">
-            {Number(food.calories) || 0}
-          </div>
-        </div>
-        <div>
-          <span className="block text-xs font-semibold text-secondary dark:text-alabaster mb-2">
-            Protein (g)
-          </span>
-          <div className="w-full px-3 py-2.5 border border-gray-light dark:border-davyGray rounded-lg bg-gray-50 dark:bg-gray-700 text-secondary dark:text-alabaster text-sm flex items-center min-h-[42px]">
-            {food.protein || 0}
-          </div>
-        </div>
-        <div>
-          <span className="block text-xs font-semibold text-secondary dark:text-alabaster mb-2">
-            Carbs (g)
-          </span>
-          <div className="w-full px-3 py-2.5 border border-gray-light dark:border-davyGray rounded-lg bg-gray-50 dark:bg-gray-700 text-secondary dark:text-alabaster text-sm flex items-center min-h-[42px]">
-            {food.carbs || 0}
-          </div>
-        </div>
-        <div>
-          <span className="block text-xs font-semibold text-secondary dark:text-alabaster mb-2">
-            Fat (g)
-          </span>
-          <div className="w-full px-3 py-2.5 border border-gray-light dark:border-davyGray rounded-lg bg-gray-50 dark:bg-gray-700 text-secondary dark:text-alabaster text-sm flex items-center min-h-[42px]">
-            {food.fat || 0}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function CreateMealPlanForm({
   onSubmit,
@@ -435,9 +283,6 @@ export default function CreateMealPlanForm({
   );
 
   const [activeMealIndex, setActiveMealIndex] = useState(0);
-
-  // Add state for drag overlay
-  const [activeFood, setActiveFood] = useState<{ food: Food; foodIndex: number } | null>(null);
   
 
 
@@ -738,81 +583,6 @@ export default function CreateMealPlanForm({
     }
   }, [initialData]);
 
-  // Add drag and drop sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  // Handle drag start for food reordering
-  const handleDragStart = (event: DragStartEvent) => {
-    const { active } = event;
-    const [type, mealIndexStr, foodIndexStr] = active.id.toString().split('-');
-    
-    if (type === 'food') {
-      const mealIndex = parseInt(mealIndexStr);
-      const foodIndex = parseInt(foodIndexStr);
-      const food = formData.meals[mealIndex]?.foods[foodIndex];
-      
-      if (food) {
-        setActiveFood({ food, foodIndex });
-      }
-    }
-  };
-
-  // Handle drag end for food reordering
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-
-    if (over && active.id !== over.id) {
-      const [type, mealIndexStr, foodIndexStr] = active.id.toString().split('-');
-      
-      if (type === 'food') {
-        const mealIndex = parseInt(mealIndexStr);
-        const oldIndex = parseInt(foodIndexStr);
-        const [_, overMealIndexStr, overFoodIndexStr] = over.id.toString().split('-');
-        const newIndex = parseInt(overFoodIndexStr);
-
-        if (mealIndex === parseInt(overMealIndexStr)) {
-          // Update the data immediately for smooth reordering
-          setFormData((prev) => {
-            const updatedMeals = [...prev.meals];
-            const foods = [...updatedMeals[mealIndex].foods];
-            const reorderedFoods = arrayMove(foods, oldIndex, newIndex);
-            updatedMeals[mealIndex] = { 
-              ...updatedMeals[mealIndex], 
-              foods: reorderedFoods 
-            };
-            return { ...prev, meals: updatedMeals };
-          });
-        }
-      }
-    }
-    
-    // Clear active food
-    setActiveFood(null);
-  };
-
-  // Custom modifier to center the drag overlay on the cursor
-  const centerDragOverlay = ({ transform }: { transform: any }) => {
-    return {
-      ...transform,
-      x: transform.x - 200, // Adjust this value based on your card width
-      y: transform.y - 100, // Adjust this value based on your card height
-    };
-  };
-
-  // Custom animation for smooth reordering
-  const customDropAnimation = {
-    duration: 200,
-    easing: 'ease-out',
-  };
 
 
 
@@ -1160,52 +930,21 @@ export default function CreateMealPlanForm({
                   Foods
                 </h4>
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center space-x-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
-                </svg>
-                <span>Drag to reorder foods</span>
-              </p>
             </div>
 
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              modifiers={[centerDragOverlay]}
-            >
-              <SortableContext
-                items={formData.meals[activeMealIndex]?.foods.map((_, index) => `food-${activeMealIndex}-${index}`) || []}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="space-y-4">
-                  {formData.meals[activeMealIndex]?.foods.map((food, foodIndex) => (
-                    <SortableFoodItem
-                      key={`food-${activeMealIndex}-${foodIndex}`}
-                      food={food}
-                      foodIndex={foodIndex}
-                      activeMealIndex={activeMealIndex}
-                      foodsLength={formData.meals[activeMealIndex]?.foods.length || 0}
-                      updateFood={updateFood}
-                      removeFood={removeFood}
-                    />
-                  ))}
-                </div>
-              </SortableContext>
-              
-              <DragOverlay 
-                className="z-50 cursor-grabbing"
-                modifiers={[centerDragOverlay]}
-              >
-                {activeFood ? (
-                  <DragOverlayItem
-                    food={activeFood.food}
-                    foodIndex={activeFood.foodIndex}
-                  />
-                ) : null}
-              </DragOverlay>
-            </DndContext>
+            <div className="space-y-4">
+              {formData.meals[activeMealIndex]?.foods.map((food, foodIndex) => (
+                <FoodItem
+                  key={`food-${activeMealIndex}-${foodIndex}`}
+                  food={food}
+                  foodIndex={foodIndex}
+                  activeMealIndex={activeMealIndex}
+                  foodsLength={formData.meals[activeMealIndex]?.foods.length || 0}
+                  updateFood={updateFood}
+                  removeFood={removeFood}
+                />
+              ))}
+            </div>
 
             <button
               type="button"

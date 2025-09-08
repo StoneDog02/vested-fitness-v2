@@ -138,8 +138,9 @@ export const loader: LoaderFunction = async ({ request }) => {
             mealIds.length > 0
               ? supabase
                   .from("foods")
-                  .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
+                  .select(`id, name, portion, calories, protein, carbs, fat, meal_id, food_library_id, sequence_order, food_library:food_library_id (calories, protein, carbs, fat)`)
                   .in("meal_id", mealIds)
+                  .order("sequence_order", { ascending: true })
               : { data: [] },
             supabase
               .from("meal_completions")

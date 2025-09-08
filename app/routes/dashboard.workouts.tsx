@@ -156,7 +156,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .from("workout_exercises")
             .select("exercise_name, exercise_description, sets_data, group_type, group_notes, sequence_order")
             .eq("workout_day_id", day.id)
-            .order("sequence_order");
+            .order("sequence_order", { ascending: true });
 
           const exercises = (exercisesRaw || []).map((exercise) => ({
             name: exercise.exercise_name,

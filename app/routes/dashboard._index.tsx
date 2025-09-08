@@ -242,8 +242,9 @@ export const loader: LoaderFunction = async ({ request }) => {
         todaysMeals = await Promise.all((mealsRaw || []).map(async (meal: any) => {
           const { data: foodsRaw } = await supabase
             .from("foods")
-            .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, food_library:food_library_id (calories, protein, carbs, fat)`)
-            .eq("meal_id", meal.id);
+            .select(`id, name, portion, calories, protein, carbs, fat, food_library_id, sequence_order, food_library:food_library_id (calories, protein, carbs, fat)`)
+            .eq("meal_id", meal.id)
+            .order("sequence_order", { ascending: true });
           const foods = (foodsRaw || []).map((food: any) => {
             const protein = food.food_library && typeof food.food_library === 'object' && 'protein' in food.food_library ? Number(food.food_library.protein) || 0 : Number(food.protein) || 0;
             const carbs = food.food_library && typeof food.food_library === 'object' && 'carbs' in food.food_library ? Number(food.food_library.carbs) || 0 : Number(food.carbs) || 0;
