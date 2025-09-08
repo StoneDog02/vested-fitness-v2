@@ -106,7 +106,11 @@ export default function CreateWorkoutModal({
 
   // Drag and drop sensors
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
@@ -297,7 +301,11 @@ export default function CreateWorkoutModal({
   useEffect(() => {
     if (lastDayIndex.current !== currentDayIndex) {
       const prevDay = daysOfWeek[lastDayIndex.current];
-      setSavedDays((prev) => ({ ...prev, [prevDay]: true }));
+      setSavedDays((prev) => {
+        // Only update if the day isn't already saved to prevent unnecessary re-renders
+        if (prev[prevDay]) return prev;
+        return { ...prev, [prevDay]: true };
+      });
       lastDayIndex.current = currentDayIndex;
     }
   }, [currentDayIndex]);
