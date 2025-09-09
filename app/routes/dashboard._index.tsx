@@ -1127,13 +1127,27 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Recent Clients */}
             <Card variant="elevated" className="p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center shadow-soft">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center shadow-soft">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-xl text-secondary dark:text-alabaster">Recent Clients</h3>
+                    <Tooltip content="This percentage tracker shows how much you've set up for each recently signed client: meal plan, workout plan, and supplement regimen. It helps you track onboarding progress at a glance.">
+                      <div className="w-5 h-5 text-blue-500 hover:text-blue-600 cursor-pointer transition-colors">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-full h-full">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                    </Tooltip>
+                  </div>
                 </div>
-                <h3 className="font-semibold text-xl text-secondary dark:text-alabaster">Recent Clients</h3>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 30 days</p>
+                </div>
               </div>
               <div className="space-y-4">
                 {nonCriticalLoading ? (
@@ -1189,13 +1203,18 @@ export default function Dashboard() {
 
             {/* Recent Activity */}
             <Card variant="elevated" className="p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-gradient-to-br from-info-500 to-info-600 rounded-xl flex items-center justify-center shadow-soft">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-info-500 to-info-600 rounded-xl flex items-center justify-center shadow-soft">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                  </div>
+                  <h3 className="font-semibold text-xl text-secondary dark:text-alabaster">Recent Activity</h3>
                 </div>
-                <h3 className="font-semibold text-xl text-secondary dark:text-alabaster">Recent Activity</h3>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Today</p>
+                </div>
               </div>
               <div className="space-y-4">
                 {nonCriticalLoading ? (
