@@ -99,7 +99,7 @@ export async function loader({ request }: { request: Request }) {
       .from("progress_photos")
       .select("id, photo_url, notes, created_at", { count: "exact" })
       .eq("client_id", clientId)
-      .order("created_at", { ascending: false })
+      .order("created_at", { ascending: true })
       .range(offset, offset + pageSize - 1);
 
     if (error) {
