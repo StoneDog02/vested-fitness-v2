@@ -32,6 +32,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const [access] = JSON.parse(JSON.parse(decoded));
       accessToken = access;
     } catch (e) {
+      console.error("Error parsing auth cookie in upload:", e);
       accessToken = undefined;
     }
   }
@@ -45,28 +46,36 @@ export async function action({ request }: ActionFunctionArgs) {
           ? (decoded.sub as string)
           : undefined;
     } catch (e) {
-      /* ignore */
+      console.error("Error decoding JWT token in upload:", e);
     }
   }
 
   if (!authId) {
-    return json({ error: "Not authenticated" }, { status: 401 });
+    console.error("Authentication failed in upload: No valid auth ID found");
+    return json({ error: "Not authenticated - please log in again" }, { status: 401 });
   }
 
   // Get user row
-  const { data: user } = await supabase
+  const { data: user, error: userError } = await supabase
     .from("users")
     .select("id, role")
     .eq("auth_id", authId)
     .single();
 
+  if (userError) {
+    console.error("Error fetching user in upload:", userError);
+    return json({ error: "Failed to verify user identity" }, { status: 500 });
+  }
+
   if (!user) {
+    console.error("User not found in upload:", { authId });
     return json({ error: "User not found" }, { status: 404 });
   }
 
   // Only coaches can upload media
   if (user.role !== "coach") {
-    return json({ error: "Unauthorized" }, { status: 403 });
+    console.error("Non-coach user attempted upload:", { userId: user.id, role: user.role });
+    return json({ error: "Unauthorized - only coaches can upload media" }, { status: 403 });
   }
 
   try {

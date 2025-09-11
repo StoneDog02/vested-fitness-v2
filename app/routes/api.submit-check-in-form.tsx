@@ -36,6 +36,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const [access] = JSON.parse(JSON.parse(decoded));
       accessToken = access;
     } catch (e) {
+      console.error("Error parsing auth cookie:", e);
       accessToken = undefined;
     }
   }
@@ -49,28 +50,42 @@ export async function action({ request }: ActionFunctionArgs) {
           ? (decoded.sub as string)
           : undefined;
     } catch (e) {
+      console.error("Error decoding JWT token:", e);
       authId = undefined;
     }
   }
 
   if (!authId) {
-    return json({ error: "Not authenticated" }, { status: 401 });
+    console.error("Authentication failed: No valid auth ID found");
+    return json({ error: "Not authenticated - please log in again" }, { status: 401 });
   }
 
   // Get the client's user record
-  const { data: clientUser } = await supabase
+  const { data: clientUser, error: clientUserError } = await supabase
     .from("users")
     .select("id, role")
     .eq("auth_id", authId)
     .single();
 
+  if (clientUserError) {
+    console.error("Error fetching client user:", clientUserError);
+    return json({ error: "Failed to verify user identity" }, { status: 500 });
+  }
+
   if (!clientUser || clientUser.role !== 'client') {
+    console.error("User is not a client:", { userId: clientUser?.id, role: clientUser?.role });
     return json({ error: "Only clients can submit form responses" }, { status: 403 });
   }
 
   try {
     // Parse responses
-    const responses = JSON.parse(responsesJson);
+    let responses;
+    try {
+      responses = JSON.parse(responsesJson);
+    } catch (parseError) {
+      console.error("Error parsing responses JSON:", parseError);
+      return json({ error: "Invalid form data format" }, { status: 400 });
+    }
 
     // Verify the form instance exists and belongs to this client
     const { data: instance, error: instanceError } = await supabase
@@ -89,7 +104,13 @@ export async function action({ request }: ActionFunctionArgs) {
       .eq("client_id", clientUser.id)
       .single();
 
-    if (instanceError || !instance) {
+    if (instanceError) {
+      console.error("Error fetching form instance:", instanceError);
+      return json({ error: "Form instance not found or not accessible" }, { status: 404 });
+    }
+
+    if (!instance) {
+      console.error("Form instance not found:", { instanceId, clientId: clientUser.id });
       return json({ error: "Form instance not found or not accessible" }, { status: 404 });
     }
 
@@ -138,7 +159,10 @@ export async function action({ request }: ActionFunctionArgs) {
     // Insert responses
     const responsesToInsert = Object.entries(responses).map(([questionId, response]) => {
       const question = questions?.find((q: any) => q.id === questionId);
-      if (!question) return null;
+      if (!question) {
+        console.error("Question not found for response:", { questionId, availableQuestions: questions?.map(q => q.id) });
+        return null;
+      }
 
       const responseData: any = {
         instance_id: instanceId,
@@ -147,7 +171,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
       // Handle different response types
       if (question.question_type === 'number') {
-        responseData.response_number = parseFloat(response as string);
+        const numValue = parseFloat(response as string);
+        if (isNaN(numValue)) {
+          console.error("Invalid number response:", { questionId, response });
+          return null;
+        }
+        responseData.response_number = numValue;
       } else if (question.question_type === 'checkbox') {
         responseData.response_options = response;
       } else {
@@ -158,14 +187,17 @@ export async function action({ request }: ActionFunctionArgs) {
     }).filter(Boolean);
 
     if (responsesToInsert.length > 0) {
+      console.log("Inserting responses:", { count: responsesToInsert.length, instanceId });
       const { error: responsesError } = await supabase
         .from("check_in_form_responses")
         .insert(responsesToInsert);
 
       if (responsesError) {
         console.error("Error inserting responses:", responsesError);
-        return json({ error: "Failed to save responses" }, { status: 500 });
+        return json({ error: "Failed to save responses: " + responsesError.message }, { status: 500 });
       }
+    } else {
+      console.warn("No valid responses to insert:", { responses, questions: questions?.map(q => ({ id: q.id, type: q.question_type })) });
     }
 
     // Mark the instance as completed
