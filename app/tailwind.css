@@ -30,6 +30,30 @@ html, body {
   .gradient-border { @apply relative; @apply before:absolute before:inset-0 before:p-[1px] before:bg-gradient-to-r before:from-primary before:to-primary-light before:rounded-xl before:-z-10; }
   .text-gradient { @apply bg-gradient-to-r from-primary to-primary-light bg-clip-text text-transparent; }
   
+  /* Mobile-specific optimizations */
+  .mobile-touch-target {
+    min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  
+  /* Prevent zoom on double-tap for form inputs */
+  .mobile-form-input {
+    font-size: 16px; /* Prevents zoom on iOS */
+    touch-action: manipulation;
+  }
+  
+  /* Mobile-friendly button states */
+  .mobile-button {
+    @apply mobile-touch-target;
+    @apply active:scale-95;
+    @apply transition-transform duration-150;
+  }
+  
   /* Custom slider styling */
   .slider::-webkit-slider-thumb {
     appearance: none;

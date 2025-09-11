@@ -17,6 +17,7 @@ export default function Button({
   icon,
   className,
   disabled,
+  onClick,
   ...props
 }: ButtonProps) {
   const variantClasses = {
@@ -38,16 +39,39 @@ export default function Button({
   };
 
   const sizeClasses = {
-    sm: "py-2 px-4 text-sm font-medium",
-    md: "py-3 px-6 text-base font-semibold",
-    lg: "py-4 px-8 text-lg font-bold",
+    sm: "py-2 px-4 text-sm font-medium min-h-[44px] min-w-[44px]", // Mobile-friendly touch targets
+    md: "py-3 px-6 text-base font-semibold min-h-[48px] min-w-[48px]",
+    lg: "py-4 px-8 text-lg font-bold min-h-[52px] min-w-[52px]",
+  };
+
+  // Enhanced click handler for mobile compatibility
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    
+    // Prevent double-tap zoom on mobile
+    e.preventDefault();
+    
+    // Add a small delay to ensure touch events are properly handled
+    setTimeout(() => {
+      if (onClick) {
+        onClick(e);
+      }
+    }, 0);
   };
 
   return (
     <button
       className={`inline-flex items-center justify-center rounded-xl font-medium transition-all duration-300 ease-out
-      ${variantClasses[variant]} ${sizeClasses[size]} ${className || ""} button-hover`}
+      ${variantClasses[variant]} ${sizeClasses[size]} ${className || ""} button-hover
+      touch-manipulation select-none`} // Mobile optimizations
       disabled={disabled}
+      onClick={handleClick}
+      style={{
+        WebkitTapHighlightColor: 'transparent', // Remove tap highlight on iOS
+        WebkitTouchCallout: 'none', // Disable callout on iOS
+        WebkitUserSelect: 'none', // Disable text selection
+        userSelect: 'none',
+      }}
       {...props}
     >
       {icon && <span className="mr-2 flex items-center">{icon}</span>}

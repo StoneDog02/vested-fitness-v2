@@ -73,6 +73,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "completedAt is required" }, { status: 400 });
     }
 
+    // Parse completedGroups if it's a JSON string (from fetcher)
+    let parsedCompletedGroups = completedGroups;
+    if (typeof completedGroups === 'string') {
+      try {
+        parsedCompletedGroups = JSON.parse(completedGroups);
+      } catch (e) {
+        return json({ error: "Invalid completedGroups format" }, { status: 400 });
+      }
+    }
+
     // Delete any existing completion for this user and date
     await supabase
       .from("workout_completions")
@@ -85,7 +95,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       .from("workout_completions")
       .insert({
         user_id: user.id,
-        completed_groups: completedGroups || [],
+        completed_groups: parsedCompletedGroups || [],
         completed_at: completedAt,
       });
 

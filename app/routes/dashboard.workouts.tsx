@@ -689,127 +689,89 @@ export default function Workouts() {
     }
   };
 
-  // Submit rest day for flexible schedules
+  // Submit rest day for flexible schedules - using fetcher for consistency
   const handleSubmitRestDay = async () => {
     setIsSubmitting(true);
     setSubmitError(null);
     
-    try {
-      const response = await fetch("/api/submit-workout-completion", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          completedAt: currentDateApi,
-          completedGroups: [], // Empty array for rest day
-        }),
-      });
-      
-      if (response.ok) {
-        setShowSuccess(true);
-        setIsWorkoutSubmitted(true);
-        // Keep rest day view active - don't reset isRestDay or selectedTemplate
-        // setIsRestDay(false);
-        // setSelectedTemplate(null);
-        
-        // Refresh week data to update available templates
-        fetchWorkoutWeek(currentWeekStart);
-        
-        // Dispatch event to refresh dashboard
-        window.dispatchEvent(new CustomEvent("workouts:completed"));
-        
-        setTimeout(() => setShowSuccess(false), 3000);
-      } else {
-        const errorData = await response.json();
-        setSubmitError(errorData.error || "Failed to submit rest day");
-      }
-    } catch (error) {
-      setSubmitError("Network error occurred");
-    } finally {
-      setIsSubmitting(false);
-    }
+    // Optimistically update UI
+    setShowSuccess(true);
+    setIsWorkoutSubmitted(true);
+    
+    // Submit using fetcher (same pattern as meals and supplements)
+    submitFetcher.submit(
+      { 
+        completedAt: currentDateApi, 
+        completedGroups: JSON.stringify([]) // Empty array for rest day
+      },
+      { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
+    );
+    
+    // Refresh week data to update available templates
+    fetchWorkoutWeek(currentWeekStart);
+    
+    // Dispatch event to refresh dashboard
+    window.dispatchEvent(new CustomEvent("workouts:completed"));
+    
+    setTimeout(() => setShowSuccess(false), 3000);
+    setIsSubmitting(false);
   };
 
-  // Submit selected template for flexible schedules
+  // Submit selected template for flexible schedules - using fetcher for consistency
   const handleSubmitTemplate = async () => {
     if (!selectedTemplate) return;
     
     setIsSubmitting(true);
     setSubmitError(null);
     
-    try {
-      const response = await fetch("/api/submit-workout-completion", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          completedAt: currentDateApi,
-          completedGroups: Object.keys(completedGroups).filter(id => completedGroups[id]),
-        }),
-      });
-      
-      if (response.ok) {
-        setShowSuccess(true);
-        setIsWorkoutSubmitted(true);
-        // Keep workout view active - don't reset selectedTemplate
-        // setSelectedTemplate(null);
-        
-        // Refresh week data to update available templates
-        fetchWorkoutWeek(currentWeekStart);
-        
-        // Dispatch event to refresh dashboard
-        window.dispatchEvent(new CustomEvent("workouts:completed"));
-        
-        setTimeout(() => setShowSuccess(false), 3000);
-      } else {
-        const errorData = await response.json();
-        setSubmitError(errorData.error || "Failed to submit workout");
-      }
-    } catch (error) {
-      setSubmitError("Network error occurred");
-    } finally {
-      setIsSubmitting(false);
-    }
+    // Optimistically update UI
+    setShowSuccess(true);
+    setIsWorkoutSubmitted(true);
+    
+    // Submit using fetcher (same pattern as meals and supplements)
+    submitFetcher.submit(
+      { 
+        completedAt: currentDateApi,
+        completedGroups: JSON.stringify(Object.keys(completedGroups).filter(id => completedGroups[id]))
+      },
+      { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
+    );
+    
+    // Refresh week data to update available templates
+    fetchWorkoutWeek(currentWeekStart);
+    
+    // Dispatch event to refresh dashboard
+    window.dispatchEvent(new CustomEvent("workouts:completed"));
+    
+    setTimeout(() => setShowSuccess(false), 3000);
+    setIsSubmitting(false);
   };
 
-  // Submit fixed schedule workout (original logic)
+  // Submit fixed schedule workout - using fetcher for consistency
   const handleSubmitFixedWorkout = async () => {
     if (!currentDayWorkout || currentDayWorkout.isRest) return;
     
     setIsSubmitting(true);
     setSubmitError(null);
     
-    try {
-      const response = await fetch("/api/submit-workout-completion", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          completedAt: currentDateApi,
-          completedGroups: Object.keys(completedGroups).filter(id => completedGroups[id]),
-        }),
-      });
-      
-      if (response.ok) {
-        setShowSuccess(true);
-        setIsWorkoutSubmitted(true);
-        
-        // Dispatch event to refresh dashboard
-        window.dispatchEvent(new CustomEvent("workouts:completed"));
-        
-        setTimeout(() => setShowSuccess(false), 3000);
-      } else {
-        const errorData = await response.json();
-        setSubmitError(errorData.error || "Failed to submit workout");
-      }
-    } catch (error) {
-      setSubmitError("Network error occurred");
-    } finally {
-      setIsSubmitting(false);
-    }
+    // Optimistically update UI
+    setShowSuccess(true);
+    setIsWorkoutSubmitted(true);
+    
+    // Submit using fetcher (same pattern as meals and supplements)
+    submitFetcher.submit(
+      { 
+        completedAt: currentDateApi,
+        completedGroups: JSON.stringify(Object.keys(completedGroups).filter(id => completedGroups[id]))
+      },
+      { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
+    );
+    
+    // Dispatch event to refresh dashboard
+    window.dispatchEvent(new CustomEvent("workouts:completed"));
+    
+    setTimeout(() => setShowSuccess(false), 3000);
+    setIsSubmitting(false);
   };
 
   // Calculate daily progress
