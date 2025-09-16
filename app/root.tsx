@@ -43,12 +43,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let accessToken;
   if (supabaseAuthCookieKey) {
     try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
+      const rawValue = cookies[supabaseAuthCookieKey];
+      const decodedURIComponent = (() => {
+        try { return decodeURIComponent(rawValue); } catch { return rawValue; }
+      })();
+      const tryDirect = () => {
+        const v = JSON.parse(decodedURIComponent);
+        return typeof v === "string" ? JSON.parse(v) : v;
+      };
+      const tryBase64 = () => {
+        const base64Decoded = Buffer.from(decodedURIComponent, "base64").toString("utf-8");
+        const v = JSON.parse(base64Decoded);
+        return typeof v === "string" ? JSON.parse(v) : v;
+      };
+      let tokens: unknown;
+      try {
+        tokens = tryDirect();
+      } catch {
+        tokens = tryBase64();
+      }
+      if (Array.isArray(tokens) && typeof tokens[0] === "string") {
+        const [access] = tokens as [string, string];
+        accessToken = access;
+      }
     } catch (e) {
       accessToken = undefined;
     }

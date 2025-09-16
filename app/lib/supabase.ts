@@ -487,12 +487,35 @@ export const extractAuthFromCookie = (cookies: Record<string, string>) => {
   }
   
   try {
-    const decoded = Buffer.from(
-      cookies[supabaseAuthCookieKey],
-      "base64"
-    ).toString("utf-8");
-    const [access, refresh] = JSON.parse(JSON.parse(decoded));
-    return { accessToken: access, refreshToken: refresh };
+    const rawValue = cookies[supabaseAuthCookieKey];
+    const decodedURIComponent = (() => {
+      try { return decodeURIComponent(rawValue); } catch { return rawValue; }
+    })();
+
+    // Attempt 1: parse as JSON directly (after URL decode)
+    const tryDirect = () => {
+      const value = JSON.parse(decodedURIComponent);
+      return typeof value === "string" ? JSON.parse(value) : value;
+    };
+
+    // Attempt 2: parse as base64(JSON or base64(JSON string)) after URL decode
+    const tryBase64 = () => {
+      const base64Decoded = Buffer.from(decodedURIComponent, "base64").toString("utf-8");
+      const value = JSON.parse(base64Decoded);
+      return typeof value === "string" ? JSON.parse(value) : value;
+    };
+
+    let tokens: unknown;
+    try {
+      tokens = tryDirect();
+    } catch {
+      tokens = tryBase64();
+    }
+
+    if (Array.isArray(tokens) && typeof tokens[0] === "string" && typeof tokens[1] === "string") {
+      return { accessToken: tokens[0], refreshToken: tokens[1] };
+    }
+    return { accessToken: null, refreshToken: null };
   } catch (e) {
     console.error("Failed to extract auth from cookie:", e);
     return { accessToken: null, refreshToken: null };
