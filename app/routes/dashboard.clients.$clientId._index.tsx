@@ -989,13 +989,52 @@ export default function ClientDetails() {
       formDataToSend.append("clientId", client.id);
       formDataToSend.append("expiresInDays", expiresInDays.toString());
 
-      const response = await fetch('/api/send-check-in-form', {
+      // Add mobile-specific logging
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      console.log('Sending check-in form:', { 
+        formId, 
+        clientId: client.id, 
+        expiresInDays, 
+        isMobile,
+        userAgent: navigator.userAgent 
+      });
+
+      // Mobile-friendly fetch with retry logic
+      const fetchWithRetry = async (url: string, options: RequestInit, retries = 3): Promise<Response> => {
+        for (let i = 0; i < retries; i++) {
+          try {
+            const response = await fetch(url, {
+              ...options,
+              // Mobile-specific timeout
+              signal: AbortSignal.timeout(isMobile ? 30000 : 10000),
+            });
+            return response;
+          } catch (error) {
+            if (i === retries - 1) throw error;
+            // Wait before retry (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+          }
+        }
+        throw new Error('Max retries exceeded');
+      };
+
+      const response = await fetchWithRetry('/api/send-check-in-form', {
         method: 'POST',
         body: formDataToSend,
+        // Add mobile-specific headers (don't set Content-Type for FormData)
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+        },
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('Form submission failed:', { 
+          status: response.status, 
+          statusText: response.statusText, 
+          errorData,
+          isMobile 
+        });
         throw new Error(errorData.error || 'Failed to send form');
       }
 

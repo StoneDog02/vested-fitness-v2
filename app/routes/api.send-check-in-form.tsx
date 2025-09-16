@@ -15,6 +15,24 @@ export async function action({ request }: ActionFunctionArgs) {
     process.env.SUPABASE_SERVICE_KEY!
   );
 
+  // Set mobile-friendly headers
+  const headers = new Headers({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Requested-With',
+    'Access-Control-Max-Age': '86400',
+  });
+
+  // Add mobile-specific logging
+  const userAgent = request.headers.get("user-agent") || "";
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+  console.log('API: Send check-in form request:', { 
+    userAgent, 
+    isMobile,
+    contentType: request.headers.get("content-type"),
+    hasCookie: !!request.headers.get("cookie")
+  });
+
   const formData = await request.formData();
   const formId = formData.get("formId")?.toString();
   const clientId = formData.get("clientId")?.toString();
@@ -30,6 +48,13 @@ export async function action({ request }: ActionFunctionArgs) {
     (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
   );
   
+  console.log('API: Auth cookie debug:', { 
+    cookieKeys: Object.keys(cookies),
+    supabaseAuthCookieKey,
+    hasAuthCookie: !!supabaseAuthCookieKey,
+    isMobile 
+  });
+  
   let accessToken;
   if (supabaseAuthCookieKey) {
     try {
@@ -39,9 +64,22 @@ export async function action({ request }: ActionFunctionArgs) {
       ).toString("utf-8");
       const [access] = JSON.parse(JSON.parse(decoded));
       accessToken = access;
+      console.log('API: Successfully parsed auth token:', { 
+        hasAccessToken: !!accessToken,
+        isMobile 
+      });
     } catch (e) {
+      console.error('API: Failed to parse auth token:', { 
+        error: e instanceof Error ? e.message : 'Unknown error',
+        isMobile 
+      });
       accessToken = undefined;
     }
+  } else {
+    console.error('API: No Supabase auth cookie found:', { 
+      availableCookies: Object.keys(cookies),
+      isMobile 
+    });
   }
 
   let authId: string | undefined;
@@ -58,7 +96,29 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (!authId) {
-    return json({ error: "Not authenticated" }, { status: 401 });
+    // Try alternative authentication methods for mobile
+    const authHeader = request.headers.get("authorization");
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        const token = authHeader.substring(7);
+        const decoded = jwt.decode(token) as Record<string, unknown> | null;
+        authId = decoded && typeof decoded === "object" && "sub" in decoded
+          ? (decoded.sub as string)
+          : undefined;
+        console.log('API: Using Bearer token auth:', { hasAuthId: !!authId, isMobile });
+      } catch (e) {
+        console.error('API: Bearer token auth failed:', { error: e instanceof Error ? e.message : 'Unknown error', isMobile });
+      }
+    }
+    
+    if (!authId) {
+      console.error('API: All authentication methods failed:', { 
+        hasCookie: !!supabaseAuthCookieKey,
+        hasBearerToken: !!authHeader,
+        isMobile 
+      });
+      return json({ error: "Not authenticated" }, { status: 401 });
+    }
   }
 
   // Get the coach's user record

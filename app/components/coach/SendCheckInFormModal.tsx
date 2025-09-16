@@ -56,10 +56,25 @@ export default function SendCheckInFormModal({
 
     setIsSubmitting(true);
     try {
-      await onSubmit(selectedFormId, expiresInDays);
-      setSelectedFormId("");
-      setExpiresInDays(7);
-      onClose();
+      // Add mobile-specific delay to ensure proper touch handling
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      if (isMobile) {
+        // Small delay for mobile touch events
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Add mobile-specific error handling
+      try {
+        await onSubmit(selectedFormId, expiresInDays);
+        setSelectedFormId("");
+        setExpiresInDays(7);
+        onClose();
+      } catch (submitError) {
+        console.error('Form submission error:', submitError);
+        // Show user-friendly error message
+        alert(`Failed to send form: ${submitError instanceof Error ? submitError.message : 'Unknown error'}`);
+        throw submitError;
+      }
     } catch (error) {
       console.error('Error sending form:', error);
     } finally {
@@ -147,6 +162,12 @@ export default function SendCheckInFormModal({
             type="submit"
             variant="primary"
             disabled={!selectedFormId || isSubmitting}
+            className="mobile-touch-target"
+            style={{
+              minHeight: '44px',
+              minWidth: '44px',
+              touchAction: 'manipulation',
+            }}
           >
             {isSubmitting ? 'Sending...' : 'Send Form'}
           </Button>
