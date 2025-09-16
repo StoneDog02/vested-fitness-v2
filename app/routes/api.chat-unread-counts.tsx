@@ -36,6 +36,24 @@ function getUserIdFromRequest(request: Request): string | undefined {
       userId = undefined;
     }
   }
+  
+  // Fallback: Try Bearer token authentication for mobile
+  if (!userId) {
+    const authHeader = request.headers.get("authorization");
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        const token = authHeader.substring(7);
+        const decoded = jwt.decode(token) as Record<string, unknown> | null;
+        userId =
+          decoded && typeof decoded === "object" && "sub" in decoded
+            ? (decoded.sub as string)
+            : undefined;
+      } catch (e) {
+        userId = undefined;
+      }
+    }
+  }
+  
   return userId;
 }
 
