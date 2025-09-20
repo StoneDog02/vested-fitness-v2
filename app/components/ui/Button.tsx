@@ -48,8 +48,11 @@ export default function Button({
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (disabled) return;
     
-    // Prevent double-tap zoom on mobile
-    e.preventDefault();
+    // Only prevent default for non-submit buttons to avoid breaking form submissions
+    if (props.type !== 'submit') {
+      // Prevent double-tap zoom on mobile for non-submit buttons
+      e.preventDefault();
+    }
     
     // Add a small delay to ensure touch events are properly handled
     setTimeout(() => {

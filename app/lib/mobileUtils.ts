@@ -88,7 +88,14 @@ export const createMobileFormHandler = (
         onError(error as Error);
       }
     } finally {
-      isSubmitting = false;
+      // Add a small delay on mobile to ensure UI updates are visible
+      if (isMobileDevice()) {
+        setTimeout(() => {
+          isSubmitting = false;
+        }, 100);
+      } else {
+        isSubmitting = false;
+      }
     }
   };
 };
@@ -99,4 +106,59 @@ export const createMobileFormHandler = (
 export const getMobileClasses = (baseClasses: string = ''): string => {
   const mobileClasses = isMobileDevice() ? 'mobile-touch-target' : '';
   return `${baseClasses} ${mobileClasses}`.trim();
+};
+
+/**
+ * Enhanced mobile form submission with better error handling
+ */
+export const submitFormWithMobileSupport = async (
+  formData: FormData,
+  endpoint: string,
+  options: {
+    onSuccess?: () => void;
+    onError?: (error: Error) => void;
+    showLoadingState?: boolean;
+  } = {}
+): Promise<boolean> => {
+  const { onSuccess, onError, showLoadingState = true } = options;
+  
+  try {
+    // Add mobile-specific headers
+    const headers: HeadersInit = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    };
+    
+    // Add mobile detection header
+    if (isMobileDevice()) {
+      headers['X-Mobile-Client'] = 'true';
+    }
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Form submission failed: ${response.status} ${errorText}`);
+    }
+    
+    // Add small delay on mobile for better UX
+    if (isMobileDevice()) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    if (onSuccess) {
+      onSuccess();
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Mobile form submission error:', error);
+    if (onError) {
+      onError(error as Error);
+    }
+    return false;
+  }
 };
