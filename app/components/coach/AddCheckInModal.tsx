@@ -370,7 +370,7 @@ export default function AddCheckInModal({
             variant="primary" 
             disabled={(!thisWeek.trim() && !recordingData) || isUploading}
           >
-            {isUploading ? 'Uploading...' : 'Save Notes'}
+            {isUploading ? 'Uploading...' : 'Send Notes'}
           </Button>
         </div>
       </form>
