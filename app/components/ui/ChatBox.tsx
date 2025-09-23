@@ -29,7 +29,7 @@ const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
   <input
     {...props}
     className={
-      "border rounded px-3 py-2 focus:outline-none focus:ring w-full " +
+      "border rounded px-3 py-2 focus:outline-none focus:ring w-full bg-white text-black " +
       (props.className || "")
     }
   />
