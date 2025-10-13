@@ -321,6 +321,7 @@ export default function Workouts() {
   const [dayOffset, setDayOffset] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [updatePersonalBests, setUpdatePersonalBests] = useState<((weights: Record<string, string>) => void) | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [completedGroups, setCompletedGroups] = useState<Record<string, boolean>>({});
   const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
@@ -479,7 +480,7 @@ export default function Workouts() {
     // Convert the Date to a dayjs object in user timezone, then format as YYYY-MM-DD
     const weekStartInUserTz = dayjs(weekStart).tz(USER_TIMEZONE).startOf("day").format("YYYY-MM-DD");
     params.set("weekStart", weekStartInUserTz);
-    weekFetcher.load(`/api/get-workout-week?${params.toString()}`);
+    weekFetcher.load(`/api/get-workout-week-v2?${params.toString()}`);
   };
 
   // Initialize week data on mount
@@ -513,47 +514,11 @@ export default function Workouts() {
         setRestDaysAllowed(weekFetcher.data.restDaysAllowed || 0);
         setRestDaysUsed(weekFetcher.data.restDaysUsed || 0);
         
-        // Check if there's already a completion for today
-        const today = getCurrentDate();
-        const todayStr = today.format("YYYY-MM-DD");
-        
-        // Check if there's a completion for today in the completions data
-        if (weekFetcher.data.completions && weekFetcher.data.completions[todayStr]) {
-          const todayCompletion = weekFetcher.data.completions[todayStr];
-          
-          if (todayCompletion.length === 0) {
-            // Empty completed_groups means it's a rest day
-            setIsRestDay(true);
-            setSelectedTemplate(null);
-            setIsWorkoutSubmitted(true);
-          } else {
-            // Has completed groups - find the matching template
-            const completedTemplate = weekFetcher.data.workoutTemplates?.find((template: any) => {
-              // Check if this template's groups match the completed groups
-              const templateGroupIds = template.groups?.map((group: any) => group.id) || [];
-              return todayCompletion.every((groupId: string) => templateGroupIds.includes(groupId));
-            });
-            
-            if (completedTemplate) {
-              setSelectedTemplate(completedTemplate);
-              setIsRestDay(false);
-              setIsWorkoutSubmitted(true);
-              
-              // Set completed groups for the selected template
-              const completedGroupsMap: Record<string, boolean> = {};
-              todayCompletion.forEach((groupId: string) => {
-                completedGroupsMap[groupId] = true;
-              });
-              setCompletedGroups(completedGroupsMap);
-            }
-          }
-        } else {
-          // No completion for today - reset to selection view
-          setSelectedTemplate(null);
-          setIsRestDay(false);
-          setIsWorkoutSubmitted(false);
-          setCompletedGroups({});
-        }
+        // Always start with selection view - don't auto-select completed workouts
+        setSelectedTemplate(null);
+        setIsRestDay(false);
+        setIsWorkoutSubmitted(false);
+        setCompletedGroups({});
         
         // Reset current day workout for flexible schedules
         setCurrentDayWorkout(null);
@@ -649,6 +614,7 @@ export default function Workouts() {
     setShowPreviewModal(true);
   };
 
+
   // Function to refresh compliance data
   const refreshComplianceData = async () => {
     try {
@@ -723,6 +689,15 @@ export default function Workouts() {
     
     setIsSubmitting(true);
     setSubmitError(null);
+    
+    // Update personal bests before submitting
+    if (updatePersonalBests) {
+      // Get current weights from all WorkoutCard components
+      // This is a simplified approach - in a real app you might want to collect weights differently
+      const currentWeights: Record<string, string> = {};
+      // For now, we'll let the WorkoutCard handle the PB update internally
+      // The PB update will happen when the workout is submitted
+    }
     
     // Optimistically update UI
     setShowSuccess(true);
@@ -879,62 +854,65 @@ export default function Workouts() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         <div className="md:col-span-2">
           <Card variant="elevated" className="mb-6">
-            <div className="flex justify-between items-center mb-4 sm:mb-6">
-              <button
-                onClick={() => setDayOffset(dayOffset - 1)}
-                className="text-primary hover:text-primary-dark transition-all duration-200 flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-primary/10 hover:scale-105"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+            {/* Only show date navigation for Fixed Schedule plans */}
+            {!isFlexibleSchedule && (
+              <div className="flex justify-between items-center mb-4 sm:mb-6">
+                <button
+                  onClick={() => setDayOffset(dayOffset - 1)}
+                  className="text-primary hover:text-primary-dark transition-all duration-200 flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-primary/10 hover:scale-105"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-                <span className="font-medium">Previous</span>
-              </button>
-              <div className="text-center">
-                <h2 className="text-xl font-semibold text-secondary dark:text-alabaster">
-                  {dateDisplay.title}
-                </h2>
-                <div className="text-sm text-gray-dark dark:text-gray-light mt-1">
-                  {dateDisplay.subtitle}
-                </div>
-                {dayOffset !== 0 && (
-                  <button
-                    onClick={() => setDayOffset(0)}
-                    className="text-xs text-primary hover:text-primary-dark transition-colors duration-200 mt-1"
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
                   >
-                    Go to today
-                  </button>
-                )}
-              </div>
-              <button
-                onClick={() => setDayOffset(dayOffset + 1)}
-                className="text-primary hover:text-primary-dark transition-all duration-200 flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-primary/10 hover:scale-105"
-              >
-                <span className="font-medium">Next</span>
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
+                  <span className="font-medium">Previous</span>
+                </button>
+                <div className="text-center">
+                  <h2 className="text-xl font-semibold text-secondary dark:text-alabaster">
+                    {dateDisplay.title}
+                  </h2>
+                  <div className="text-sm text-gray-dark dark:text-gray-light mt-1">
+                    {dateDisplay.subtitle}
+                  </div>
+                  {dayOffset !== 0 && (
+                    <button
+                      onClick={() => setDayOffset(0)}
+                      className="text-xs text-primary hover:text-primary-dark transition-colors duration-200 mt-1"
+                    >
+                      Go to today
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={() => setDayOffset(dayOffset + 1)}
+                  className="text-primary hover:text-primary-dark transition-all duration-200 flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-primary/10 hover:scale-105"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-              </button>
-            </div>
+                  <span className="font-medium">Next</span>
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                </button>
+              </div>
+            )}
 
             <div className="mb-4 sm:mb-6">
               <h2 className="text-xl sm:text-2xl font-semibold text-secondary dark:text-alabaster mb-2">
@@ -1007,24 +985,26 @@ export default function Workouts() {
                     )}
 
                     {/* Available Workout Templates */}
-                    {availableTemplates.length > 0 && (
+                    {workoutTemplates.length > 0 && (
                       <div className="space-y-3">
                         <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
                           Available Workouts ({availableTemplates.length} remaining)
                         </h3>
-                        {availableTemplates.map((template) => (
+                        {workoutTemplates.map((template) => (
                           <div
                             key={template.id}
-                            className={`bg-white dark:bg-secondary-light/5 rounded-xl border-2 transition-all duration-200 p-4 sm:p-6 cursor-pointer ${
-                              selectedTemplate?.id === template.id
-                                ? "border-primary bg-primary/5"
-                                : "border-gray-200 dark:border-gray-700 hover:border-primary/50"
+                            className={`rounded-xl border-2 transition-all duration-200 p-4 sm:p-6 cursor-pointer ${
+                              template.isCompleted
+                                ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                : selectedTemplate?.id === template.id
+                                ? "border-primary bg-primary/5 dark:bg-primary/10"
+                                : "border-gray-200 dark:border-gray-700 hover:border-primary/50 bg-white dark:bg-secondary-light/5"
                             }`}
-                            onClick={() => handleTemplateSelection(template)}
+                            onClick={() => !template.isCompleted && handleTemplateSelection(template)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
-                                handleTemplateSelection(template);
+                                !template.isCompleted && handleTemplateSelection(template);
                               }
                             }}
                             role="button"
@@ -1039,6 +1019,11 @@ export default function Workouts() {
                                   {template.dayLabel && (
                                     <span className="px-2 py-1 text-xs font-medium bg-primary/10 text-primary rounded-full">
                                       {template.dayLabel}
+                                    </span>
+                                  )}
+                                  {template.isCompleted && (
+                                    <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 rounded-full">
+                                      ✓ Completed this week
                                     </span>
                                   )}
                                 </div>
@@ -1057,11 +1042,19 @@ export default function Workouts() {
                                   View
                                 </button>
                                 <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 ${
-                                  selectedTemplate?.id === template.id
+                                  template.isCompleted
+                                    ? "border-green-500 bg-green-500"
+                                    : selectedTemplate?.id === template.id
                                     ? "border-primary bg-primary"
                                     : "border-gray-300 dark:border-gray-600"
                                 }`}>
-                                  {selectedTemplate?.id === template.id && (
+                                  {template.isCompleted ? (
+                                    <div className="w-full h-full flex items-center justify-center">
+                                      <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                      </svg>
+                                    </div>
+                                  ) : selectedTemplate?.id === template.id && (
                                     <svg className="w-full h-full text-white" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                     </svg>
@@ -1154,6 +1147,7 @@ export default function Workouts() {
                               exercises={group.exercises || []}
                               type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
                               dayOffset={0}
+                              onWeightSubmit={setUpdatePersonalBests}
                             />
                           </div>
                         ))}
@@ -1265,6 +1259,7 @@ export default function Workouts() {
                         exercises={group.exercises || []}
                         type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
                         dayOffset={0}
+                        onWeightSubmit={setUpdatePersonalBests}
                       />
                     </div>
                   ))
@@ -1695,6 +1690,7 @@ export default function Workouts() {
                       exercises={group.exercises || []}
                       type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
                       dayOffset={0}
+                      onWeightSubmit={setUpdatePersonalBests}
                     />
                   </div>
                 ))}

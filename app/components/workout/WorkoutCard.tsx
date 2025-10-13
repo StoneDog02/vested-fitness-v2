@@ -7,6 +7,7 @@ interface WorkoutCardProps {
   type: "Single" | "Super" | "Giant";
   isSubmitted?: boolean;
   dayOffset: number;
+  onWeightSubmit?: (updateFn: (weights: Record<string, string>) => void) => void;
 }
 
 export default function WorkoutCard({
@@ -14,9 +15,11 @@ export default function WorkoutCard({
   type,
   isSubmitted = false,
   dayOffset,
+  onWeightSubmit,
 }: WorkoutCardProps) {
   const [weights, setWeights] = useState<Record<string, string>>({});
   const [personalBests, setPersonalBests] = useState<Record<string, number>>({});
+  const weightsRef = useRef<Record<string, string>>({});
   // Fetch PBs for each exercise on mount
   useEffect(() => {
     async function fetchPBs() {
@@ -44,16 +47,15 @@ export default function WorkoutCard({
 
   useEffect(() => {
     // Initialize weights state only on the client side
-    setWeights(
-      Object.fromEntries(
-        exercises.flatMap((exercise) =>
-          exercise.sets.map((set) => [
-            `${exercise.id}-${set.setNumber}`,
-            set.weight?.toString() || "",
-          ])
-        )
-      )
-    );
+    const initialWeights: Record<string, string> = {};
+    exercises.forEach((exercise) => {
+      exercise.sets.forEach((set) => {
+        const key = `${exercise.id}-${set.setNumber}`;
+        initialWeights[key] = set.weight?.toString() || "";
+      });
+    });
+    setWeights(initialWeights);
+    weightsRef.current = initialWeights; // Initialize ref
   }, [exercises]);
 
   const handleWeightChange = (
@@ -62,26 +64,92 @@ export default function WorkoutCard({
     value: string
   ) => {
     if (isSubmitted) return; // Prevent changes if submitted
-    setWeights((prev) => ({
-      ...prev,
+    const newWeights = {
+      ...weights,
       [`${exerciseId}-${setNumber}`]: value,
-    }));
-    // If this is set 1 and value is a new PB, update PB in Supabase
-    if (setNumber === 1 && value && !isNaN(Number(value))) {
-      const newWeight = Number(value);
-      if (!personalBests[exerciseId] || newWeight > personalBests[exerciseId]) {
-        setPersonalBests((prev) => ({ ...prev, [exerciseId]: newWeight }));
+    };
+    setWeights(newWeights);
+    weightsRef.current = newWeights; // Keep ref in sync
+  };
+
+
+
+  // Calculate current highest weight for each exercise
+  const getCurrentHighestWeight = (exerciseId: string) => {
+    const exercise = exercises.find(ex => ex.id === exerciseId);
+    if (!exercise) return 0;
+    
+    let highestWeight = 0;
+    exercise.sets.forEach(set => {
+      const weightKey = `${exerciseId}-${set.setNumber}`;
+      const weightValue = weights[weightKey];
+      if (weightValue && !isNaN(Number(weightValue))) {
+        const weight = Number(weightValue);
+        if (weight > highestWeight) {
+          highestWeight = weight;
+        }
+      }
+    });
+    return highestWeight;
+  };
+
+  // Get the PB to display (only stored PB, not current weights)
+  const getDisplayPB = (exerciseId: string) => {
+    return personalBests[exerciseId] || 0;
+  };
+
+  // Update PBs when weights are submitted
+  const updatePersonalBests = async (submittedWeights: Record<string, string>) => {
+    const updatedPBs: Record<string, number> = {};
+    
+    // Calculate new PBs for each exercise
+    exercises.forEach(exercise => {
+      let highestWeight = 0;
+      exercise.sets.forEach(set => {
+        const weightKey = `${exercise.id}-${set.setNumber}`;
+        const weightValue = submittedWeights[weightKey];
+        if (weightValue && !isNaN(Number(weightValue))) {
+          const weight = Number(weightValue);
+          if (weight > highestWeight) {
+            highestWeight = weight;
+          }
+        }
+      });
+      
+      // Only update PB if the new weight is higher than the stored PB
+      const storedPB = personalBests[exercise.id] || 0;
+      if (highestWeight > storedPB) {
+        updatedPBs[exercise.id] = highestWeight;
+        
         // Update PB in Supabase
         fetch("/api/personal-best", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ exerciseId, weight: newWeight }),
+          body: JSON.stringify({ exerciseId: exercise.id, weight: highestWeight }),
         });
       }
+    });
+    
+    // Update local state
+    if (Object.keys(updatedPBs).length > 0) {
+      setPersonalBests(prev => ({ ...prev, ...updatedPBs }));
     }
   };
 
+  // Expose the update function to parent component
+  useEffect(() => {
+    if (onWeightSubmit) {
+      onWeightSubmit(updatePersonalBests);
+    }
+  }, [onWeightSubmit]);
 
+  // Auto-update PBs when workout is submitted
+  useEffect(() => {
+    if (isSubmitted) {
+      // Use ref to get weights at submission time (not reactive to weight changes)
+      updatePersonalBests(weightsRef.current);
+    }
+  }, [isSubmitted]); // Only trigger on submission, not on weight changes
 
   const getSetLabel = (
     type: "Super" | "Giant" | "Single",
@@ -114,7 +182,7 @@ export default function WorkoutCard({
                 >
                   <div className="flex items-center justify-end mb-4">
                     <div className="text-xs text-green-600 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/30 px-3 py-1.5 rounded-md">
-                      PB: {personalBests[exercise.id] ? `${personalBests[exercise.id]} lbs` : "-"}
+                      PB: {getDisplayPB(exercise.id) > 0 ? `${getDisplayPB(exercise.id)} lbs` : "-"}
                     </div>
                   </div>
                   
@@ -133,29 +201,23 @@ export default function WorkoutCard({
                             <label htmlFor={`weight-${exercise.id}-${set.setNumber}`} className="text-sm font-medium text-gray-600 dark:text-gray-400">
                               Weight (lbs)
                             </label>
-                            {set.setNumber === 1 ? (
-                              <input
-                                id={`weight-${exercise.id}-${set.setNumber}`}
-                                type="number"
-                                value={weights[`${exercise.id}-${set.setNumber}`] || ""}
-                                onChange={(e) =>
-                                  handleWeightChange(
-                                    exercise.id,
-                                    set.setNumber,
-                                    e.target.value
-                                  )
-                                }
-                                disabled={isSubmitted}
-                                className={`w-full px-3 py-2 border rounded-md bg-white dark:bg-gray-600 dark:border-gray-500 text-secondary dark:text-alabaster focus:ring-2 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light text-sm ${
-                                  isSubmitted ? "cursor-not-allowed opacity-50" : ""
-                                }`}
-                                placeholder="0"
-                              />
-                            ) : (
-                              <div className="px-3 py-2 text-gray-400 dark:text-gray-500 text-sm bg-gray-100 dark:bg-gray-600 rounded-md">
-                                -
-                              </div>
-                            )}
+                            <input
+                              id={`weight-${exercise.id}-${set.setNumber}`}
+                              type="number"
+                              value={weights[`${exercise.id}-${set.setNumber}`] || ""}
+                              onChange={(e) =>
+                                handleWeightChange(
+                                  exercise.id,
+                                  set.setNumber,
+                                  e.target.value
+                                )
+                              }
+                              disabled={isSubmitted}
+                              className={`w-full px-3 py-2 border rounded-md bg-white dark:bg-gray-600 dark:border-gray-500 text-secondary dark:text-alabaster focus:ring-2 focus:ring-primary focus:border-primary dark:focus:border-primary dark:focus:ring-primary-light text-sm ${
+                                isSubmitted ? "cursor-not-allowed opacity-50" : ""
+                              }`}
+                              placeholder="0"
+                            />
                           </div>
                           
                           {/* Reps Display */}

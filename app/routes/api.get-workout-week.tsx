@@ -196,13 +196,24 @@ export const loader: LoaderFunction = async ({ request }) => {
       !completion.completed_groups || completion.completed_groups.length === 0
     ).length;
 
+    // Temporarily disable filtering to show all templates
     // Track completed templates to remove from available options
     const completedTemplateIds = new Set();
+    
+    // For flexible schedules, we need to match completed groups to template groups
     (completionsRaw || []).forEach(completion => {
       if (completion.completed_groups && completion.completed_groups.length > 0) {
-        // For flexible schedules, we need to track which templates were completed
-        // This will be handled by the client-side logic
-        completedTemplateIds.add(completion.completed_at);
+        // Find which template has matching groups
+        workoutTemplates.forEach(template => {
+          const templateGroupIds = template.groups.map((group: any) => group.id).sort();
+          const completedGroupIds = [...completion.completed_groups].sort();
+          
+          // If the groups match exactly, this template is completed
+          if (templateGroupIds.length === completedGroupIds.length &&
+              templateGroupIds.every((id, index) => id === completedGroupIds[index])) {
+            completedTemplateIds.add(template.id);
+          }
+        });
       }
     });
 
@@ -210,6 +221,12 @@ export const loader: LoaderFunction = async ({ request }) => {
     const availableTemplates = workoutTemplates.filter(template => 
       !completedTemplateIds.has(template.id)
     );
+    
+    // Add completion status to each template for UI display
+    const templatesWithCompletionStatus = workoutTemplates.map(template => ({
+      ...template,
+      isCompleted: completedTemplateIds.has(template.id)
+    }));
 
     // Process completions into a map by date for flexible schedules
     const completionsByDate: Record<string, string[]> = {};
@@ -221,7 +238,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       workouts: {}, // Empty for flexible schedules - client handles day assignment
       completions: completionsByDate, // Include completions data for flexible schedules
       isFlexibleSchedule: true,
-      workoutTemplates,
+      workoutTemplates: templatesWithCompletionStatus, // Include completion status
       availableTemplates,
       restDaysAllowed,
       restDaysUsed,
