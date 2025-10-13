@@ -199,6 +199,24 @@ export async function action({ request }: ActionFunctionArgs) {
       transcript: checkIn.transcript ? `${checkIn.transcript.substring(0, 50)}...` : null
     });
 
+    // Create an automatic coach update notification
+    const updateMessage = recordingType === 'video' 
+      ? '📹 Check-in video received from coach!'
+      : '🎤 Check-in audio received from coach!';
+
+    const { error: updateError } = await supabase
+      .from("coach_updates")
+      .insert({
+        coach_id: user.id,
+        client_id: clientId,
+        message: updateMessage,
+      });
+
+    if (updateError) {
+      console.error('Error creating automatic update notification:', updateError);
+      // Don't fail the whole request if the notification fails
+    }
+
     return json({ 
       success: true, 
       checkIn,

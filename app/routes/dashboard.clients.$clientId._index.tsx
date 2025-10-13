@@ -605,6 +605,21 @@ export const action: import("@remix-run/node").ActionFunction = async ({ request
     if (error || !data) {
       return json({ error: error?.message || "Failed to add check-in" }, { status: 500 });
     }
+
+    // Create an automatic coach update notification for text check-ins
+    const { error: updateError } = await supabase
+      .from("coach_updates")
+      .insert({
+        coach_id: coach_id,
+        client_id: client.id,
+        message: '💬 Check-in message received from coach!',
+      });
+
+    if (updateError) {
+      console.error('Error creating automatic update notification:', updateError);
+      // Don't fail the whole request if the notification fails
+    }
+
     return json({ checkIn: data });
   }
   if (intent === "editCheckIn" && id && notes) {

@@ -82,14 +82,24 @@ export default function AddCheckInModal({
           console.error('Upload response:', response.status, errorText);
           throw new Error(`Failed to upload recording: ${response.status} ${errorText}`);
         }
+        
+        // Recording uploaded successfully - the check-in was created by the API
+        // No need to call onSubmit since the check-in already exists
+        setThisWeek("");
+        setRecordingData(null);
+        setShowRecorder(false);
+        onClose();
+        
+        // Reload the page to show the new check-in
+        window.location.reload();
+      } else {
+        // No recording, just text notes - submit via the normal flow
+        onSubmit(thisWeek, undefined);
+        setThisWeek("");
+        setRecordingData(null);
+        setShowRecorder(false);
+        onClose();
       }
-      
-      // Submit the check-in
-      onSubmit(thisWeek, recordingData || undefined);
-    setThisWeek("");
-      setRecordingData(null);
-      setShowRecorder(false);
-    onClose();
     } catch (error) {
       console.error('Error submitting check-in:', error);
       alert('Failed to submit check-in. Please try again.');
