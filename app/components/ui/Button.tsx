@@ -48,8 +48,12 @@ export default function Button({
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (disabled) return;
     
+    // Don't prevent default if button is inside an anchor tag
+    const isInsideAnchor = e.currentTarget.closest('a');
+    
     // Only prevent default for non-submit buttons to avoid breaking form submissions
-    if (props.type !== 'submit') {
+    // and only if not inside an anchor tag
+    if (props.type !== 'submit' && !isInsideAnchor) {
       // Prevent double-tap zoom on mobile for non-submit buttons
       e.preventDefault();
     }

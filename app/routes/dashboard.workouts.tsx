@@ -480,7 +480,7 @@ export default function Workouts() {
     // Convert the Date to a dayjs object in user timezone, then format as YYYY-MM-DD
     const weekStartInUserTz = dayjs(weekStart).tz(USER_TIMEZONE).startOf("day").format("YYYY-MM-DD");
     params.set("weekStart", weekStartInUserTz);
-    weekFetcher.load(`/api/get-workout-week-v2?${params.toString()}`);
+    weekFetcher.load(`/api/get-workout-week?${params.toString()}`);
   };
 
   // Initialize week data on mount
