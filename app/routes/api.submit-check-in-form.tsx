@@ -5,6 +5,10 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import { Resend } from "resend";
+
+// Create a Resend instance
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function action({ request }: ActionFunctionArgs) {
   const supabase = createClient<Database>(
@@ -94,6 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
         id,
         form_id,
         client_id,
+        coach_id,
         status,
         expires_at,
         check_in_forms!inner (
@@ -214,7 +219,72 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "Failed to complete form" }, { status: 500 });
     }
 
+    // Send email notification to coach
+    try {
+      // Get the client's name
+      const { data: clientInfo } = await supabase
+        .from("users")
+        .select("name")
+        .eq("id", instance.client_id)
+        .single();
 
+      // Get the coach's email and notification preferences
+      const { data: coachInfo } = await supabase
+        .from("users")
+        .select("name, email, email_notifications")
+        .eq("id", instance.coach_id)
+        .single();
+
+      if (coachInfo?.email_notifications && coachInfo.email && clientInfo?.name) {
+        await resend.emails.send({
+          from: "Kava Training <noreply@kavatraining.com>",
+          to: coachInfo.email,
+          subject: `${clientInfo.name} submitted a check-in form!`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+              <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; padding: 24px; border-radius: 12px 12px 0 0;">
+                <h1 style="margin: 0; font-size: 24px; font-weight: bold;">New Check-In Form Submitted!</h1>
+              </div>
+              
+              <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 24px;">
+                <p style="margin: 0 0 16px 0; color: #374151; font-size: 16px;">Hi ${coachInfo.name},</p>
+                
+                <p style="margin: 0 0 20px 0; color: #374151; font-size: 16px;">
+                  Your client <strong>${clientInfo.name}</strong> has submitted a check-in form!
+                </p>
+                
+                <div style="background: #f3f4f6; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
+                  <p style="margin: 0; color: #374151; font-weight: 500;">Form: ${instance.check_in_forms[0]?.title || 'Check-in Form'}</p>
+                </div>
+                
+                <p style="margin: 20px 0; color: #374151; font-size: 16px;">
+                  Log in to your Kava Training dashboard to review their responses.
+                </p>
+                
+                <div style="text-align: center; margin: 32px 0;">
+                  <a href="${process.env.NODE_ENV === 'production' ? 'https://your-domain.com' : 'http://localhost:3000'}/dashboard/coach-access" 
+                     style="display: inline-block; background-color: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
+                    Review Form
+                  </a>
+                </div>
+                
+                <div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 24px; text-align: center;">
+                  <p style="margin: 0; color: #6b7280; font-size: 14px;">
+                    Keep up the great work coaching! 👊
+                  </p>
+                </div>
+              </div>
+            </div>
+          `,
+        });
+        console.log(`[CHECK-IN FORM] Coach notification email sent to ${coachInfo.email} for form submission by ${clientInfo.name}`);
+      } else {
+        console.log(`[CHECK-IN FORM] Coach notification skipped - email notifications disabled or coach/client not found`);
+      }
+    } catch (emailError) {
+      // Don't fail the submission if email fails
+      console.error("Error sending email notification to coach:", emailError);
+    }
 
     return json({ 
       success: true,
