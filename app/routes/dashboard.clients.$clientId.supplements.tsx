@@ -558,9 +558,9 @@ export default function ClientSupplements() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-2">
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-lg sm:text-xl font-semibold text-secondary dark:text-alabaster truncate">
-                                                          {supplement.name}
-                          </h3>
+                            <h3 className="text-lg sm:text-xl font-semibold text-secondary dark:text-alabaster break-words">
+                              {supplement.name}
+                            </h3>
                           {/* Show indicator if supplement was created today */}
                           {supplement.created_at && supplement.created_at.startsWith(currentDateString) && (
                             <div className="mt-1">

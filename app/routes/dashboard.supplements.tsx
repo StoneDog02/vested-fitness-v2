@@ -444,7 +444,7 @@ export default function Supplements() {
                 supplements.map((supplement: Supplement) => (
                   <div
                     key={supplement.id}
-                    className="flex items-start p-5 rounded-xl border border-gray-100 dark:border-gray-700 shadow-soft hover:shadow-medium transition-shadow duration-200 bg-white dark:bg-gray-700"
+                    className="flex items-start p-3 sm:p-5 rounded-xl border border-gray-100 dark:border-gray-700 shadow-soft hover:shadow-medium transition-shadow duration-200 bg-white dark:bg-gray-700"
                   >
                     <div className="flex-shrink-0 pt-1">
                       <input
@@ -460,11 +460,11 @@ export default function Supplements() {
                         }`}
                       />
                     </div>
-                    <div className="ml-4 flex-grow">
-                      <div className="mb-3">
+                    <div className="ml-2 sm:ml-4 flex-grow min-w-0">
+                      <div className="mb-2 sm:mb-3">
                         <label
                           htmlFor={`supplement-${supplement.id}`}
-                          className={`font-bold text-xl text-secondary dark:text-alabaster ${
+                          className={`font-bold text-lg sm:text-xl text-secondary dark:text-alabaster block break-words ${
                             isDaySubmitted || dayOffset !== 0 ? "cursor-not-allowed" : "cursor-pointer"
                           }`}
                         >
@@ -482,15 +482,15 @@ export default function Supplements() {
                           </div>
                         )}
                       </div>
-                      <div className="space-y-3">
-                        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                      <div className="space-y-2 sm:space-y-3">
+                        <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 sm:gap-x-6 sm:gap-y-2">
                           <div className="flex items-center">
-                            <span className="font-semibold text-sm text-gray-700 dark:text-gray-300 mr-2">Dosage:</span>
-                            <span className="text-sm text-gray-600 dark:text-gray-400">{supplement.dosage}</span>
+                            <span className="font-semibold text-sm text-gray-700 dark:text-gray-300 mr-2 flex-shrink-0">Dosage:</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400 break-words">{supplement.dosage}</span>
                           </div>
                           <div className="flex items-center">
-                            <span className="font-semibold text-sm text-gray-700 dark:text-gray-300 mr-2">Frequency:</span>
-                            <span className="text-sm text-gray-600 dark:text-gray-400">{supplement.frequency}</span>
+                            <span className="font-semibold text-sm text-gray-700 dark:text-gray-300 mr-2 flex-shrink-0">Frequency:</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400 break-words">{supplement.frequency}</span>
                           </div>
                         </div>
                         {supplement.instructions && (
