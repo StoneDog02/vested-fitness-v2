@@ -352,22 +352,19 @@ export default function Supplements() {
 
       {/* GET SUPPS Button */}
       <div className="mb-6 text-right">
-        <a
-          href="https://completenutritionlogan.com/collections/supplements"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex flex-col items-center gap-2"
-        >
-          <Button
-            variant="primary"
-            className="px-8 py-3 text-lg font-semibold"
+        <div className="inline-flex flex-col items-center gap-2">
+          <a
+            href="https://completenutritionlogan.com/discount/Mike15?redirect=%2Fcollections%2Fsupplements"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center rounded-xl font-semibold transition-all duration-300 ease-out bg-gradient-to-r from-primary to-primary-light hover:from-primary-dark hover:to-primary text-white hover:text-white shadow-soft hover:shadow-glow px-8 py-3 text-lg min-h-[48px] touch-manipulation select-none"
           >
             GET SUPPS
-          </Button>
+          </a>
           <span className="text-xs font-medium text-gray-600 dark:text-gray-400 tracking-wider">
-            USE CODE: MIKE15
+            Code MIKE15 applied at checkout
           </span>
-        </a>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
