@@ -191,12 +191,27 @@ export const loader: LoaderFunction = async ({ request }) => {
     process.env.SUPABASE_SERVICE_KEY!
   );
   
-  const { data: user } = await supabase
+  const { data: user, error: userError } = await supabase
     .from("users")
     .select("id, role, coach_id, starting_weight, current_weight")
     .eq("auth_id", authId)
     .single();
+  
+  if (userError) {
+    console.error("Dashboard: Failed to fetch user data:", {
+      error: userError,
+      authId: authId,
+      message: userError.message,
+      code: userError.code,
+      details: userError.details
+    });
+  }
     
+  if (!user) {
+    console.error("Dashboard: User not found for auth_id:", authId);
+    return redirect("/auth/login");
+  }
+  
   if (user) {
     const coachId = user.role === "coach" ? user.id : user.coach_id;
     if (user.role === "client") {

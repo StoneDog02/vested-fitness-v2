@@ -427,6 +427,8 @@ export interface Database {
 // Replace mock resetPassword with real implementation
 import { createClient } from "@supabase/supabase-js";
 import jwt from "jsonwebtoken";
+import fs from "fs";
+import path from "path";
 
 export const resetPassword = async (email: string): Promise<{ error: Error | null }> => {
   const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
@@ -474,6 +476,68 @@ export const validateAndRefreshToken = async (accessToken: string, refreshToken:
     return { valid: true };
   } catch (error) {
     return { valid: false, reason: "Token validation error", error };
+  }
+};
+
+/**
+ * Get the Supabase auth cookie name dynamically from SUPABASE_URL
+ * The cookie name format is: sb-{project-ref}-auth-token
+ * where project-ref is extracted from SUPABASE_URL (e.g., https://ckwcxmxbfffkknrnkdtk.supabase.co)
+ * 
+ * For local Supabase instances, it tries to read from supabase/.temp/project-ref file
+ */
+export const getSupabaseCookieName = (): string => {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error("SUPABASE_URL environment variable is not set");
+  }
+  
+  try {
+    const url = new URL(supabaseUrl);
+    const hostname = url.hostname;
+    
+    // For production Supabase URLs: https://{project-ref}.supabase.co
+    const match = hostname.match(/^([^.]+)\.supabase\.co$/);
+    if (match && match[1]) {
+      return `sb-${match[1]}-auth-token`;
+    }
+    
+    // For local Supabase instances (localhost or 127.0.0.1)
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.includes("localhost")) {
+      // Try to read from supabase/.temp/project-ref file (created by Supabase CLI)
+      try {
+        const projectRefPath = path.join(process.cwd(), "supabase", ".temp", "project-ref");
+        if (fs.existsSync(projectRefPath)) {
+          const projectRef = fs.readFileSync(projectRefPath, "utf-8").trim();
+          if (projectRef) {
+            return `sb-${projectRef}-auth-token`;
+          }
+        }
+      } catch (fileError) {
+        // File reading failed, continue to other fallbacks
+        console.warn("Could not read project-ref file:", fileError);
+      }
+      
+      // Try to extract from URL path if available
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      if (pathParts.length > 0 && pathParts[0].length > 10) {
+        // Assume it's a project ref if it looks like one (long alphanumeric string)
+        return `sb-${pathParts[0]}-auth-token`;
+      }
+      
+      // Final fallback: extract from existing cookies if available
+      // This will be handled by extractAuthFromCookie which finds any matching cookie
+      // But we need a name for setting cookies, so use a default
+      console.warn("Could not determine project ref for local Supabase, using default");
+      return "sb-localhost-auth-token";
+    }
+    
+    // Fallback: use hostname as project ref (for custom domains)
+    const projectRef = hostname.split('.')[0];
+    return `sb-${projectRef}-auth-token`;
+  } catch (e) {
+    console.error("Error parsing SUPABASE_URL:", e);
+    throw new Error("Invalid SUPABASE_URL format");
   }
 };
 

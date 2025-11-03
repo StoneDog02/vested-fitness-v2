@@ -1,5 +1,6 @@
 import { json, createCookie } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseCookieName } from "~/lib/supabase";
 
 export const action = async ({ request }: { request: Request }) => {
   try {
@@ -9,7 +10,8 @@ export const action = async ({ request }: { request: Request }) => {
     }
 
     // Set the HTTP-only cookie for the session (same as in auth.login.tsx)
-    const supabaseSession = createCookie("sb-ckwcxmxbfffkknrnkdtk-auth-token", {
+    const cookieName = getSupabaseCookieName();
+    const supabaseSession = createCookie(cookieName, {
       path: "/",
       httpOnly: true,
       sameSite: "lax",

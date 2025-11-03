@@ -1,15 +1,17 @@
 import { redirect, createCookie } from "@remix-run/node";
-
-const supabaseSession = createCookie("sb-ckwcxmxbfffkknrnkdtk-auth-token", {
-  path: "/",
-  httpOnly: true,
-  sameSite: "lax",
-  secure: process.env.NODE_ENV === "production",
-  maxAge: 0, // Expire immediately
-});
+import { getSupabaseCookieName } from "~/lib/supabase";
 
 export const loader = async () => {
   // Clear the cookie by setting it to an empty value and expiring it
+  const cookieName = getSupabaseCookieName();
+  const supabaseSession = createCookie(cookieName, {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 0, // Expire immediately
+  });
+  
   return redirect("/auth/login", {
     headers: {
       "Set-Cookie": await supabaseSession.serialize(""),

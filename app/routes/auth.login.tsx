@@ -8,6 +8,9 @@ import {
 } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
+import { getSupabaseCookieName } from "~/lib/supabase";
+import jwt from "jsonwebtoken";
+import { parse } from "cookie";
 
 export const meta: MetaFunction = () => {
   return [
@@ -24,16 +27,15 @@ type ActionData = {
   };
 };
 
-// Create a cookie instance for the Supabase session
-const supabaseSession = createCookie("sb-ckwcxmxbfffkknrnkdtk-auth-token", {
-  path: "/",
-  httpOnly: true,
-  sameSite: "lax",
-  secure: process.env.NODE_ENV === "production",
-  maxAge: 60 * 60 * 24 * 7, // 1 week
-});
+// Cookie name will be set dynamically in the action
 
 export const action: ActionFunction = async ({ request }) => {
+  // First, clear any existing auth cookies to prevent conflicts
+  const cookies = parse(request.headers.get("cookie") || "");
+  const authCookieKeys = Object.keys(cookies).filter(
+    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+  );
+  
   const formData = await request.formData();
   const email = formData.get("email")?.toString();
   const password = formData.get("password")?.toString();
@@ -65,32 +67,119 @@ export const action: ActionFunction = async ({ request }) => {
   }
 
   // Get user from users table by auth_id
+  const authId = signInData.user.id;
+  console.log("Login attempt - Auth user ID:", authId);
+  
   const { data: userRow, error: userError } = await supabase
     .from("users")
     .select("role")
-    .eq("auth_id", signInData.user.id)
-    .single();
+    .eq("auth_id", authId);
 
-  if (userError || !userRow) {
+  console.log("Login query result:", { 
+    userRow, 
+    userError, 
+    rowCount: userRow?.length || 0,
+    authId: authId
+  });
+  
+  // Also check what auth_id is in the database for this email
+  const { data: userByEmail, error: emailError } = await supabase
+    .from("users")
+    .select("id, auth_id, email, name")
+    .eq("email", email);
+  console.log("User by email query:", { userByEmail, emailError, count: userByEmail?.length || 0 });
+  
+  // Also check ALL users to see what's in the database
+  const { data: allUsers, error: allUsersError } = await supabase
+    .from("users")
+    .select("id, auth_id, email, name")
+    .limit(10);
+  console.log("Sample of users in database:", { allUsers, allUsersError, count: allUsers?.length || 0 });
+
+  // Handle the query result
+  if (userError) {
+    console.error("Login error querying users table:", userError);
     return json<ActionData>({
-      error: userError?.message || "User not found.",
+      error: userError.message || "Database error occurred.",
       fields: { email, password },
     });
   }
 
+  if (!userRow || userRow.length === 0) {
+    console.error("Login error: No user found with auth_id:", authId);
+    return json<ActionData>({
+      error: "User not found in database. Please contact support.",
+      fields: { email, password },
+    });
+  }
+
+  if (userRow.length > 1) {
+    console.error("Login error: Multiple users found with auth_id:", authId);
+    return json<ActionData>({
+      error: "Multiple user accounts found. Please contact support.",
+      fields: { email, password },
+    });
+  }
+
+  const user = userRow[0];
+
   // Set the Supabase session cookie
   if (signInData.session) {
+    const cookieName = getSupabaseCookieName();
+    console.log("Setting cookie with name:", cookieName);
+    console.log("Token auth_id:", authId);
+    
+    // Verify the token auth_id matches
+    try {
+      const decoded = jwt.decode(signInData.session.access_token) as Record<string, unknown> | null;
+      const tokenAuthId = decoded && typeof decoded === "object" && "sub" in decoded ? decoded.sub : undefined;
+      console.log("Token auth_id from access_token:", tokenAuthId);
+      if (tokenAuthId !== authId) {
+        console.error("⚠️ WARNING: Token auth_id mismatch!", { tokenAuthId, expectedAuthId: authId });
+      }
+    } catch (e) {
+      console.error("Error decoding token:", e);
+    }
+    
+    const supabaseSession = createCookie(cookieName, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 24 * 7, // 1 week
+    });
     const setCookie = await supabaseSession.serialize(
       JSON.stringify([
         signInData.session.access_token,
         signInData.session.refresh_token,
       ])
     );
+    
+    // Clear any old cookies that might have different auth_id values
+    // We need to clear all possible cookie names (in case there are multiple)
+    const headers = new Headers();
+    headers.set("Set-Cookie", setCookie);
+    
+    // Clear ALL existing auth cookies to prevent conflicts
+    for (const oldCookieKey of authCookieKeys) {
+      if (oldCookieKey !== cookieName) {
+        const oldCookie = createCookie(oldCookieKey, {
+          path: "/",
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          maxAge: 0, // Expire immediately
+        });
+        const clearOldCookie = await oldCookie.serialize("");
+        headers.append("Set-Cookie", clearOldCookie);
+      }
+    }
+    
     // Redirect based on role with Set-Cookie header
-    if (userRow.role === "coach") {
-      return redirect("/dashboard", { headers: { "Set-Cookie": setCookie } });
-    } else if (userRow.role === "client") {
-      return redirect("/dashboard", { headers: { "Set-Cookie": setCookie } });
+    if (user.role === "coach") {
+      return redirect("/dashboard", { headers });
+    } else if (user.role === "client") {
+      return redirect("/dashboard", { headers });
     }
   }
 

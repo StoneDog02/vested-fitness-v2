@@ -131,7 +131,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     // Fetch all exercises for workout templates
     const { data: exercisesRaw } = await supabase
       .from("workout_exercises")
-      .select("workout_day_id, id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data")
+      .select("workout_day_id, id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
       .in("workout_day_id", nonRestDayIds)
       .order("workout_day_id")
       .order("sequence_order", { ascending: true });
@@ -149,6 +149,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             groupsMap.set(groupKey, {
               id: groupKey,
               type: exercise.group_type,
+              notes: exercise.group_notes || null,
               exercises: []
             });
           }
@@ -160,6 +161,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             id: exercise.id,
             name: exercise.exercise_name,
             description: exercise.exercise_description,
+            notes: exercise.exercise_description || null,
             videoUrl: exercise.video_url,
             type: exercise.group_type,
             sets: setsData.map((set: any) => ({
@@ -259,7 +261,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       
     const { data: exercisesRaw } = await supabase
       .from("workout_exercises")
-      .select("workout_day_id, id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data")
+      .select("workout_day_id, id, group_type, sequence_order, exercise_name, exercise_description, video_url, sets_data, group_notes")
       .in("workout_day_id", nonRestDayIds)
       .order("workout_day_id")
       .order("sequence_order", { ascending: true });
@@ -305,6 +307,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             groupsMap.set(groupKey, {
               id: groupKey,
               type: exercise.group_type,
+              notes: exercise.group_notes || null,
               exercises: []
             });
           }
@@ -316,6 +319,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             id: exercise.id,
             name: exercise.exercise_name,
             description: exercise.exercise_description,
+            notes: exercise.exercise_description || null,
             videoUrl: exercise.video_url,
             type: exercise.group_type,
             sets: setsData.map((set: any) => ({

@@ -1977,13 +1977,56 @@ export default function ClientWorkouts() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="text-xs text-gray-dark dark:text-gray-light">
+                                <div className="text-xs text-gray-dark dark:text-gray-light mb-3">
                                   {shouldShowCompleted ? (
                                     <span className="text-green-600 font-medium">Completed this week</span>
                                   ) : (
                                     <span className="text-gray-500">Not completed yet</span>
                                   )}
                                 </div>
+                                
+                                {/* Coach Notes Section */}
+                                {(() => {
+                                  // Collect all notes from groups and exercises
+                                  const groupNotes = template.groups
+                                    ?.filter((group: any) => group.notes && group.notes.trim())
+                                    .map((group: any) => ({ type: 'group', text: group.notes, groupType: group.type })) || [];
+                                  
+                                  const exerciseNotes = template.groups
+                                    ?.flatMap((group: any) => 
+                                      (group.exercises || [])
+                                        .filter((ex: any) => ex.notes && ex.notes.trim())
+                                        .map((ex: any) => ({ type: 'exercise', text: ex.notes, exerciseName: ex.name, groupType: group.type }))
+                                    ) || [];
+                                  
+                                  const allNotes = [...groupNotes, ...exerciseNotes];
+                                  
+                                  if (allNotes.length === 0) return null;
+                                  
+                                  return (
+                                    <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                      <div className="space-y-2">
+                                        <h5 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
+                                          Coach Notes
+                                        </h5>
+                                        {groupNotes.map((note: any, idx: number) => (
+                                          <div key={`group-note-${idx}`} className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-2 border-l-4 border-blue-500">
+                                            <p className="text-xs text-blue-800 dark:text-blue-200 font-medium">
+                                              <span className="font-semibold">{note.groupType}:</span> {note.text}
+                                            </p>
+                                          </div>
+                                        ))}
+                                        {exerciseNotes.map((note: any, idx: number) => (
+                                          <div key={`exercise-note-${idx}`} className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-2 border-l-4 border-gray-400 dark:border-gray-600">
+                                            <p className="text-xs text-gray-700 dark:text-gray-300">
+                                              <span className="font-semibold">{note.exerciseName}:</span> {note.text}
+                                            </p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             );
                           });
@@ -2124,13 +2167,56 @@ export default function ClientWorkouts() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="text-xs text-gray-dark dark:text-gray-light">
+                                <div className="text-xs text-gray-dark dark:text-gray-light mb-3">
                                   {isCompleted ? (
                                     <span className="text-green-600 font-medium">Completed this week</span>
                                   ) : (
                                     <span className="text-gray-500">Not completed yet</span>
                                   )}
                                 </div>
+                                
+                                {/* Coach Notes Section */}
+                                {(() => {
+                                  // Collect all notes from groups and exercises
+                                  const groupNotes = day.workout?.exercises
+                                    ?.filter((group: any) => group.notes && group.notes.trim())
+                                    .map((group: any) => ({ type: 'group', text: group.notes, groupType: group.type })) || [];
+                                  
+                                  const exerciseNotes = day.workout?.exercises
+                                    ?.flatMap((group: any) => 
+                                      (group.exercises || [])
+                                        .filter((ex: any) => ex.notes && ex.notes.trim())
+                                        .map((ex: any) => ({ type: 'exercise', text: ex.notes, exerciseName: ex.name, groupType: group.type }))
+                                    ) || [];
+                                  
+                                  const allNotes = [...groupNotes, ...exerciseNotes];
+                                  
+                                  if (allNotes.length === 0) return null;
+                                  
+                                  return (
+                                    <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                      <div className="space-y-2">
+                                        <h5 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
+                                          Coach Notes
+                                        </h5>
+                                        {groupNotes.map((note: any, idx: number) => (
+                                          <div key={`group-note-${idx}`} className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-2 border-l-4 border-blue-500">
+                                            <p className="text-xs text-blue-800 dark:text-blue-200 font-medium">
+                                              <span className="font-semibold">{note.groupType}:</span> {note.text}
+                                            </p>
+                                          </div>
+                                        ))}
+                                        {exerciseNotes.map((note: any, idx: number) => (
+                                          <div key={`exercise-note-${idx}`} className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-2 border-l-4 border-gray-400 dark:border-gray-600">
+                                            <p className="text-xs text-gray-700 dark:text-gray-300">
+                                              <span className="font-semibold">{note.exerciseName}:</span> {note.text}
+                                            </p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             );
                           })}
@@ -2229,13 +2315,56 @@ export default function ClientWorkouts() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="text-xs text-gray-dark dark:text-gray-light">
+                                <div className="text-xs text-gray-dark dark:text-gray-light mb-3">
                                   {isCompleted ? (
                                     <span className="text-green-600 font-medium">Completed this week</span>
                                   ) : (
                                     <span className="text-gray-500">Not completed yet</span>
                                   )}
                                 </div>
+                                
+                                {/* Coach Notes Section */}
+                                {(() => {
+                                  // Collect all notes from groups and exercises
+                                  const groupNotes = day.workout?.exercises
+                                    ?.filter((group: any) => group.notes && group.notes.trim())
+                                    .map((group: any) => ({ type: 'group', text: group.notes, groupType: group.type })) || [];
+                                  
+                                  const exerciseNotes = day.workout?.exercises
+                                    ?.flatMap((group: any) => 
+                                      (group.exercises || [])
+                                        .filter((ex: any) => ex.notes && ex.notes.trim())
+                                        .map((ex: any) => ({ type: 'exercise', text: ex.notes, exerciseName: ex.name, groupType: group.type }))
+                                    ) || [];
+                                  
+                                  const allNotes = [...groupNotes, ...exerciseNotes];
+                                  
+                                  if (allNotes.length === 0) return null;
+                                  
+                                  return (
+                                    <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                      <div className="space-y-2">
+                                        <h5 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
+                                          Coach Notes
+                                        </h5>
+                                        {groupNotes.map((note: any, idx: number) => (
+                                          <div key={`group-note-${idx}`} className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-2 border-l-4 border-blue-500">
+                                            <p className="text-xs text-blue-800 dark:text-blue-200 font-medium">
+                                              <span className="font-semibold">{note.groupType}:</span> {note.text}
+                                            </p>
+                                          </div>
+                                        ))}
+                                        {exerciseNotes.map((note: any, idx: number) => (
+                                          <div key={`exercise-note-${idx}`} className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-2 border-l-4 border-gray-400 dark:border-gray-600">
+                                            <p className="text-xs text-gray-700 dark:text-gray-300">
+                                              <span className="font-semibold">{note.exerciseName}:</span> {note.text}
+                                            </p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             );
                           })}

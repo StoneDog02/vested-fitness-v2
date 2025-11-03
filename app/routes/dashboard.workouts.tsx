@@ -1124,9 +1124,36 @@ export default function Workouts() {
                             className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
                           >
                             <div className="flex items-center justify-between mb-4">
-                              <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
-                                {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
-                              </h3>
+                              <div className="flex-1">
+                                <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                                  {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
+                                </h3>
+                                {/* Coach Notes - directly below the title */}
+                                {(() => {
+                                  const groupNotes = group.notes ? [{ type: 'group', text: group.notes, groupType: group.type }] : [];
+                                  const exerciseNotes = (group.exercises || [])
+                                    .filter((ex: any) => ex.notes && ex.notes.trim())
+                                    .map((ex: any) => ({ type: 'exercise', text: ex.notes, exerciseName: ex.name }));
+                                  const allNotes = [...groupNotes, ...exerciseNotes];
+                                  
+                                  if (allNotes.length === 0) return null;
+                                  
+                                  return (
+                                    <div className="mt-2 space-y-1">
+                                      {groupNotes.map((note: any, noteIdx: number) => (
+                                        <p key={`group-note-${noteIdx}`} className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+                                          {note.text}
+                                        </p>
+                                      ))}
+                                      {exerciseNotes.map((note: any, noteIdx: number) => (
+                                        <p key={`exercise-note-${noteIdx}`} className="text-sm text-gray-600 dark:text-gray-400">
+                                          {note.text}
+                                        </p>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
                               <div className="flex items-center gap-2">
                                 <label
                                   htmlFor={`group-${group.id}`}
@@ -1143,6 +1170,7 @@ export default function Workouts() {
                                 />
                               </div>
                             </div>
+                            
                             <WorkoutCard
                               exercises={group.exercises || []}
                               type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}
@@ -1217,9 +1245,36 @@ export default function Workouts() {
                       className="bg-white dark:bg-secondary-light/5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow duration-200 p-4 sm:p-6"
                     >
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
-                          {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
-                        </h3>
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-secondary dark:text-alabaster">
+                            {group.exercises?.map((ex: any) => ex.name).join(" + ")} - {group.type === "Super Set" || group.type === "SuperSet" ? "Super Set" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant Set" : "Single"}
+                          </h3>
+                          {/* Coach Notes - directly below the title */}
+                          {(() => {
+                            const groupNotes = group.notes ? [{ type: 'group', text: group.notes, groupType: group.type }] : [];
+                            const exerciseNotes = (group.exercises || [])
+                              .filter((ex: any) => ex.notes && ex.notes.trim())
+                              .map((ex: any) => ({ type: 'exercise', text: ex.notes, exerciseName: ex.name }));
+                            const allNotes = [...groupNotes, ...exerciseNotes];
+                            
+                            if (allNotes.length === 0) return null;
+                            
+                            return (
+                              <div className="mt-2 space-y-1">
+                                {groupNotes.map((note: any, noteIdx: number) => (
+                                  <p key={`group-note-${noteIdx}`} className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+                                    {note.text}
+                                  </p>
+                                ))}
+                                {exerciseNotes.map((note: any, noteIdx: number) => (
+                                  <p key={`exercise-note-${noteIdx}`} className="text-sm text-gray-600 dark:text-gray-400">
+                                    {note.text}
+                                  </p>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
                         <div className="flex items-center gap-2">
                           <label
                             htmlFor={`group-${group.id}`}
@@ -1255,6 +1310,7 @@ export default function Workouts() {
                           />
                         </div>
                       </div>
+                      
                       <WorkoutCard
                         exercises={group.exercises || []}
                         type={group.type === "Super Set" || group.type === "SuperSet" ? "Super" : group.type === "Giant Set" || group.type === "GiantSet" ? "Giant" : "Single"}

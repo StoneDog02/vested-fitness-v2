@@ -86,14 +86,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
     );
-    const { data: userData } = await supabase
+    const { data: userData, error: userError } = await supabase
       .from("users")
       .select("id, name, email, role, avatar_url, font_size, access_status, stripe_customer_id, chat_bubble_color")
       .eq("auth_id", authId)
       .single();
+    
+    if (userError) {
+      console.error("Root loader: Failed to fetch user data:", {
+        error: userError,
+        authId: authId,
+        message: userError.message,
+        code: userError.code,
+        details: userError.details
+      });
+    }
+    
     if (userData) {
       role = userData.role;
       user = userData;
+    } else if (authId) {
+      // Only log if we have an authId but no user data (potential data issue)
+      console.warn("Root loader: User data not found for auth_id:", authId);
     }
   }
   return json({ user: user ? { id: String(user.id), role: user.role as 'coach' | 'client', chat_bubble_color: user.chat_bubble_color } as UserContextType : undefined });

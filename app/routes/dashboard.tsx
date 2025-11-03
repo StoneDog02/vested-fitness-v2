@@ -9,7 +9,7 @@ import { Buffer } from "buffer";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import React from "react";
 import { UserContext } from "~/context/UserContext";
-import { extractAuthFromCookie, validateAndRefreshToken } from "~/lib/supabase";
+import { extractAuthFromCookie, validateAndRefreshToken, getSupabaseCookieName } from "~/lib/supabase";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const cookies = parse(request.headers.get("cookie") || "");
@@ -71,12 +71,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     process.env.SUPABASE_SERVICE_KEY!
   );
   
-  const { data: userData } = await supabase
+  const { data: userData, error: userError } = await supabase
     .from("users")
     .select("id, name, email, role, avatar_url, font_size, access_status, stripe_customer_id, chat_bubble_color, starting_weight, current_weight, created_at, coach_id")
     .eq("auth_id", authId)
     .single();
     
+  if (userError) {
+    console.error("Failed to fetch user data:", {
+      error: userError,
+      authId: authId,
+      message: userError.message,
+      code: userError.code,
+      details: userError.details
+    });
+  }
+  
   if (userData) {
     role = userData.role;
     user = userData;
@@ -84,6 +94,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const stripeModule = await import("~/utils/stripe.server");
       currentInvoice = await stripeModule.getCurrentOpenInvoice(userData.stripe_customer_id);
     }
+  } else {
+    console.error("User data not found for auth_id:", authId);
+    // If user data is not found, redirect to login
+    return redirect("/auth/login");
   }
   
   // Prepare response
@@ -95,7 +109,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   
   // If we need to refresh tokens, set the new cookie
   if (needsTokenRefresh && newTokens) {
-    const supabaseSession = createCookie("sb-ckwcxmxbfffkknrnkdtk-auth-token", {
+    const cookieName = getSupabaseCookieName();
+    const supabaseSession = createCookie(cookieName, {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
