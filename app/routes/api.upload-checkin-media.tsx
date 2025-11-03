@@ -98,7 +98,8 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!file || !clientId || !recordingType) {
-      return json({ error: "Missing required fields" }, { status: 400 });
+      console.error('Missing required fields:', { hasFile: !!file, hasClientId: !!clientId, hasRecordingType: !!recordingType });
+      return json({ error: "Missing required fields: file, clientId, and recordingType are required" }, { status: 400 });
     }
 
     // Validate file type
@@ -107,22 +108,46 @@ export async function action({ request }: ActionFunctionArgs) {
       : ['audio/webm', 'audio/mp3', 'audio/wav', 'audio/m4a'];
 
     if (!allowedTypes.includes(file.type)) {
-      return json({ error: "Invalid file type" }, { status: 400 });
+      console.error('Invalid file type:', { fileType: file.type, recordingType, allowedTypes });
+      return json({ error: `Invalid file type. Expected ${allowedTypes.join(', ')} but got ${file.type}` }, { status: 400 });
     }
 
     // Validate file size (50MB max for video, 10MB for audio)
     const maxSize = recordingType === 'video' ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
     if (file.size > maxSize) {
-      return json({ error: "File too large" }, { status: 400 });
+      const maxSizeMB = Math.round(maxSize / 1024 / 1024);
+      const fileSizeMB = Math.round(file.size / 1024 / 1024);
+      console.error('File too large:', { fileSize: file.size, maxSize, fileSizeMB, maxSizeMB });
+      return json({ error: `File too large. Maximum size is ${maxSizeMB}MB, but file is ${fileSizeMB}MB` }, { status: 400 });
     }
 
-    // Generate unique filename
+    // Validate client exists and belongs to this coach (also get name for later use)
+    const { data: client, error: clientError } = await supabase
+      .from("users")
+      .select("id, coach_id, name")
+      .eq("id", clientId)
+      .single();
+
+    if (clientError || !client) {
+      console.error('Client validation error:', clientError);
+      return json({ error: "Client not found" }, { status: 404 });
+    }
+
+    if (client.coach_id !== user.id) {
+      console.error('Client does not belong to coach:', { clientId, clientCoachId: client.coach_id, userId: user.id });
+      return json({ error: "Unauthorized - client does not belong to this coach" }, { status: 403 });
+    }
+
+    // Generate unique filename with random component to avoid collisions
     const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(2, 9);
     const fileExtension = file.name.split('.').pop() || 'webm';
-    const fileName = `checkin-${clientId}-${timestamp}.${fileExtension}`;
+    const fileName = `checkin-${clientId}-${timestamp}-${randomId}.${fileExtension}`;
     const filePath = `checkins/${user.id}/${fileName}`;
 
-    // Upload to Supabase Storage
+    console.log('Uploading file to storage:', { filePath, fileSize: file.size, fileType: file.type });
+
+    // Upload to Supabase Storage with better error handling
     const { error: uploadError } = await supabase.storage
       .from('checkin-media')
       .upload(filePath, file, {
@@ -131,8 +156,28 @@ export async function action({ request }: ActionFunctionArgs) {
       });
 
     if (uploadError) {
-      console.error('Upload error:', uploadError);
-      return json({ error: "Failed to upload file" }, { status: 500 });
+      console.error('Storage upload error:', {
+        error: uploadError,
+        message: uploadError.message,
+        statusCode: uploadError.statusCode,
+        errorCode: uploadError.error,
+        filePath
+      });
+      
+      // Provide more specific error messages
+      if (uploadError.message?.includes('already exists') || uploadError.statusCode === '409') {
+        return json({ error: "File already exists. Please try again." }, { status: 409 });
+      }
+      
+      if (uploadError.message?.includes('bucket') || uploadError.statusCode === '404') {
+        return json({ error: "Storage bucket not found. Please contact support." }, { status: 500 });
+      }
+      
+      if (uploadError.statusCode === '413' || uploadError.message?.includes('too large')) {
+        return json({ error: "File is too large for upload" }, { status: 413 });
+      }
+      
+      return json({ error: `Upload failed: ${uploadError.message || 'Unknown error'}` }, { status: 500 });
     }
 
     // Get public URL
@@ -148,13 +193,7 @@ export async function action({ request }: ActionFunctionArgs) {
       thumbnailUrl = urlData.publicUrl; // Placeholder
     }
 
-    // Get client name for better recording label
-    const { data: client } = await supabase
-      .from("users")
-      .select("name")
-      .eq("id", clientId)
-      .single();
-
+    // Use client name from validation query above
     const clientName = client?.name || 'Client';
     const firstName = clientName.split(' ')[0]; // Get just the first name
     const recordingLabel = transcript && transcript.trim() 
@@ -183,6 +222,15 @@ export async function action({ request }: ActionFunctionArgs) {
       transcript: checkInData.transcript ? `${checkInData.transcript.substring(0, 50)}...` : null
     });
 
+    console.log('Creating check-in record:', {
+      clientId,
+      coachId: user.id,
+      recordingType,
+      hasVideoUrl: !!checkInData.video_url,
+      hasAudioUrl: !!checkInData.audio_url,
+      hasTranscript: !!checkInData.transcript
+    });
+
     const { data: checkIn, error: checkInError } = await supabase
       .from("check_ins")
       .insert(checkInData)
@@ -190,8 +238,28 @@ export async function action({ request }: ActionFunctionArgs) {
       .single();
 
     if (checkInError) {
-      console.error('Check-in creation error:', checkInError);
-      return json({ error: "Failed to create check-in" }, { status: 500 });
+      console.error('Check-in creation error:', {
+        error: checkInError,
+        message: checkInError.message,
+        code: checkInError.code,
+        details: checkInError.details,
+        hint: checkInError.hint,
+        checkInData
+      });
+      
+      // Try to clean up the uploaded file if check-in creation fails
+      try {
+        await supabase.storage
+          .from('checkin-media')
+          .remove([filePath]);
+        console.log('Cleaned up uploaded file after check-in creation failure');
+      } catch (cleanupError) {
+        console.error('Failed to clean up file after error:', cleanupError);
+      }
+      
+      return json({ 
+        error: `Failed to create check-in: ${checkInError.message || 'Database error'}` 
+      }, { status: 500 });
     }
 
     console.log('Check-in created successfully:', {

@@ -3,6 +3,7 @@ import Modal from "~/components/ui/Modal";
 import Button from "~/components/ui/Button";
 import VideoRecorder from "~/components/ui/VideoRecorder";
 import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
+import { useToast } from "~/context/ToastContext";
 
 interface AddCheckInModalProps {
   isOpen: boolean;
@@ -21,11 +22,13 @@ export default function AddCheckInModal({
   clientId,
   completedForms = [],
 }: AddCheckInModalProps) {
+  const toast = useToast();
   const [thisWeek, setThisWeek] = useState("");
   const [showRecorder, setShowRecorder] = useState(false);
   const [recordingType, setRecordingType] = useState<'video' | 'audio'>('video');
   const [recordingData, setRecordingData] = useState<{ blob: Blob; duration: number; type: 'video' | 'audio'; transcript?: string } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string>("");
   const [showPreview, setShowPreview] = useState(false);
   const [expandedForms, setExpandedForms] = useState<Set<string>>(new Set());
 
@@ -46,6 +49,7 @@ export default function AddCheckInModal({
     if (!thisWeek.trim() && !recordingData) return;
     
     setIsUploading(true);
+    setUploadProgress("");
     
     try {
       // If there's recording data, upload it first
@@ -53,41 +57,117 @@ export default function AddCheckInModal({
         console.log('Uploading recording data:', {
           hasTranscript: !!recordingData.transcript,
           transcriptLength: recordingData.transcript?.length,
-          transcriptPreview: recordingData.transcript?.substring(0, 100)
+          transcriptPreview: recordingData.transcript?.substring(0, 100),
+          fileSize: recordingData.blob.size,
+          duration: recordingData.duration
         });
         
-        const formData = new FormData();
+        // Upload with retry logic and timeout
+        const uploadWithRetry = async (retries = 3): Promise<Response> => {
+          for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+              setUploadProgress(`Uploading${attempt > 1 ? ` (attempt ${attempt}/${retries})` : ''}...`);
+              
+              // Recreate FormData for each attempt (FormData cannot be reused after being sent)
+              const formData = new FormData();
+              
+              // Create a proper File object from the blob with unique filename for each attempt
+              const timestamp = Date.now();
+              const randomId = Math.random().toString(36).substring(2, 9);
+              const fileName = `recording-${timestamp}-${randomId}.${recordingData.type === 'video' ? 'webm' : 'webm'}`;
+              const file = new File([recordingData.blob], fileName, { 
+                type: recordingData.type === 'video' ? 'video/webm' : 'audio/webm' 
+              });
+              
+              formData.append('file', file);
+              formData.append('clientId', clientId);
+              formData.append('recordingType', recordingData.type);
+              formData.append('duration', recordingData.duration.toString());
+              if (recordingData.transcript) {
+                formData.append('transcript', recordingData.transcript);
+              }
+              
+              // Create AbortController for timeout
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for large videos
+              
+              try {
+                const response = await fetch('/api/upload-checkin-media', {
+                  method: 'POST',
+                  body: formData,
+                  signal: controller.signal,
+                });
+                
+                clearTimeout(timeout);
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  let errorMessage = `Upload failed: ${response.status}`;
+                  
+                  try {
+                    const errorData = JSON.parse(errorText);
+                    errorMessage = errorData.error || errorMessage;
+                  } catch {
+                    errorMessage = errorText || errorMessage;
+                  }
+                  
+                  // Don't retry on client errors (400, 401, 403, 404)
+                  if (response.status >= 400 && response.status < 500) {
+                    throw new Error(errorMessage);
+                  }
+                  
+                  // Retry on server errors (500+) or network errors
+                  if (attempt < retries) {
+                    const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+                    setUploadProgress(`Upload failed, retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                  }
+                  
+                  throw new Error(errorMessage);
+                }
+                
+                return response;
+              } catch (fetchError) {
+                clearTimeout(timeout);
+                
+                if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+                  throw new Error('Upload timeout - the file may be too large or your connection is slow. Please try again.');
+                }
+                
+                // Retry on network errors
+                if (attempt < retries && fetchError instanceof Error) {
+                  const delay = Math.pow(2, attempt) * 1000;
+                  setUploadProgress(`Connection error, retrying in ${delay / 1000}s...`);
+                  await new Promise(resolve => setTimeout(resolve, delay));
+                  continue;
+                }
+                
+                throw fetchError;
+              }
+            } catch (error) {
+              if (attempt === retries) {
+                throw error;
+              }
+            }
+          }
+          
+          throw new Error('Max retries exceeded');
+        };
         
-        // Create a proper File object from the blob
-        const fileName = `recording.${recordingData.type === 'video' ? 'webm' : 'webm'}`;
-        const file = new File([recordingData.blob], fileName, { 
-          type: recordingData.type === 'video' ? 'video/webm' : 'audio/webm' 
-        });
-        
-        formData.append('file', file);
-        formData.append('clientId', clientId);
-        formData.append('recordingType', recordingData.type);
-        formData.append('duration', recordingData.duration.toString());
-        if (recordingData.transcript) {
-          formData.append('transcript', recordingData.transcript);
-        }
-        
-        const response = await fetch('/api/upload-checkin-media', {
-          method: 'POST',
-          body: formData,
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Upload response:', response.status, errorText);
-          throw new Error(`Failed to upload recording: ${response.status} ${errorText}`);
-        }
+        const response = await uploadWithRetry();
+        const result = await response.json();
         
         // Recording uploaded successfully - the check-in was created by the API
-        // No need to call onSubmit since the check-in already exists
+        toast.success(
+          'Check-In Sent Successfully',
+          `Your ${recordingData.type === 'video' ? 'video' : 'audio'} check-in has been uploaded and sent.`
+        );
+        
         setThisWeek("");
         setRecordingData(null);
         setShowRecorder(false);
+        setUploadProgress("");
         onClose();
         
         // Reload the page to show the new check-in
@@ -102,7 +182,17 @@ export default function AddCheckInModal({
       }
     } catch (error) {
       console.error('Error submitting check-in:', error);
-      alert('Failed to submit check-in. Please try again.');
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Failed to submit check-in. Please try again.';
+      
+      toast.error(
+        'Upload Failed',
+        errorMessage
+      );
+      
+      // Don't close the modal on error so user can retry
+      setUploadProgress("");
     } finally {
       setIsUploading(false);
     }
@@ -380,7 +470,7 @@ export default function AddCheckInModal({
             variant="primary" 
             disabled={(!thisWeek.trim() && !recordingData) || isUploading}
           >
-            {isUploading ? 'Uploading...' : 'Send Notes'}
+            {isUploading ? (uploadProgress || 'Uploading...') : 'Send Notes'}
           </Button>
         </div>
       </form>
