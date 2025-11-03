@@ -28,6 +28,7 @@ type ActionData = {
   message?: string;
   clientSecret?: string | null;
   free?: boolean;
+  paymentSucceeded?: boolean;
 };
 
 // Utility to generate a slug from a name
@@ -226,13 +227,27 @@ export const action: ActionFunction = async ({ request }) => {
           });
         }
         
-        // Pass clientSecret to the frontend for Stripe.js confirmation (paid products)
+        // Handle payment status - if payment already succeeded, no confirmation needed
+        if (data.paymentSucceeded) {
+          console.log('[REGISTRATION] Payment already succeeded - no confirmation needed');
+          return json<ActionData>({
+            fields: { name: '', email: '', password: '', userType: role },
+            error: undefined,
+            success: true,
+            message: `Account created! Payment processed successfully. We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
+            clientSecret: null,
+            paymentSucceeded: true,
+          });
+        }
+        
+        // Pass clientSecret to the frontend for Stripe.js confirmation (paid products that need confirmation)
         return json<ActionData>({
           fields: { name: '', email: '', password: '', userType: role },
           error: undefined,
           success: true,
           message: `Account created! We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
           clientSecret: data.clientSecret || null,
+          paymentSucceeded: false,
         });
       } catch (e) {
         console.error('Failed to create Stripe subscription:', e);
@@ -466,7 +481,18 @@ function ClientOnlyRegisterForm(props: any) {
       return;
     }
     
-    if (clientSecret) {
+    // Handle case where payment already succeeded on the server
+    if (actionData?.paymentSucceeded) {
+      console.log('[FRONTEND] Payment already succeeded - no confirmation needed');
+      setPaymentSuccess(true);
+      setPaymentLoading(false);
+      setPaymentError(null);
+      return;
+    }
+    
+    // Only confirm payment if we have a clientSecret and payment hasn't already succeeded
+    if (clientSecret && !actionData?.paymentSucceeded) {
+      console.log('[FRONTEND] Confirming payment with clientSecret');
       // Confirm payment intent with Stripe.js
       setPaymentLoading(true);
       setPaymentError(null);
@@ -477,16 +503,31 @@ function ClientOnlyRegisterForm(props: any) {
           setPaymentLoading(false);
           return;
         }
-        const result = await stripe.confirmCardPayment(clientSecret);
-        if (result.error) {
-          setPaymentError(result.error.message || 'Payment confirmation failed');
-        } else if (result.paymentIntent && result.paymentIntent.status === 'succeeded') {
-          setPaymentSuccess(true);
+        try {
+          const result = await stripe.confirmCardPayment(clientSecret);
+          if (result.error) {
+            console.error('[FRONTEND] Payment confirmation error:', result.error);
+            setPaymentError(result.error.message || 'Payment confirmation failed');
+          } else if (result.paymentIntent && result.paymentIntent.status === 'succeeded') {
+            console.log('[FRONTEND] Payment confirmed successfully');
+            setPaymentSuccess(true);
+          } else {
+            console.log('[FRONTEND] Payment intent status:', result.paymentIntent?.status);
+            setPaymentSuccess(result.paymentIntent?.status === 'succeeded');
+          }
+        } catch (err: any) {
+          console.error('[FRONTEND] Error confirming payment:', err);
+          setPaymentError(err.message || 'Payment confirmation failed');
         }
         setPaymentLoading(false);
       });
+    } else if (!clientSecret && !actionData?.paymentSucceeded && !actionData?.free) {
+      // If we don't have a clientSecret and payment hasn't succeeded, there might be an issue
+      console.warn('[FRONTEND] No clientSecret and payment not succeeded - this might indicate a problem');
+      // Don't set an error immediately - the subscription might be processing
+      // But we should log this for debugging
     }
-  }, [clientSecret, actionData?.free]);
+  }, [clientSecret, actionData?.free, actionData?.paymentSucceeded]);
 
   // Unified form submit handler
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

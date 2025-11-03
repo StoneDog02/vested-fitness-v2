@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from '~/lib/supabase';
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-06-30.basil' });
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-04-30.basil' });
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
@@ -36,23 +36,107 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (event.type === 'customer.subscription.created') {
       const subscription = event.data.object as Stripe.Subscription;
       console.log('[WEBHOOK] Subscription created:', subscription.id);
+      console.log('[WEBHOOK] Subscription metadata:', subscription.metadata);
+      console.log('[WEBHOOK] Subscription status:', subscription.status);
       
-      // Create database record for recurring subscription
-      const { error } = await supabase
-        .from('recurring_subscriptions')
-        .insert({
-          user_id: subscription.metadata.userId || subscription.metadata.user_id,
-          stripe_subscription_id: subscription.id,
-          price_id: subscription.items.data[0]?.price.id,
-          status: subscription.status,
-          current_period_start: new Date((subscription as any).current_period_start * 1000),
-          current_period_end: new Date((subscription as any).current_period_end * 1000)
-        });
+      // Extract user_id from metadata
+      const userId = subscription.metadata.userId || subscription.metadata.user_id;
       
-      if (error) {
-        console.error('[WEBHOOK] Failed to create subscription record:', error);
+      if (!userId) {
+        console.error('[WEBHOOK] WARNING: No userId found in subscription metadata for subscription:', subscription.id);
+        console.error('[WEBHOOK] Subscription customer:', subscription.customer);
+        // Try to find user by stripe_customer_id as fallback
+        if (typeof subscription.customer === 'string') {
+          const { data: user } = await supabase
+            .from('users')
+            .select('id')
+            .eq('stripe_customer_id', subscription.customer)
+            .single();
+          
+          if (user) {
+            console.log('[WEBHOOK] Found user by stripe_customer_id:', user.id);
+            // Use the found user_id
+            const userIdFromCustomer = user.id;
+            
+            // Create database record for recurring subscription
+            const { error } = await supabase
+              .from('recurring_subscriptions')
+              .insert({
+                user_id: userIdFromCustomer,
+                stripe_subscription_id: subscription.id,
+                price_id: subscription.items.data[0]?.price.id,
+                status: subscription.status,
+                current_period_start: new Date((subscription as any).current_period_start * 1000),
+                current_period_end: new Date((subscription as any).current_period_end * 1000)
+              });
+            
+            if (error) {
+              // Check if it's a duplicate key error (subscription already exists)
+              if (error.code === '23505') {
+                console.log('[WEBHOOK] Subscription record already exists, updating instead');
+                const { error: updateError } = await supabase
+                  .from('recurring_subscriptions')
+                  .update({
+                    status: subscription.status,
+                    current_period_start: new Date((subscription as any).current_period_start * 1000),
+                    current_period_end: new Date((subscription as any).current_period_end * 1000),
+                    updated_at: new Date()
+                  })
+                  .eq('stripe_subscription_id', subscription.id);
+                
+                if (updateError) {
+                  console.error('[WEBHOOK] Failed to update existing subscription record:', updateError);
+                } else {
+                  console.log('[WEBHOOK] Updated existing subscription record for:', subscription.id);
+                }
+              } else {
+                console.error('[WEBHOOK] Failed to create subscription record:', error);
+              }
+            } else {
+              console.log('[WEBHOOK] Created subscription record for:', subscription.id);
+            }
+          } else {
+            console.error('[WEBHOOK] Could not find user by stripe_customer_id:', subscription.customer);
+          }
+        }
       } else {
-        console.log('[WEBHOOK] Created subscription record for:', subscription.id);
+        // Create database record for recurring subscription
+        const { error } = await supabase
+          .from('recurring_subscriptions')
+          .insert({
+            user_id: userId,
+            stripe_subscription_id: subscription.id,
+            price_id: subscription.items.data[0]?.price.id,
+            status: subscription.status,
+            current_period_start: new Date((subscription as any).current_period_start * 1000),
+            current_period_end: new Date((subscription as any).current_period_end * 1000)
+          });
+        
+        if (error) {
+          // Check if it's a duplicate key error (subscription already exists)
+          if (error.code === '23505') {
+            console.log('[WEBHOOK] Subscription record already exists, updating instead');
+            const { error: updateError } = await supabase
+              .from('recurring_subscriptions')
+              .update({
+                status: subscription.status,
+                current_period_start: new Date((subscription as any).current_period_start * 1000),
+                current_period_end: new Date((subscription as any).current_period_end * 1000),
+                updated_at: new Date()
+              })
+              .eq('stripe_subscription_id', subscription.id);
+            
+            if (updateError) {
+              console.error('[WEBHOOK] Failed to update existing subscription record:', updateError);
+            } else {
+              console.log('[WEBHOOK] Updated existing subscription record for:', subscription.id);
+            }
+          } else {
+            console.error('[WEBHOOK] Failed to create subscription record:', error);
+          }
+        } else {
+          console.log('[WEBHOOK] Created subscription record for:', subscription.id, 'user_id:', userId);
+        }
       }
     }
     

@@ -57,7 +57,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     const customerId = user.stripe_customer_id;
     // Find latest open invoice
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-06-30.basil' });
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-04-30.basil' });
     const invoices = await stripe.invoices.list({ customer: customerId, status: 'open', limit: 1 });
     if (!invoices.data.length) {
       return json({ error: 'No open invoices to pay.' }, { status: 400 });

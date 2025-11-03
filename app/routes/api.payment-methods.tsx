@@ -60,7 +60,7 @@ async function getUserAndCustomerId(request: Request) {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { customerId } = await getUserAndCustomerId(request);
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-06-30.basil' });
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-04-30.basil' });
     const paymentMethods = await stripe.paymentMethods.list({ customer: customerId, type: 'card' });
     return json({ paymentMethods: paymentMethods.data });
   } catch (error) {
@@ -72,7 +72,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const { customerId } = await getUserAndCustomerId(request);
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-06-30.basil' });
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-04-30.basil' });
     if (request.method === 'POST') {
       // Add payment method (expects paymentMethodId in body)
       const { paymentMethodId, setAsDefault } = await request.json();
