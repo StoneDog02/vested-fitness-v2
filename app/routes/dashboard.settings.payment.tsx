@@ -1,7 +1,7 @@
 import { useState, useEffect , useRef } from "react";
 import type { MetaFunction, LoaderFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData, useFetcher, useMatches } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import { parse } from "cookie";
@@ -207,6 +207,10 @@ function AddCardForm({ onSuccess, onCancel }: { onSuccess: () => void; onCancel:
 
 export default function PaymentSettings() {
   const data = useLoaderData<any>();
+  const matches = useMatches();
+  const parentMatch = matches.find((m) => m.id === "routes/dashboard");
+  const parentData = (parentMatch?.data ?? {}) as { role?: string };
+  const userRole = parentData.role;
   // Always declare hooks at the top level
   // Coach view hooks
   const [tab, setTab] = useState<'all' | 'paid' | 'unpaid'>('all');
@@ -484,7 +488,42 @@ export default function PaymentSettings() {
     });
     return (
       <div>
-        <h1 className="text-2xl font-bold mb-6">Client Billing Overview</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold text-secondary dark:text-alabaster">
+            Settings
+          </h1>
+        </div>
+
+        <div className="flex border-b border-gray-light dark:border-davyGray mb-6">
+          <Link
+            to="/dashboard/settings"
+            className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:border-primary/50"
+          >
+            General
+          </Link>
+          <Link
+            to="/dashboard/settings/payment"
+            className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-primary text-primary dark:text-primary"
+          >
+            Payment Method
+          </Link>
+          {userRole === "coach" && (
+            <Link
+              to="/dashboard/settings/stripe-account"
+              className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:border-primary/50"
+            >
+              Stripe Account
+            </Link>
+          )}
+          <Link
+            to="/dashboard/settings/terms"
+            className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:border-primary/50"
+          >
+            Terms & Conditions
+          </Link>
+        </div>
+
+        <h2 className="text-xl font-bold mb-6 text-secondary dark:text-alabaster">Client Billing Overview</h2>
         <div className="flex space-x-4 mb-4">
           <button className={`px-4 py-2 rounded ${tab === 'all' ? 'bg-primary text-white' : 'bg-gray-100'}`} onClick={() => setTab('all')}>All</button>
           <button className={`px-4 py-2 rounded ${tab === 'paid' ? 'bg-primary text-white' : 'bg-gray-100'}`} onClick={() => setTab('paid')}>Paid</button>
@@ -556,6 +595,14 @@ export default function PaymentSettings() {
         >
           Payment Method
         </Link>
+        {userRole === "coach" && (
+          <Link
+            to="/dashboard/settings/stripe-account"
+            className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:border-primary/50"
+          >
+            Stripe Account
+          </Link>
+        )}
         <Link
           to="/dashboard/settings/terms"
           className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:border-primary/50"

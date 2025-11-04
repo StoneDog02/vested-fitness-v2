@@ -31,6 +31,10 @@ export default function ClientDetailLayout({
       href: `/dashboard/clients/${clientId}/supplements`,
     },
     {
+      name: "Subscription",
+      href: `/dashboard/clients/${clientId}/subscription`,
+    },
+    {
       name: "Chat",
       href: `/dashboard/clients/${clientId}/chat`,
     },

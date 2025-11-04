@@ -62,10 +62,6 @@ export async function createStripeSubscription({ customerId, priceId, paymentMet
     expand: ['latest_invoice', 'latest_invoice.payment_intent'],
     // No billing_cycle_anchor - Stripe will use signup date as the billing anchor
     proration_behavior: 'none', // No proration - charge full monthly amount
-    // Enable automatic tax collection so clients pay fees, not coaches
-    automatic_tax: {
-      enabled: true
-    },
     metadata: {
       userId: userId || 'unknown',
       createdVia: 'api'

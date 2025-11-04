@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { MetaFunction, LoaderFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData, useFetcher, useNavigate } from "@remix-run/react";
+import { Link, useLoaderData, useFetcher, useNavigate, useMatches } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
 import Modal from "~/components/ui/Modal";
@@ -104,6 +104,10 @@ export const loader: LoaderFunction = async ({ request }) => {
 export default function Settings() {
   const { user } = useLoaderData<LoaderData>();
   const navigate = useNavigate();
+  const matches = useMatches();
+  const parentMatch = matches.find((m) => m.id === "routes/dashboard");
+  const parentData = (parentMatch?.data ?? {}) as { role?: string };
+  const userRole = parentData.role;
   const profileFetcher = useFetcher();
   const passwordFetcher = useFetcher();
   const avatarFetcher = useFetcher();
@@ -388,6 +392,14 @@ export default function Settings() {
         >
           Payment Method
         </Link>
+        {userRole === "coach" && (
+          <Link
+            to="/dashboard/settings/stripe-account"
+            className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:border-primary/50"
+          >
+            Stripe Account
+          </Link>
+        )}
         <Link
           to="/dashboard/settings/terms"
           className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:border-primary/50"

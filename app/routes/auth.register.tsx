@@ -531,7 +531,7 @@ function ClientOnlyRegisterForm(props: any) {
 
   // Unified form submit handler
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    if (isClientInvite && planPriceId) {
+    if (isClientInvite) {
       e.preventDefault();
       setPaymentLoading(true);
       setCardError(null);
@@ -539,8 +539,8 @@ function ClientOnlyRegisterForm(props: any) {
       // Reset submission flag for new payment method creation
       hasSubmittedRef.current = false;
 
-      // Check if this is a free plan by looking at the plan price
-      const isFreePlan = planPrice === "Free";
+      // Check if this is a free plan by looking at the plan price (only if planPriceId exists)
+      const isFreePlan = planPriceId && planPrice === "Free";
       
       if (isFreePlan) {
         // For free plans, skip payment method creation and submit directly
@@ -551,6 +551,7 @@ function ClientOnlyRegisterForm(props: any) {
         return;
       }
 
+      // For all other client invites, payment method is required
       // Only proceed if mounted (client)
       if (!elements || !stripe) {
         setCardError("Stripe is not loaded");
@@ -716,7 +717,8 @@ function ClientOnlyRegisterForm(props: any) {
                     )}
                   </div>
                 )}
-                {isClientInvite && planPriceId && planPrice !== "Free" && (
+                {/* Show card section for all client invites (unless free plan) */}
+                {isClientInvite && (!planPriceId || planPrice !== "Free") && (
                   <div>
                     {elements && (
                       <CardSection

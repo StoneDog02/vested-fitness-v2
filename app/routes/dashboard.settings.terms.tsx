@@ -1,5 +1,5 @@
 import type { MetaFunction } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { Link, useMatches } from "@remix-run/react";
 import Card from "~/components/ui/Card";
 
 export const meta: MetaFunction = () => {
@@ -10,6 +10,10 @@ export const meta: MetaFunction = () => {
 };
 
 export default function TermsAndConditions() {
+  const matches = useMatches();
+  const parentMatch = matches.find((m) => m.id === "routes/dashboard");
+  const parentData = (parentMatch?.data ?? {}) as { role?: string };
+  const userRole = parentData.role;
   return (
     <>
       <div className="flex justify-between items-center mb-6">
@@ -31,6 +35,14 @@ export default function TermsAndConditions() {
         >
           Payment Method
         </Link>
+        {userRole === "coach" && (
+          <Link
+            to="/dashboard/settings/stripe-account"
+            className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-transparent text-gray-dark dark:text-primary hover:text-primary hover:border-primary/50 dark:hover:border-primary/50"
+          >
+            Stripe Account
+          </Link>
+        )}
         <Link
           to="/dashboard/settings/terms"
           className="px-4 py-2 font-medium transition-colors duration-200 border-b-2 border-primary text-primary dark:text-primary"

@@ -1,0 +1,193 @@
+import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { parse } from "cookie";
+import jwt from "jsonwebtoken";
+import { Buffer } from "buffer";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "~/lib/supabase";
+import { stripe, getOrCreateStripeCustomer } from "~/utils/stripe.server";
+import dayjs from "dayjs";
+
+export async function action({ request }: ActionFunctionArgs) {
+  if (request.method !== "POST") {
+    return json({ error: "Method not allowed" }, { status: 405 });
+  }
+
+  try {
+    // Get coach from auth cookie
+    const cookies = parse(request.headers.get("cookie") || "");
+    const supabaseAuthCookieKey = Object.keys(cookies).find(
+      (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+    );
+    let accessToken;
+    if (supabaseAuthCookieKey) {
+      try {
+        const decoded = Buffer.from(
+          cookies[supabaseAuthCookieKey],
+          "base64"
+        ).toString("utf-8");
+        const [access] = JSON.parse(JSON.parse(decoded));
+        accessToken = access;
+      } catch (e) {
+        accessToken = undefined;
+      }
+    }
+    let authId: string | undefined;
+    if (accessToken) {
+      try {
+        const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
+        authId =
+          decoded && typeof decoded === "object" && "sub" in decoded
+            ? (decoded.sub as string)
+            : undefined;
+      } catch (e) {
+        authId = undefined;
+      }
+    }
+    if (!authId) {
+      return json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Get coach user record
+    const supabase = createClient<Database>(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+    const { data: coachUser } = await supabase
+      .from("users")
+      .select("id, role")
+      .eq("auth_id", authId)
+      .single();
+
+    if (!coachUser || coachUser.role !== "coach") {
+      return json({ error: "Only coaches can create subscriptions" }, { status: 403 });
+    }
+
+    // Parse request body
+    const {
+      clientId,
+      priceId,
+      taxPercentage,
+      startDate,
+      notes,
+    } = await request.json();
+
+    if (!clientId || !priceId) {
+      return json({ error: "Missing clientId or priceId" }, { status: 400 });
+    }
+
+    // Verify client belongs to this coach
+    const { data: client } = await supabase
+      .from("users")
+      .select("id, email, stripe_customer_id")
+      .eq("id", clientId)
+      .eq("coach_id", coachUser.id)
+      .single();
+
+    if (!client) {
+      return json({ error: "Client not found or access denied" }, { status: 404 });
+    }
+
+    // Get or create Stripe customer
+    const customerId = await getOrCreateStripeCustomer({
+      userId: client.id,
+      email: client.email,
+    });
+
+    // Get payment methods for the customer
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      type: "card",
+    });
+
+    const customer = await stripe.customers.retrieve(customerId);
+    const defaultPaymentMethodId = 
+      (customer as any).invoice_settings?.default_payment_method ||
+      paymentMethods.data[0]?.id;
+
+    if (!defaultPaymentMethodId) {
+      return json({ error: "Client has no payment method on file" }, { status: 400 });
+    }
+
+    // Retrieve the price from Stripe
+    const price = await stripe.prices.retrieve(priceId);
+    const baseAmount = price.unit_amount || 0;
+
+    // Calculate tax amount if tax percentage is provided
+    let taxAmount = 0;
+    let invoiceTotal = baseAmount;
+    if (taxPercentage && taxPercentage > 0) {
+      taxAmount = Math.round(baseAmount * (taxPercentage / 100));
+      invoiceTotal = baseAmount + taxAmount;
+    }
+
+    // Calculate billing cycle anchor (start date)
+    let billingCycleAnchor: number | undefined;
+    if (startDate) {
+      // Convert start date to Unix timestamp
+      const startDateTime = dayjs(startDate).startOf("day").unix();
+      billingCycleAnchor = startDateTime;
+    }
+
+    // Create subscription
+    const subscriptionParams: any = {
+      customer: customerId,
+      items: [{ price: priceId }],
+      payment_behavior: "default_incomplete",
+      payment_settings: { save_default_payment_method: "on_subscription" },
+      expand: ["latest_invoice", "latest_invoice.payment_intent"],
+      proration_behavior: "none",
+      default_payment_method: defaultPaymentMethodId,
+      metadata: {
+        userId: client.id,
+        createdVia: "coach_subscription_creation",
+        ...(notes ? { notes } : {}),
+      },
+    };
+
+    if (billingCycleAnchor) {
+      subscriptionParams.billing_cycle_anchor = billingCycleAnchor;
+    }
+
+    // Add tax if provided
+    if (taxAmount > 0) {
+      // Create subscription first
+      const subscription = await stripe.subscriptions.create(subscriptionParams);
+
+      // Add tax as a recurring invoice item that will be included in every billing cycle
+      await stripe.invoiceItems.create({
+        customer: customerId,
+        subscription: subscription.id,
+        amount: taxAmount,
+        currency: price.currency,
+        description: `Tax (${taxPercentage}%)`,
+        // Don't specify period - this makes it recurring for the subscription
+      });
+
+      // Finalize the invoice
+      const invoice = await stripe.invoices.retrieve(subscription.latest_invoice as string);
+      await stripe.invoices.finalizeInvoice(invoice.id, {
+        auto_advance: true,
+      });
+
+      return json({
+        success: true,
+        subscription,
+        message: "Subscription created successfully",
+      });
+    } else {
+      const subscription = await stripe.subscriptions.create(subscriptionParams);
+      return json({
+        success: true,
+        subscription,
+        message: "Subscription created successfully",
+      });
+    }
+  } catch (error: any) {
+    console.error("Error creating subscription:", error);
+    return json(
+      { error: error.message || "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+

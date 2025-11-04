@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Modal from "~/components/ui/Modal";
 import Button from "~/components/ui/Button";
 import { useFetcher } from "@remix-run/react";
@@ -16,15 +16,6 @@ interface InviteClientResponse {
   error?: string;
 }
 
-// Define the shape of a plan from the API
-interface Plan {
-  id: string;
-  name: string;
-  amount: number | null;
-  currency: string;
-  interval?: string | null;
-}
-
 export default function ClientInviteModal({
   isOpen,
   onClose,
@@ -33,25 +24,6 @@ export default function ClientInviteModal({
   const fetcher = useFetcher<InviteClientResponse>();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>("");
-  const [plansLoading, setPlansLoading] = useState(false);
-
-  // Fetch plans from the API when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setPlansLoading(true);
-      fetch("/api/get-stripe-plans")
-        .then((res) => res.json())
-        .then((data) => {
-          setPlans(data.plans || []);
-          if (data.plans && data.plans.length > 0) {
-            setSelectedPlanId(data.plans[0].id);
-          }
-        })
-        .finally(() => setPlansLoading(false));
-    }
-  }, [isOpen]);
 
   // Close modal and reload route on successful invite
   React.useEffect(() => {
@@ -67,13 +39,6 @@ export default function ClientInviteModal({
   }, [fetcher.data?.success, onClose]);
 
   const isSubmitting = fetcher.state !== "idle";
-
-  // Helper to format price
-  function formatPrice(amount: number | null, currency: string, interval?: string | null) {
-    if (amount == null) return "";
-    const price = (amount / 100).toLocaleString(undefined, { style: "currency", currency });
-    return interval ? `${price} / ${interval}` : price;
-  }
 
   return (
     <Modal
@@ -141,36 +106,11 @@ export default function ClientInviteModal({
               </p>
             </div>
 
-            {/* Plan selection (dynamic, enabled for coach) */}
-            <div>
-              <label htmlFor="plan_price_id" className="block text-sm font-medium text-secondary dark:text-alabaster mb-1">
-                Subscription Plan
-              </label>
-              <select
-                id="plan_price_id"
-                name="plan_price_id"
-                value={selectedPlanId}
-                onChange={e => setSelectedPlanId(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-lg bg-white dark:bg-night text-secondary dark:text-alabaster"
-                disabled={plansLoading || isSubmitting}
-                required
-              >
-                {plans.map((plan) => (
-                  <option key={plan.id} value={plan.id}>
-                    {plan.name}
-                  </option>
-                ))}
-              </select>
-              {/* Show price for selected plan below the dropdown */}
-              {selectedPlanId && plans.length > 0 && (
-                <div className="mt-1 text-xs text-secondary dark:text-alabaster opacity-60">
-                  {formatPrice(
-                    plans.find(p => p.id === selectedPlanId)?.amount ?? null,
-                    plans.find(p => p.id === selectedPlanId)?.currency ?? "usd",
-                    plans.find(p => p.id === selectedPlanId)?.interval
-                  )}
-                </div>
-              )}
+            {/* FYI Box */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                <strong>FYI:</strong> This is creating the profile for the client. You will create the subscription once they register.
+              </p>
             </div>
 
             <div className="pt-2">
@@ -178,7 +118,7 @@ export default function ClientInviteModal({
                 type="submit"
                 variant="primary"
                 className="w-full"
-                disabled={isSubmitting || !email || !name || !coachId || !selectedPlanId}
+                disabled={isSubmitting || !email || !name || !coachId}
               >
                 {isSubmitting ? "Sending..." : "Send Invitation"}
               </Button>
