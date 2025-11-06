@@ -70,13 +70,13 @@ export default function CreateSubscriptionModal({
 
   // Close modal on success
   useEffect(() => {
-    if (fetcher.data?.success) {
+    if (fetcher.state === "idle" && fetcher.data?.success) {
       setTimeout(() => {
         onClose();
         window.location.reload();
       }, 1500);
     }
-  }, [fetcher.data?.success, onClose]);
+  }, [fetcher.state, fetcher.data?.success, onClose]);
 
   const selectedPlan = plans.find((p) => p.id === selectedPlanId);
   const baseAmount = selectedPlan?.amount || 0;
@@ -129,12 +129,17 @@ export default function CreateSubscriptionModal({
     <Modal isOpen={isOpen} onClose={onClose} title="Create Subscription" size="lg">
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Success/Error Messages */}
-        {fetcher.data?.success && (
+        {fetcher.state === "idle" && fetcher.data?.success && (
           <div className="bg-green-500/10 text-green-600 dark:text-green-400 p-4 rounded-lg">
             Subscription created successfully!
           </div>
         )}
-        {fetcher.data?.error && (
+        {fetcher.state === "idle" && fetcher.data?.error && (
+          <div className="bg-red-500/10 text-red-600 dark:text-red-400 p-4 rounded-lg">
+            {fetcher.data.error}
+          </div>
+        )}
+        {fetcher.state !== "idle" && fetcher.data?.error && (
           <div className="bg-red-500/10 text-red-600 dark:text-red-400 p-4 rounded-lg">
             {fetcher.data.error}
           </div>

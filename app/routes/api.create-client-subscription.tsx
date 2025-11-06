@@ -76,14 +76,28 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Verify client belongs to this coach
-    const { data: client } = await supabase
+    // Try by slug first, then by id
+    let { data: client, error: clientError } = await supabase
       .from("users")
       .select("id, email, stripe_customer_id")
-      .eq("id", clientId)
+      .eq("slug", clientId)
       .eq("coach_id", coachUser.id)
       .single();
+    
+    // If not found by slug, try by id
+    if (!client || clientError) {
+      const { data: clientById, error: clientByIdError } = await supabase
+        .from("users")
+        .select("id, email, stripe_customer_id")
+        .eq("id", clientId)
+        .eq("coach_id", coachUser.id)
+        .single();
+      client = clientById;
+      clientError = clientByIdError;
+    }
 
     if (!client) {
+      console.error("Client lookup failed:", clientError);
       return json({ error: "Client not found or access denied" }, { status: 404 });
     }
 
@@ -115,8 +129,9 @@ export async function action({ request }: ActionFunctionArgs) {
     // Calculate tax amount if tax percentage is provided
     let taxAmount = 0;
     let invoiceTotal = baseAmount;
-    if (taxPercentage && taxPercentage > 0) {
-      taxAmount = Math.round(baseAmount * (taxPercentage / 100));
+    const taxPercent = typeof taxPercentage === 'string' ? parseFloat(taxPercentage) : taxPercentage;
+    if (taxPercent && taxPercent > 0) {
+      taxAmount = Math.round(baseAmount * (taxPercent / 100));
       invoiceTotal = baseAmount + taxAmount;
     }
 
@@ -159,7 +174,7 @@ export async function action({ request }: ActionFunctionArgs) {
         subscription: subscription.id,
         amount: taxAmount,
         currency: price.currency,
-        description: `Tax (${taxPercentage}%)`,
+        description: `Tax (${taxPercent}%)`,
         // Don't specify period - this makes it recurring for the subscription
       });
 
@@ -184,8 +199,14 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   } catch (error: any) {
     console.error("Error creating subscription:", error);
+    const errorMessage = error?.message || error?.toString() || "Internal server error";
+    console.error("Full error details:", {
+      message: errorMessage,
+      stack: error?.stack,
+      response: error?.response,
+    });
     return json(
-      { error: error.message || "Internal server error" },
+      { error: errorMessage, success: false },
       { status: 500 }
     );
   }
