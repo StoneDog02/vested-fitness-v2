@@ -86,6 +86,11 @@ export default function ClientSubscription() {
   const subscription = loaderData.subscription;
   const paymentMethods = loaderData.paymentMethods || [];
   const hasPaymentMethod = paymentMethods.length > 0;
+  
+  // Get the last 4 digits of the first payment method
+  const paymentMethodLast4 = paymentMethods.length > 0 && paymentMethods[0]?.card?.last4 
+    ? paymentMethods[0].card.last4 
+    : undefined;
 
   // Get initials for avatar
   const getInitials = (name: string): string => {
@@ -151,6 +156,7 @@ export default function ClientSubscription() {
           clientName={client.name || "Client"}
           clientEmail={client.email || ""}
           hasPaymentMethod={hasPaymentMethod}
+          paymentMethodLast4={paymentMethodLast4}
         />
       </div>
     </ClientDetailLayout>

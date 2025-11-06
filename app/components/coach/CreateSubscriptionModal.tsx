@@ -22,6 +22,7 @@ interface CreateSubscriptionModalProps {
   clientName: string;
   clientEmail: string;
   hasPaymentMethod?: boolean;
+  paymentMethodLast4?: string;
 }
 
 export default function CreateSubscriptionModal({
@@ -31,6 +32,7 @@ export default function CreateSubscriptionModal({
   clientName,
   clientEmail,
   hasPaymentMethod = true,
+  paymentMethodLast4,
 }: CreateSubscriptionModalProps) {
   const fetcher = useFetcher();
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -149,7 +151,9 @@ export default function CreateSubscriptionModal({
               ({clientEmail})
             </div>
             <div className={`mt-2 ${hasPaymentMethod ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-              {hasPaymentMethod ? '✓ Card on file' : '⚠ No payment method on file'}
+              {hasPaymentMethod 
+                ? `✓ Card on file${paymentMethodLast4 ? ` (ending in ${paymentMethodLast4})` : ''}`
+                : '⚠ No payment method on file'}
             </div>
           </div>
         </div>

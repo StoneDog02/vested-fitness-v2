@@ -66,12 +66,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     // Verify client belongs to this coach
-    const { data: client } = await supabase
+    // Try by slug first, then by id
+    let { data: client, error: clientError } = await supabase
       .from("users")
       .select("id, name, email, stripe_customer_id")
-      .eq("id", clientId)
+      .eq("slug", clientId)
       .eq("coach_id", coachUser.id)
       .single();
+    
+    // If not found by slug, try by id
+    if (!client || clientError) {
+      const { data: clientById, error: clientByIdError } = await supabase
+        .from("users")
+        .select("id, name, email, stripe_customer_id")
+        .eq("id", clientId)
+        .eq("coach_id", coachUser.id)
+        .single();
+      client = clientById;
+      clientError = clientByIdError;
+    }
 
     if (!client) {
       return json({ error: "Client not found or access denied" }, { status: 404 });
@@ -84,7 +97,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (client.stripe_customer_id) {
       try {
         subscription = await getSubscriptionInfo(client.stripe_customer_id);
-        // subscription might be null if no active subscription exists - that's ok
         
         // Fetch attached payment methods
         const pmList = await listPaymentMethods(client.stripe_customer_id);
@@ -94,6 +106,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // This is important because Stripe can have a default payment method
         // that's not explicitly attached (e.g., saved during setup)
         const customer = await stripe.customers.retrieve(client.stripe_customer_id);
+        
         if (customer && !customer.deleted) {
           const defaultPaymentMethodId = (customer as Stripe.Customer).invoice_settings?.default_payment_method;
           
@@ -111,7 +124,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
               } catch (pmError) {
                 // If we can't retrieve the payment method, that's ok
                 // It might have been deleted or is invalid
-                console.log(`Could not retrieve default payment method ${defaultPaymentMethodId}:`, pmError);
               }
             }
           }
