@@ -4,7 +4,8 @@ import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
-import { getSubscriptionInfo, listPaymentMethods } from "~/utils/stripe.server";
+import { getSubscriptionInfo, listPaymentMethods, stripe } from "~/utils/stripe.server";
+import type Stripe from "stripe";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -84,8 +85,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
       try {
         subscription = await getSubscriptionInfo(client.stripe_customer_id);
         // subscription might be null if no active subscription exists - that's ok
+        
+        // Fetch attached payment methods
         const pmList = await listPaymentMethods(client.stripe_customer_id);
         paymentMethods = pmList.data || [];
+        
+        // Also check for default payment method set on customer
+        // This is important because Stripe can have a default payment method
+        // that's not explicitly attached (e.g., saved during setup)
+        const customer = await stripe.customers.retrieve(client.stripe_customer_id);
+        if (customer && !customer.deleted) {
+          const defaultPaymentMethodId = (customer as Stripe.Customer).invoice_settings?.default_payment_method;
+          
+          if (defaultPaymentMethodId && typeof defaultPaymentMethodId === 'string') {
+            // Check if this payment method is already in our list
+            const alreadyInList = paymentMethods.some(pm => pm.id === defaultPaymentMethodId);
+            
+            if (!alreadyInList) {
+              // Fetch the default payment method and add it to the list
+              try {
+                const defaultPm = await stripe.paymentMethods.retrieve(defaultPaymentMethodId);
+                if (defaultPm) {
+                  paymentMethods.push(defaultPm);
+                }
+              } catch (pmError) {
+                // If we can't retrieve the payment method, that's ok
+                // It might have been deleted or is invalid
+                console.log(`Could not retrieve default payment method ${defaultPaymentMethodId}:`, pmError);
+              }
+            }
+          }
+        }
       } catch (error) {
         console.error("Error fetching subscription info:", error);
         // Continue with null subscription and empty payment methods
