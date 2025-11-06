@@ -99,25 +99,114 @@ export async function detachPaymentMethod(paymentMethodId: string) {
 
 // Fetch subscription info
 export async function getSubscriptionInfo(customerId: string) {
-  const subscriptions = await stripe.subscriptions.list({ customer: customerId, limit: 1 });
+  const subscriptions = await stripe.subscriptions.list({ 
+    customer: customerId, 
+    limit: 1,
+    expand: ['data.latest_invoice', 'data.latest_invoice.payment_intent']
+  });
   const subscription = subscriptions.data[0] || null;
-  if (
-    subscription &&
-    typeof subscription === "object" &&
-    subscription !== null &&
-    Object.prototype.hasOwnProperty.call(subscription, "plan") &&
-    (subscription as any).plan &&
-    Object.prototype.hasOwnProperty.call((subscription as any).plan, "product") &&
-    (subscription as any).plan.product
-  ) {
+  
+  if (!subscription) {
+    return null;
+  }
+
+  // Get product name if available
+  let productName: string | undefined;
+  const price = subscription.items?.data?.[0]?.price;
+  const plan = (subscription as any).plan || price;
+  
+  if (plan?.product) {
     try {
-      const product = await stripe.products.retrieve((subscription as any).plan.product as string);
-      return { ...subscription, productName: (product as Stripe.Product).name };
+      const productId = typeof plan.product === 'string' ? plan.product : plan.product.id;
+      const product = await stripe.products.retrieve(productId);
+      productName = product.name;
     } catch (e) {
-      return subscription;
+      // Product retrieval failed, continue without product name
     }
   }
-  return subscription;
+
+  // Get cancellation reason if subscription is canceled
+  let cancellationReason: string | null = null;
+  if (subscription.status === 'canceled' || subscription.status === 'unpaid' || subscription.status === 'past_due') {
+    // Check cancellation_details
+    if ((subscription as any).cancellation_details?.reason) {
+      const reason = (subscription as any).cancellation_details.reason;
+      const reasonMap: Record<string, string> = {
+        'other': 'Canceled by customer',
+        'fraudulent': 'Canceled due to fraud',
+        'requested_by_customer': 'Canceled by customer request',
+      };
+      cancellationReason = reasonMap[reason] || 'Canceled';
+    }
+    
+    // Check latest invoice for payment failure reasons
+    if (!cancellationReason && subscription.latest_invoice) {
+      try {
+        const invoiceId = typeof subscription.latest_invoice === 'string' 
+          ? subscription.latest_invoice 
+          : subscription.latest_invoice.id;
+        const invoice = await stripe.invoices.retrieve(invoiceId, {
+          expand: ['payment_intent']
+        });
+        
+        if (invoice.status === 'open' || invoice.status === 'uncollectible') {
+          const paymentIntent = invoice.payment_intent;
+          if (paymentIntent && typeof paymentIntent === 'object') {
+            const pi = paymentIntent as any;
+            if (pi.last_payment_error) {
+              const error = pi.last_payment_error;
+              if (error.decline_code) {
+                const declineCodeMap: Record<string, string> = {
+                  'insufficient_funds': 'Payment failed due to insufficient funds',
+                  'lost_card': 'Payment failed - card reported as lost',
+                  'stolen_card': 'Payment failed - card reported as stolen',
+                  'expired_card': 'Payment failed - card expired',
+                  'incorrect_cvc': 'Payment failed - incorrect CVC',
+                  'incorrect_number': 'Payment failed - incorrect card number',
+                  'processing_error': 'Payment failed - processing error',
+                  'reenter_transaction': 'Payment failed - please try again',
+                  'restricted_card': 'Payment failed - card restricted',
+                  'security_violation': 'Payment failed - security violation',
+                  'service_not_allowed': 'Payment failed - service not allowed',
+                  'stop_payment_order': 'Payment failed - stop payment order',
+                  'testmode_decline': 'Payment failed - test mode decline',
+                  'withdrawal_count_limit_exceeded': 'Payment failed - withdrawal limit exceeded',
+                };
+                cancellationReason = declineCodeMap[error.decline_code] || `Payment failed: ${error.decline_code}`;
+              } else if (error.message) {
+                cancellationReason = `Payment failed: ${error.message}`;
+              } else if (error.type === 'card_error') {
+                cancellationReason = 'Payment failed - card error';
+              } else {
+                cancellationReason = 'Payment failed';
+              }
+            } else if (pi.status === 'requires_payment_method') {
+              cancellationReason = 'Payment failed - payment method required';
+            }
+          }
+        }
+      } catch (invoiceError) {
+        // If we can't retrieve invoice, continue without payment failure reason
+      }
+    }
+    
+    // If still no reason, use status-based message
+    if (!cancellationReason) {
+      if (subscription.status === 'unpaid') {
+        cancellationReason = 'Subscription unpaid';
+      } else if (subscription.status === 'past_due') {
+        cancellationReason = 'Payment past due';
+      } else if (subscription.status === 'canceled') {
+        cancellationReason = 'Subscription canceled';
+      }
+    }
+  }
+
+  return { 
+    ...subscription, 
+    productName,
+    cancellationReason 
+  };
 }
 
 // Fetch billing history (invoices)

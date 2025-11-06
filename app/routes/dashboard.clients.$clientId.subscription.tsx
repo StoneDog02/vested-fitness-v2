@@ -5,6 +5,9 @@ import { useMatches, useLoaderData } from "@remix-run/react";
 import { useState } from "react";
 import Button from "~/components/ui/Button";
 import CreateSubscriptionModal from "~/components/coach/CreateSubscriptionModal";
+import Card from "~/components/ui/Card";
+import dayjs from "dayjs";
+import { CheckCircleIcon, ClockIcon, CreditCardIcon, CalendarIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 
 export const meta: MetaFunction = () => {
   return [
@@ -92,6 +95,77 @@ export default function ClientSubscription() {
     ? paymentMethods[0].card.last4 
     : undefined;
 
+  // Format currency helper
+  const formatCurrency = (amount: number | null, currency: string = "usd") => {
+    if (amount == null) return "$0.00";
+    return (amount / 100).toLocaleString(undefined, {
+      style: "currency",
+      currency: currency.toLowerCase(),
+    });
+  };
+
+  // Format date helper
+  const formatDate = (timestamp: number | null | undefined) => {
+    if (!timestamp) return "N/A";
+    return dayjs.unix(timestamp).format("MMM D, YYYY");
+  };
+
+  // Get subscription details
+  const getSubscriptionDetails = () => {
+    if (!subscription) return null;
+    
+    const sub = subscription as any;
+    const price = sub.items?.data?.[0]?.price;
+    const plan = sub.plan || price;
+    const amount = plan?.unit_amount || plan?.amount || 0;
+    const currency = plan?.currency || "usd";
+    const interval = plan?.interval || price?.recurring?.interval || "month";
+    const productName = sub.productName || plan?.product?.name || "Subscription";
+    const status = sub.status || "unknown";
+    
+    // Extract period dates - Stripe returns these as Unix timestamps
+    // For future-dated subscriptions, these might not be set yet
+    let currentPeriodStart = sub.current_period_start ?? null;
+    let currentPeriodEnd = sub.current_period_end ?? null;
+    const billingCycleAnchor = sub.billing_cycle_anchor ?? null;
+    
+    // If period dates aren't set but we have a billing cycle anchor, use that
+    // This happens for subscriptions scheduled to start in the future
+    if (!currentPeriodStart && billingCycleAnchor) {
+      currentPeriodStart = billingCycleAnchor;
+      // Calculate end date based on interval
+      if (interval === "month") {
+        currentPeriodEnd = dayjs.unix(billingCycleAnchor).add(1, "month").unix();
+      } else if (interval === "year") {
+        currentPeriodEnd = dayjs.unix(billingCycleAnchor).add(1, "year").unix();
+      } else if (interval === "week") {
+        currentPeriodEnd = dayjs.unix(billingCycleAnchor).add(1, "week").unix();
+      } else {
+        // Default to 1 month
+        currentPeriodEnd = dayjs.unix(billingCycleAnchor).add(1, "month").unix();
+      }
+    }
+    
+    const notes = sub.metadata?.notes;
+    const cancellationReason = sub.cancellationReason;
+
+    return {
+      id: sub.id,
+      status,
+      productName,
+      amount,
+      currency,
+      interval,
+      currentPeriodStart,
+      currentPeriodEnd,
+      billingCycleAnchor,
+      notes,
+      cancellationReason,
+    };
+  };
+
+  const subscriptionDetails = getSubscriptionDetails();
+
   // Get initials for avatar
   const getInitials = (name: string): string => {
     const parts = name.trim().split(" ");
@@ -140,12 +214,214 @@ export default function ClientSubscription() {
           </div>
         )}
 
-        {/* Active Subscription State - TODO: implement later */}
-        {subscription && (
-          <div className="bg-white dark:bg-night rounded-lg shadow-sm border border-gray-light dark:border-davyGray p-6">
-            <p className="text-sm text-gray-dark dark:text-gray-light">
-              Active subscription details will be shown here.
-            </p>
+        {/* Active Subscription State */}
+        {subscription && subscriptionDetails && (
+          <div className="space-y-6">
+            {/* Subscription Overview Card */}
+            <Card title="Active Subscription">
+              <div className="space-y-6">
+                {/* Status Badge */}
+                <div className="flex items-center justify-between">
+                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    subscriptionDetails.status === "active" 
+                      ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+                      : subscriptionDetails.status === "trialing"
+                      ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
+                      : subscriptionDetails.status === "past_due"
+                      ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400"
+                      : subscriptionDetails.status === "canceled" || subscriptionDetails.status === "unpaid"
+                      ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
+                      : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
+                  }`}>
+                    {subscriptionDetails.status === "active" && (
+                      <span className="flex items-center gap-1">
+                        <CheckCircleIcon className="w-4 h-4" />
+                        Active
+                      </span>
+                    )}
+                    {subscriptionDetails.status === "trialing" && (
+                      <span className="flex items-center gap-1">
+                        <ClockIcon className="w-4 h-4" />
+                        Trial
+                      </span>
+                    )}
+                    {subscriptionDetails.status === "past_due" && (
+                      <span className="flex items-center gap-1">
+                        <ClockIcon className="w-4 h-4" />
+                        Past Due
+                      </span>
+                    )}
+                    {subscriptionDetails.status === "canceled" && (
+                      <span className="flex items-center gap-1">
+                        <ClockIcon className="w-4 h-4" />
+                        Canceled
+                      </span>
+                    )}
+                    {subscriptionDetails.status === "unpaid" && (
+                      <span className="flex items-center gap-1">
+                        <ClockIcon className="w-4 h-4" />
+                        Unpaid
+                      </span>
+                    )}
+                    {!["active", "trialing", "past_due", "canceled", "unpaid"].includes(subscriptionDetails.status) && (
+                      <span className="capitalize">{subscriptionDetails.status}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Cancellation/Payment Failure Reason */}
+                {subscriptionDetails.cancellationReason && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div className="flex items-start gap-2">
+                      <InformationCircleIcon className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-sm font-medium text-red-800 dark:text-red-200 mb-1">
+                          Subscription Inactive
+                        </div>
+                        <div className="text-sm text-red-700 dark:text-red-300">
+                          {subscriptionDetails.cancellationReason}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Plan Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-dark dark:text-gray-light mb-2">
+                        Plan Details
+                      </h3>
+                      <div className="bg-gray-50 dark:bg-davyGray rounded-lg p-4 space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-dark dark:text-gray-light">Product:</span>
+                          <span className="text-sm font-medium text-secondary dark:text-alabaster">
+                            {subscriptionDetails.productName}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-dark dark:text-gray-light">Price:</span>
+                          <span className="text-sm font-medium text-secondary dark:text-alabaster">
+                            {formatCurrency(subscriptionDetails.amount, subscriptionDetails.currency)}
+                            {subscriptionDetails.interval && ` / ${subscriptionDetails.interval}`}
+                          </span>
+                        </div>
+                        {subscriptionDetails.billingCycleAnchor && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-dark dark:text-gray-light">Billing Date:</span>
+                            <span className="text-sm font-medium text-secondary dark:text-alabaster">
+                              {formatDate(subscriptionDetails.billingCycleAnchor)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Payment Method */}
+                    {hasPaymentMethod && (
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-dark dark:text-gray-light mb-2">
+                          Payment Method
+                        </h3>
+                        <div className="bg-gray-50 dark:bg-davyGray rounded-lg p-4">
+                          <div className="flex items-center gap-3">
+                            <CreditCardIcon className="w-5 h-5 text-gray-dark dark:text-gray-light" />
+                            <div>
+                              <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                                {paymentMethods[0]?.card?.brand?.toUpperCase() || "Card"} ending in {paymentMethodLast4 || "----"}
+                              </div>
+                              {paymentMethods[0]?.card?.exp_month && paymentMethods[0]?.card?.exp_year && (
+                                <div className="text-xs text-gray-dark dark:text-gray-light">
+                                  Expires {paymentMethods[0].card.exp_month}/{paymentMethods[0].card.exp_year}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Billing Period */}
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-dark dark:text-gray-light mb-2">
+                        Billing Period
+                      </h3>
+                      <div className="bg-gray-50 dark:bg-davyGray rounded-lg p-4 space-y-3">
+                        <div className="flex items-start gap-3">
+                          <CalendarIcon className="w-5 h-5 text-gray-dark dark:text-gray-light mt-0.5" />
+                          <div className="flex-1">
+                            <div className="text-xs text-gray-dark dark:text-gray-light mb-1">Current Period</div>
+                            <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                              {formatDate(subscriptionDetails.currentPeriodStart)} - {formatDate(subscriptionDetails.currentPeriodEnd)}
+                            </div>
+                          </div>
+                        </div>
+                        {subscriptionDetails.currentPeriodStart && (
+                          <div className="flex items-start gap-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                            <ClockIcon className="w-5 h-5 text-gray-dark dark:text-gray-light mt-0.5" />
+                            <div className="flex-1">
+                              {(() => {
+                                const now = dayjs();
+                                const periodStart = dayjs.unix(subscriptionDetails.currentPeriodStart);
+                                const periodEnd = subscriptionDetails.currentPeriodEnd 
+                                  ? dayjs.unix(subscriptionDetails.currentPeriodEnd)
+                                  : null;
+                                
+                                // If period hasn't started yet, show "First Billing Date"
+                                if (now.isBefore(periodStart)) {
+                                  return (
+                                    <>
+                                      <div className="text-xs text-gray-dark dark:text-gray-light mb-1">First Billing Date</div>
+                                      <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                                        {formatDate(subscriptionDetails.currentPeriodStart)}
+                                      </div>
+                                    </>
+                                  );
+                                }
+                                
+                                // If period has started, show "Next Billing Date" (which is the period end)
+                                if (periodEnd) {
+                                  return (
+                                    <>
+                                      <div className="text-xs text-gray-dark dark:text-gray-light mb-1">Next Billing Date</div>
+                                      <div className="text-sm font-medium text-secondary dark:text-alabaster">
+                                        {formatDate(subscriptionDetails.currentPeriodEnd)}
+                                      </div>
+                                    </>
+                                  );
+                                }
+                                
+                                return null;
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Notes */}
+                    {subscriptionDetails.notes && (
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-dark dark:text-gray-light mb-2">
+                          Notes
+                        </h3>
+                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                          <div className="flex items-start gap-2">
+                            <InformationCircleIcon className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                            <p className="text-sm text-blue-800 dark:text-blue-200">
+                              {subscriptionDetails.notes}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </Card>
           </div>
         )}
 

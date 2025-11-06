@@ -136,11 +136,20 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Calculate billing cycle anchor (start date)
+    // If start date is today or in the past, charge immediately (no anchor)
+    // If start date is in the future, schedule charge for that date (set anchor)
     let billingCycleAnchor: number | undefined;
     if (startDate) {
-      // Convert start date to Unix timestamp
-      const startDateTime = dayjs(startDate).startOf("day").unix();
-      billingCycleAnchor = startDateTime;
+      const startDateTime = dayjs(startDate).startOf("day");
+      const today = dayjs().startOf("day");
+      
+      // Only set billing_cycle_anchor if start date is in the future
+      // If today or past, let Stripe charge immediately
+      if (startDateTime.isAfter(today)) {
+        billingCycleAnchor = startDateTime.unix();
+      }
+      // If start date is today or in the past, don't set billing_cycle_anchor
+      // This will cause Stripe to charge immediately
     }
 
     // Create subscription
@@ -178,11 +187,20 @@ export async function action({ request }: ActionFunctionArgs) {
         // Don't specify period - this makes it recurring for the subscription
       });
 
-      // Finalize the invoice
-      const invoice = await stripe.invoices.retrieve(subscription.latest_invoice as string);
-      await stripe.invoices.finalizeInvoice(invoice.id, {
-        auto_advance: true,
-      });
+      // Only finalize invoice if one exists (might not exist for future-dated subscriptions)
+      if (subscription.latest_invoice && typeof subscription.latest_invoice === 'string') {
+        try {
+          const invoice = await stripe.invoices.retrieve(subscription.latest_invoice);
+          if (invoice.status === 'draft') {
+            await stripe.invoices.finalizeInvoice(invoice.id, {
+              auto_advance: true,
+            });
+          }
+        } catch (invoiceError) {
+          // If invoice retrieval/finalization fails, log but don't fail the subscription creation
+          console.error("Error handling invoice:", invoiceError);
+        }
+      }
 
       return json({
         success: true,
