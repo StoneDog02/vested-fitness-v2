@@ -117,6 +117,7 @@ export default function CreateSubscriptionModal({
       {
         method: "POST",
         action: "/api/create-client-subscription",
+        encType: "application/json",
       }
     );
   };
