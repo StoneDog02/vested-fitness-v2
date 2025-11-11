@@ -52,6 +52,26 @@ export default function AddCheckInModal({
     setUploadProgress("");
     
     try {
+      const getExtensionFromMimeType = (mime: string, recordingType: 'video' | 'audio') => {
+        const baseType = mime.split(';')[0];
+        switch (baseType) {
+          case 'video/mp4':
+            return 'mp4';
+          case 'video/quicktime':
+            return 'mov';
+          case 'audio/mp3':
+          case 'audio/mpeg':
+            return 'mp3';
+          case 'audio/wav':
+            return 'wav';
+          case 'audio/m4a':
+          case 'audio/mp4':
+            return 'm4a';
+          default:
+            return recordingType === 'video' ? 'webm' : 'webm';
+        }
+      };
+
       // If there's recording data, upload it first
       if (recordingData) {
         console.log('Uploading recording data:', {
@@ -74,9 +94,11 @@ export default function AddCheckInModal({
               // Create a proper File object from the blob with unique filename for each attempt
               const timestamp = Date.now();
               const randomId = Math.random().toString(36).substring(2, 9);
-              const fileName = `recording-${timestamp}-${randomId}.${recordingData.type === 'video' ? 'webm' : 'webm'}`;
+              const mimeType = recordingData.blob.type || (recordingData.type === 'video' ? 'video/webm' : 'audio/webm');
+              const extension = getExtensionFromMimeType(mimeType, recordingData.type);
+              const fileName = `recording-${timestamp}-${randomId}.${extension}`;
               const file = new File([recordingData.blob], fileName, { 
-                type: recordingData.type === 'video' ? 'video/webm' : 'audio/webm' 
+                type: mimeType 
               });
               
               formData.append('file', file);

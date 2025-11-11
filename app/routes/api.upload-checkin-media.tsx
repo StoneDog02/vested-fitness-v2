@@ -105,7 +105,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Validate file type
     const allowedTypes = recordingType === 'video' 
       ? ['video/webm', 'video/mp4', 'video/quicktime']
-      : ['audio/webm', 'audio/mp3', 'audio/wav', 'audio/m4a'];
+      : ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/m4a', 'audio/mp4'];
 
     const fileType = file.type || '';
     const baseMimeType = fileType.split(';')[0];

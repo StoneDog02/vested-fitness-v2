@@ -236,6 +236,40 @@ export default function VideoRecorder({
     }
   }, []);
 
+  const getSupportedMimeType = useCallback((type: 'video' | 'audio') => {
+    if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined') {
+      return null;
+    }
+
+    const videoCandidates = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm',
+      'video/mp4;codecs=h264,opus',
+      'video/mp4;codecs=h264,aac',
+      'video/mp4'
+    ];
+
+    const audioCandidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4;codecs=aac',
+      'audio/mp4',
+      'audio/mpeg'
+    ];
+
+    const candidates = type === 'video' ? videoCandidates : audioCandidates;
+    for (const candidate of candidates) {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }, []);
+
   const startRecording = useCallback(async () => {
     try {
       let mediaStream: MediaStream;
@@ -261,11 +295,23 @@ export default function VideoRecorder({
         videoRef.current.srcObject = mediaStream;
       }
 
-      const recorder = new MediaRecorder(mediaStream, {
-        mimeType: recordingType === 'video' 
-          ? 'video/webm;codecs=vp9' 
-          : 'audio/webm;codecs=opus'
-      });
+      const supportedMimeType = getSupportedMimeType(recordingType);
+      let preferredMimeType: string | null = supportedMimeType;
+      let recorder: MediaRecorder;
+
+      try {
+        recorder = supportedMimeType
+          ? new MediaRecorder(mediaStream, { mimeType: supportedMimeType })
+          : new MediaRecorder(mediaStream);
+      } catch (mimeError) {
+        console.warn('Failed to initialize MediaRecorder with preferred mimeType, falling back.', {
+          mimeError,
+          supportedMimeType,
+          recordingType
+        });
+        recorder = new MediaRecorder(mediaStream);
+        preferredMimeType = null;
+      }
 
       const chunks: Blob[] = [];
       
@@ -276,8 +322,9 @@ export default function VideoRecorder({
       };
 
       recorder.onstop = () => {
+        const effectiveMimeType = recorder.mimeType || preferredMimeType || chunks[0]?.type || (recordingType === 'video' ? 'video/webm' : 'audio/webm');
         const blob = new Blob(chunks, { 
-          type: recordingType === 'video' ? 'video/webm' : 'audio/webm' 
+          type: effectiveMimeType 
         });
         const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
         
@@ -306,7 +353,7 @@ export default function VideoRecorder({
       setMediaRecorder(recorder);
       setRecordedChunks(chunks);
       setIsRecording(true);
-      setIsPaused(false);
+    setIsPaused(false);
       setRecordingTime(0);
       setTranscript(''); // Reset transcript
       accumulatedTranscriptRef.current = ''; // Reset accumulated transcript
@@ -372,8 +419,9 @@ export default function VideoRecorder({
       
       // Create final blob from recorded chunks
       if (recordedChunks.length > 0) {
+        const effectiveMimeType = mediaRecorder?.mimeType || recordedChunks[0]?.type || (recordingType === 'video' ? 'video/webm' : 'audio/webm');
         const blob = new Blob(recordedChunks, { 
-          type: recordingType === 'video' ? 'video/webm' : 'audio/webm' 
+          type: effectiveMimeType 
         });
         const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
         
