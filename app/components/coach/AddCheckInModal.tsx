@@ -82,102 +82,54 @@ export default function AddCheckInModal({
           duration: recordingData.duration
         });
         
-        // Upload with retry logic and timeout
-        const uploadWithRetry = async (retries = 3): Promise<Response> => {
-          for (let attempt = 1; attempt <= retries; attempt++) {
-            try {
-              setUploadProgress(`Uploading${attempt > 1 ? ` (attempt ${attempt}/${retries})` : ''}...`);
-              
-              // Recreate FormData for each attempt (FormData cannot be reused after being sent)
-              const formData = new FormData();
-              
-              // Create a proper File object from the blob with unique filename for each attempt
-              const timestamp = Date.now();
-              const randomId = Math.random().toString(36).substring(2, 9);
-              const mimeType = recordingData.blob.type || (recordingData.type === 'video' ? 'video/webm' : 'audio/webm');
-              const extension = getExtensionFromMimeType(mimeType, recordingData.type);
-              const fileName = `recording-${timestamp}-${randomId}.${extension}`;
-              const file = new File([recordingData.blob], fileName, { 
-                type: mimeType 
-              });
-              
-              formData.append('file', file);
-              formData.append('clientId', clientId);
-              formData.append('recordingType', recordingData.type);
-              formData.append('duration', recordingData.duration.toString());
-              if (recordingData.transcript) {
-                formData.append('transcript', recordingData.transcript);
-              }
-              
-              // Create AbortController for timeout
-              const controller = new AbortController();
-              const timeout = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for large videos
-              
-              try {
-                const response = await fetch('/api/upload-checkin-media', {
-                  method: 'POST',
-                  body: formData,
-                  signal: controller.signal,
-                });
-                
-                clearTimeout(timeout);
-                
-                if (!response.ok) {
-                  const errorText = await response.text();
-                  let errorMessage = `Upload failed: ${response.status}`;
-                  
-                  try {
-                    const errorData = JSON.parse(errorText);
-                    errorMessage = errorData.error || errorMessage;
-                  } catch {
-                    errorMessage = errorText || errorMessage;
-                  }
-                  
-                  // Don't retry on client errors (400, 401, 403, 404)
-                  if (response.status >= 400 && response.status < 500) {
-                    throw new Error(errorMessage);
-                  }
-                  
-                  // Retry on server errors (500+) or network errors
-                  if (attempt < retries) {
-                    const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
-                    setUploadProgress(`Upload failed, retrying in ${delay / 1000}s...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue;
-                  }
-                  
-                  throw new Error(errorMessage);
-                }
-                
-                return response;
-              } catch (fetchError) {
-                clearTimeout(timeout);
-                
-                if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-                  throw new Error('Upload timeout - the file may be too large or your connection is slow. Please try again.');
-                }
-                
-                // Retry on network errors
-                if (attempt < retries && fetchError instanceof Error) {
-                  const delay = Math.pow(2, attempt) * 1000;
-                  setUploadProgress(`Connection error, retrying in ${delay / 1000}s...`);
-                  await new Promise(resolve => setTimeout(resolve, delay));
-                  continue;
-                }
-                
-                throw fetchError;
-              }
-            } catch (error) {
-              if (attempt === retries) {
-                throw error;
-              }
-            }
+        setUploadProgress('Uploading...');
+
+        const formData = new FormData();
+
+        // Create a proper File object from the blob with unique filename
+        const timestamp = Date.now();
+        const randomId = Math.random().toString(36).substring(2, 9);
+        const mimeType = recordingData.blob.type || (recordingData.type === 'video' ? 'video/webm' : 'audio/webm');
+        const extension = getExtensionFromMimeType(mimeType, recordingData.type);
+        const fileName = `recording-${timestamp}-${randomId}.${extension}`;
+        const file = new File([recordingData.blob], fileName, { 
+          type: mimeType 
+        });
+
+        formData.append('file', file);
+        formData.append('clientId', clientId);
+        formData.append('recordingType', recordingData.type);
+        formData.append('duration', recordingData.duration.toString());
+        if (recordingData.transcript) {
+          formData.append('transcript', recordingData.transcript);
+        }
+
+        // Create AbortController for timeout
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for large videos
+
+        const response = await fetch('/api/upload-checkin-media', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorMessage = `Upload failed: ${response.status}`;
+
+          try {
+            const errorData = JSON.parse(errorText);
+            errorMessage = errorData.error || errorMessage;
+          } catch {
+            errorMessage = errorText || errorMessage;
           }
-          
-          throw new Error('Max retries exceeded');
-        };
+
+          throw new Error(errorMessage);
+        }
         
-        const response = await uploadWithRetry();
         const result = await response.json();
         
         // Recording uploaded successfully - the check-in was created by the API
