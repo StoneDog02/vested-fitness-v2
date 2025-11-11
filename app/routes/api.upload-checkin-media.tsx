@@ -107,9 +107,13 @@ export async function action({ request }: ActionFunctionArgs) {
       ? ['video/webm', 'video/mp4', 'video/quicktime']
       : ['audio/webm', 'audio/mp3', 'audio/wav', 'audio/m4a'];
 
-    if (!allowedTypes.includes(file.type)) {
-      console.error('Invalid file type:', { fileType: file.type, recordingType, allowedTypes });
-      return json({ error: `Invalid file type. Expected ${allowedTypes.join(', ')} but got ${file.type}` }, { status: 400 });
+    const fileType = file.type || '';
+    const baseMimeType = fileType.split(';')[0];
+    const isAllowedType = allowedTypes.includes(fileType) || allowedTypes.includes(baseMimeType);
+
+    if (!isAllowedType) {
+      console.error('Invalid file type:', { fileType, baseMimeType, recordingType, allowedTypes });
+      return json({ error: `Invalid file type. Expected ${allowedTypes.join(', ')} but got ${fileType || 'unknown type'}` }, { status: 400 });
     }
 
     // Validate file size (50MB max for video, 10MB for audio)
