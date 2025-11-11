@@ -152,11 +152,15 @@ export async function action({ request }: ActionFunctionArgs) {
     console.log('Uploading file to storage:', { filePath, fileSize: file.size, fileType: file.type });
 
     // Upload to Supabase Storage with better error handling
+    const arrayBuffer = await file.arrayBuffer();
+    const fileBuffer = Buffer.from(arrayBuffer);
+
     const { error: uploadError } = await supabase.storage
       .from('checkin-media')
-      .upload(filePath, file, {
+      .upload(filePath, fileBuffer, {
         cacheControl: '3600',
-        upsert: false
+        upsert: false,
+        contentType: file.type || undefined,
       });
 
     if (uploadError) {
