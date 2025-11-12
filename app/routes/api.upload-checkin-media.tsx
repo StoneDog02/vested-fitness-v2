@@ -6,6 +6,8 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 
+const MAX_LOG_BLAMELESS_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, { status: 405 });
@@ -87,11 +89,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const transcript = formData.get("transcript") as string;
 
     console.log('Upload request received:', {
-      fileType: file?.type,
-      fileSize: file?.size,
       clientId,
       recordingType,
       duration,
+      file: {
+        type: file?.type,
+        size: file?.size,
+        name: file?.name
+      },
       hasTranscript: !!transcript,
       transcriptLength: transcript?.length,
       transcriptPreview: transcript?.substring(0, 100)
@@ -169,7 +174,11 @@ export async function action({ request }: ActionFunctionArgs) {
         message: uploadError.message,
         statusCode: uploadError.statusCode,
         errorCode: uploadError.error,
-        filePath
+        filePath,
+        fileInfo: {
+          type: file?.type,
+          size: file?.size
+        }
       });
       
       // Provide more specific error messages
@@ -181,11 +190,18 @@ export async function action({ request }: ActionFunctionArgs) {
         return json({ error: "Storage bucket not found. Please contact support." }, { status: 500 });
       }
       
-      if (uploadError.statusCode === '413' || uploadError.message?.includes('too large')) {
+      if (
+        uploadError.statusCode === '413' ||
+        uploadError.message?.includes('too large') ||
+        uploadError.message?.toLowerCase().includes('payload too large') ||
+        (file?.size && Number(file.size) > MAX_LOG_BLAMELESS_SIZE_BYTES)
+      ) {
         return json({ error: "File is too large for upload" }, { status: 413 });
       }
       
-      return json({ error: `Upload failed: ${uploadError.message || 'Unknown error'}` }, { status: 500 });
+      return json({ 
+        error: `Upload failed: ${uploadError.message || 'Unknown error'}` 
+      }, { status: 500 });
     }
 
     // Get public URL
