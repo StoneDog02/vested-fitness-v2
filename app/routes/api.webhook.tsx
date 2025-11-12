@@ -157,6 +157,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       
       if (error) {
         console.error('[WEBHOOK] Failed to update subscription record:', error);
+      } else {
+        const customerId = subscription.customer;
+        if (
+          typeof customerId === 'string' &&
+          (subscription.status === 'active' || subscription.status === 'trialing')
+        ) {
+          try {
+            await resetPaymentFailedAttempts(customerId);
+            console.log(
+              `[WEBHOOK] Reset payment attempts for customer ${customerId} after subscription status ${subscription.status}`
+            );
+          } catch (err) {
+            console.error(
+              '[WEBHOOK] Failed to reset payment attempts after subscription became active:',
+              err
+            );
+          }
+        }
       }
     }
     
