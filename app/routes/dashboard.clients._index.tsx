@@ -1,19 +1,16 @@
-import type { MetaFunction , LoaderFunction } from "@remix-run/node";
+import type { LoaderFunction, MetaFunction } from "@remix-run/node";
 import Button from "~/components/ui/Button";
-import Card from "~/components/ui/Card";
 import ClientInviteModal from "~/components/coach/ClientInviteModal";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
-import { Buffer } from "buffer";
 import type { Database } from "~/lib/supabase";
-import { useLoaderData, useSearchParams, useNavigate, useFetcher , Link } from "@remix-run/react";
-import ClientProfile from "~/components/coach/ClientProfile";
-import { calculateMacros } from "~/lib/utils";
-import { URL } from "url";
+import { extractAuthFromCookie } from "~/lib/supabase";
+import { useFetcher, useLoaderData, Link } from "@remix-run/react";
 import { useUser } from "~/context/UserContext";
+import { useToast } from "~/context/ToastContext";
 
 interface Supplement {
   id: string;
@@ -51,6 +48,23 @@ interface WorkoutPlan {
   is_active: boolean;
 }
 
+type ClientSummary = {
+  id: string;
+  name: string;
+  email?: string;
+  status?: string;
+  slug?: string;
+};
+
+type ClientsLoaderResult = {
+  clients: ClientSummary[];
+  hasMore: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  error?: string;
+};
+
 export const meta: MetaFunction = () => {
   return [
     { title: "Clients | Kava Training" },
@@ -59,85 +73,102 @@ export const meta: MetaFunction = () => {
 };
 
 // In-memory cache for coach's clients (expires after 30s)
-const clientsCache: Record<string, { data: any; expires: number }> = {};
+const clientsCache: Record<string, { data: ClientsLoaderResult; expires: number }> = {};
 
 export const loader: LoaderFunction = async ({ request }) => {
   const url = new URL(request.url);
-  const page = parseInt(url.searchParams.get("page") || "1", 10);
+  const rawPage = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
+  const page = Number.isNaN(rawPage) || rawPage < 1 ? 1 : rawPage;
   const pageSize = 10;
   const offset = (page - 1) * pageSize;
 
   const cookies = parse(request.headers.get("cookie") || "");
-  const supabaseAuthCookieKey = Object.keys(cookies).find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-  let accessToken;
-  if (supabaseAuthCookieKey) {
-    try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
-    } catch (e) {
-      accessToken = undefined;
-    }
-  }
-  let coachId = null;
+  const { accessToken } = extractAuthFromCookie(cookies);
+
   let authId: string | undefined;
   if (accessToken) {
     try {
       const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      authId =
-        decoded && typeof decoded === "object" && "sub" in decoded
-          ? (decoded.sub as string)
-          : undefined;
-    } catch (e) {
-      /* ignore */
+      if (decoded && typeof decoded === "object" && "sub" in decoded) {
+        authId = decoded.sub as string;
+      }
+    } catch (error) {
+      console.error("[LOADER] Failed to decode access token:", error);
     }
   }
+
+  let coachId: string | null = null;
+  let supabaseAdmin: ReturnType<typeof createClient<Database>> | null = null;
+
   if (authId) {
-    const supabase = createClient<Database>(
+    supabaseAdmin = createClient<Database>(
       process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
+      process.env.SUPABASE_SERVICE_KEY!,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
     );
-    const { data: user } = await supabase
-      .from("users")
-      .select("id, role, coach_id")
-      .eq("auth_id", authId)
-      .single();
-    if (user) {
-      coachId = user.role === "coach" ? user.id : user.coach_id;
+
+    try {
+      const { data: user, error: userError } = await supabaseAdmin
+        .from("users")
+        .select("id, role, coach_id")
+        .eq("auth_id", authId)
+        .single();
+
+      if (userError) {
+        console.error("[LOADER] Failed to resolve coach id:", userError);
+      } else if (user) {
+        coachId = user.role === "coach" ? user.id : user.coach_id;
+      }
+    } catch (error) {
+      console.error("[LOADER] Unexpected error resolving coach id:", error);
     }
   }
 
-  // Only cache the first page (optional, can expand later)
-  if (
-    coachId &&
-    page === 1 &&
-    clientsCache[coachId] &&
-    clientsCache[coachId].expires > Date.now()
-  ) {
-    return json(clientsCache[coachId].data);
+  const cacheEntry = coachId ? clientsCache[coachId] : undefined;
+  const cacheHit =
+    cacheEntry && cacheEntry.expires > Date.now() ? cacheEntry.data : null;
+
+  if (!coachId) {
+    if (cacheHit) {
+      return json({ ...cacheHit, error: "unauthorized" }, { status: 401 });
+    }
+    return json(
+      {
+        clients: [],
+        hasMore: false,
+        page,
+        pageSize,
+        total: 0,
+        error: "unauthorized",
+      },
+      { status: 401 }
+    );
   }
 
-  let clients: {
-    id: string;
-    name: string;
-    email?: string;
-    status?: string;
-    slug?: string;
-  }[] = [];
-  let hasMore = false;
-  let total = 0;
-  if (coachId) {
-    const supabase = createClient<Database>(
+  if (cacheHit && page === 1) {
+    return json(cacheHit);
+  }
+
+  if (!supabaseAdmin) {
+    supabaseAdmin = createClient<Database>(
       process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
+      process.env.SUPABASE_SERVICE_KEY!,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
     );
-    // Fetch paginated clients for this coach (summary only)
-    const { data: clientRows, count, error } = await supabase
+  }
+
+  try {
+    const { data: clientRows, count, error } = await supabaseAdmin
       .from("users")
       .select("id, name, email, status, slug", { count: "exact" })
       .eq("coach_id", coachId)
@@ -145,26 +176,52 @@ export const loader: LoaderFunction = async ({ request }) => {
       .neq("status", "inactive")
       .order("created_at", { ascending: false })
       .range(offset, offset + pageSize - 1);
-    if (error) console.log("[LOADER] Supabase error:", error);
-    clients = clientRows || [];
-    total = count || 0;
-    hasMore = offset + clients.length < total;
+
+    if (error) {
+      throw error;
+    }
+
+    const clients = clientRows ?? [];
+    const total = count ?? 0;
+    const hasMore = offset + clients.length < total;
+
+    const result: ClientsLoaderResult = {
+      clients,
+      hasMore,
+      page,
+      pageSize,
+      total,
+    };
+
+    if (page === 1) {
+      clientsCache[coachId] = {
+        data: result,
+        expires: Date.now() + 30_000,
+      };
+    }
+
+    return json(result);
+  } catch (error) {
+    console.error("[LOADER] Failed to fetch clients:", error);
+    if (page === 1 && cacheHit) {
+      return json({ ...cacheHit, error: "failed_to_load" }, { status: 500 });
+    }
+    return json(
+      {
+        clients: [],
+        hasMore: false,
+        page,
+        pageSize,
+        total: 0,
+        error: "failed_to_load",
+      },
+      { status: 500 }
+    );
   }
-  const result = { clients, hasMore, page, pageSize, total };
-  if (coachId && page === 1) {
-    clientsCache[coachId] = { data: result, expires: Date.now() + 30_000 };
-  }
-  return json(result);
 };
 
 export default function ClientsIndex() {
-  const initialData = useLoaderData<{
-    clients: { id: string; name: string; email?: string; status?: string; slug?: string }[];
-    hasMore: boolean;
-    page: number;
-    pageSize: number;
-    total: number;
-  }>();
+  const initialData = useLoaderData<ClientsLoaderResult>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [clients, setClients] = useState(initialData.clients);
@@ -172,6 +229,8 @@ export default function ClientsIndex() {
   const [hasMore, setHasMore] = useState(initialData.hasMore);
   const [loadingMore, setLoadingMore] = useState(false);
   const fetcher = useFetcher();
+  const toast = useToast();
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<{ [clientId: string]: number }>({});
   const user = useUser();
 
@@ -195,20 +254,70 @@ export default function ClientsIndex() {
     };
   }, []);
 
-  // When fetcher loads more clients, append them
   useEffect(() => {
-    if (fetcher.data && fetcher.state === "idle") {
-      const data = fetcher.data as {
-        clients: { id: string; name: string; email?: string; status?: string; slug?: string }[];
-        hasMore: boolean;
-        page: number;
-      };
-      setClients((prev) => [...prev, ...(data.clients || [])]);
-      setPage(data.page);
-      setHasMore(data.hasMore);
-      setLoadingMore(false);
+    if (!initialData.error) {
+      setLoadMoreError(null);
+      return;
     }
-  }, [fetcher.data, fetcher.state]);
+
+    if (initialData.error === "unauthorized") {
+      toast.error("Session expired", "Please refresh and sign in again.");
+      setLoadMoreError("We couldn't verify your access. Refresh the page to continue.");
+    } else {
+      toast.error("Couldn't load clients", "Please try again in a moment.");
+      setLoadMoreError("We couldn't load clients right now. Please try again.");
+    }
+  }, [initialData.error, toast]);
+
+  // When fetcher loads more clients, merge them into state and surface errors
+  useEffect(() => {
+    if (fetcher.state !== "idle") {
+      return;
+    }
+
+    const data = fetcher.data as ClientsLoaderResult | undefined;
+
+    if (!data) {
+      if (loadingMore) {
+        setLoadMoreError("Unable to load more clients. Please try again.");
+        toast.error("Couldn't load clients", "Please try again.");
+        setLoadingMore(false);
+      }
+      return;
+    }
+
+    if (typeof data.page === "number") {
+      setPage(data.page);
+    }
+    if (typeof data.hasMore === "boolean") {
+      setHasMore(data.hasMore);
+    }
+
+    if (data.error) {
+      if (loadingMore) {
+        setLoadMoreError("Unable to load more clients. Please try again.");
+        toast.error("Couldn't load clients", "Please try again.");
+      }
+    } else {
+      const newClients = data.clients ?? [];
+      if (newClients.length > 0) {
+        setClients((prev) => {
+          const existingIds = new Set(prev.map((client) => client.id));
+          const merged = [...prev];
+          for (const client of newClients) {
+            if (!existingIds.has(client.id)) {
+              merged.push(client);
+              existingIds.add(client.id);
+            }
+          }
+          return merged;
+        });
+      }
+      setLoadMoreError(null);
+    }
+
+    setLoadingMore(false);
+  }, [fetcher.data, fetcher.state, loadingMore, toast]);
 
   const filteredClients = clients.filter((client) =>
     client.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -216,8 +325,13 @@ export default function ClientsIndex() {
   );
 
   const handleLoadMore = () => {
+    if (loadingMore || fetcher.state !== "idle") {
+      return;
+    }
+    setLoadMoreError(null);
     setLoadingMore(true);
-    fetcher.load(`/dashboard/clients?page=${page + 1}`);
+    const nextPage = page + 1;
+    fetcher.load(`/dashboard/clients?index&page=${nextPage}`);
   };
 
   return (
@@ -294,11 +408,18 @@ export default function ClientsIndex() {
       </div>
 
       {/* Load More Button */}
-      {hasMore && (
-        <div className="flex justify-center mt-8">
-          <Button variant="outline" onClick={handleLoadMore} disabled={loadingMore || fetcher.state !== "idle"}>
-            {loadingMore || fetcher.state !== "idle" ? "Loading..." : "Load More"}
-          </Button>
+      {(hasMore || loadMoreError) && (
+        <div className="flex flex-col items-center mt-8 space-y-2">
+          {hasMore && (
+            <Button variant="outline" onClick={handleLoadMore} disabled={loadingMore || fetcher.state !== "idle"}>
+              {loadingMore || fetcher.state !== "idle" ? "Loading..." : "Load More"}
+            </Button>
+          )}
+          {loadMoreError && (
+            <p className="text-sm text-red-500 dark:text-red-400 text-center">
+              {loadMoreError}
+            </p>
+          )}
         </div>
       )}
 
