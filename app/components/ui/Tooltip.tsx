@@ -4,9 +4,10 @@ import ReactDOM from "react-dom";
 interface TooltipProps {
   content: ReactNode;
   children: ReactNode;
+  className?: string;
 }
 
-const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
+const Tooltip: React.FC<TooltipProps> = ({ content, children, className }) => {
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number; placement: 'top' | 'bottom' }>({ top: 0, left: 0, placement: 'bottom' });
   const triggerRef = useRef<HTMLSpanElement>(null);
@@ -86,7 +87,7 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
 
   return (
     <span
-      className="relative inline-block focus:outline-none"
+      className={`relative inline-block focus:outline-none ${className || ""}`}
       ref={triggerRef}
       onMouseEnter={show}
       onMouseLeave={hide}

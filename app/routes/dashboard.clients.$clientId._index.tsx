@@ -8,10 +8,12 @@ import CheckInHistoryModal from "~/components/coach/CheckInHistoryModal";
 import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
 import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
 import ProgressPhotosModal from "~/components/coach/ProgressPhotosModal";
-import CreateCheckInFormModal from "~/components/coach/CreateCheckInFormModal";
+import CreateCheckInFormModal, { FormTemplate } from "~/components/coach/CreateCheckInFormModal";
 import SendCheckInFormModal from "~/components/coach/SendCheckInFormModal";
 import CheckInFormResponseViewer from "~/components/coach/CheckInFormResponseViewer";
 import CheckInFormHistoryModal from "~/components/coach/CheckInFormHistoryModal";
+import ViewCheckInFormsModal from "~/components/coach/ViewCheckInFormsModal";
+import Tooltip from "~/components/ui/Tooltip";
 import { useState, useEffect } from "react";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
@@ -709,10 +711,13 @@ export default function ClientDetails() {
   const [showProgressPhotos, setShowProgressPhotos] = useState(false);
   const [showCreateCheckInForm, setShowCreateCheckInForm] = useState(false);
   const [showSendCheckInForm, setShowSendCheckInForm] = useState(false);
+  const [showViewForms, setShowViewForms] = useState(false);
   const [showFormResponseViewer, setShowFormResponseViewer] = useState(false);
   const [currentFormResponse, setCurrentFormResponse] = useState<any>(null);
   const [showFormHistory, setShowFormHistory] = useState(false);
   const [completedForms, setCompletedForms] = useState<any[]>(loaderCompletedForms);
+  const [editingForm, setEditingForm] = useState<FormTemplate | null>(null);
+  const [formsRefreshToken, setFormsRefreshToken] = useState(0);
   const fetcher = useFetcher();
 
   // Local state for updates, checkIns, and supplements
@@ -960,39 +965,60 @@ export default function ClientDetails() {
   };
 
   // Check-in form handlers
-  const handleCreateCheckInForm = async (formData: { title: string; description: string; questions: any[] }) => {
+  const handleSaveCheckInForm = async (formData: FormTemplate) => {
     try {
       const formDataToSend = new FormData();
       formDataToSend.append("title", formData.title);
-      formDataToSend.append("description", formData.description);
-      formDataToSend.append("questions", JSON.stringify(formData.questions));
+      formDataToSend.append("description", formData.description ?? "");
+      formDataToSend.append(
+        "questions",
+        JSON.stringify(
+          (formData.questions || []).map((question, index) => ({
+            id: question.id,
+            persistedId: question.persistedId ?? null,
+            question_text: question.question_text,
+            question_type: question.question_type,
+            is_required: question.is_required,
+            options: (question.options || []).filter((option) => option && option.trim().length > 0),
+            order_index: index,
+          }))
+        )
+      );
 
-      const response = await fetch('/api/create-check-in-form', {
-        method: 'POST',
+      const endpoint = formData.id
+        ? `/api/update-check-in-form/${formData.id}`
+        : "/api/create-check-in-form";
+
+      const response = await fetch(endpoint, {
+        method: "POST",
         body: formDataToSend,
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to create form');
+        throw new Error(errorData.error || "Failed to save form");
       }
 
-      const result = await response.json();
-      
-      // Show success toast
-      toast.success(
-        "Form Created Successfully", 
-        `"${formData.title}" has been saved and is ready to send to clients.`
-      );
-      
-      // Close the modal
+      if (formData.id) {
+        toast.success(
+          "Form Updated",
+          `"${formData.title}" has been updated successfully.`
+        );
+      } else {
+        toast.success(
+          "Form Created Successfully",
+          `"${formData.title}" has been saved and is ready to send to clients.`
+        );
+      }
+
+      setEditingForm(null);
       setShowCreateCheckInForm(false);
-      
+      setFormsRefreshToken((prev) => prev + 1);
     } catch (error) {
-      console.error('Error creating form:', error);
+      console.error("Error saving form:", error);
       toast.error(
-        "Failed to Create Form", 
-        error instanceof Error ? error.message : 'An unexpected error occurred'
+        "Failed to Save Form",
+        error instanceof Error ? error.message : "An unexpected error occurred"
       );
     }
   };
@@ -1120,6 +1146,75 @@ export default function ClientDetails() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left column with two stacked cards */}
           <div className="space-y-6">
+            <Card title="Form Manager">
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
+                Build, send, and manage the check-in forms you use with clients.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Tooltip content="Build a new check-in form template for future use." className="w-full block">
+                  <button
+                    onClick={() => {
+                      setEditingForm(null);
+                      setShowViewForms(false);
+                      setShowCreateCheckInForm(true);
+                    }}
+                    className="group w-full rounded-xl border border-gray-light dark:border-davyGray bg-white dark:bg-night p-8 flex flex-col items-center justify-center gap-4 shadow-sm transition-all duration-200 hover:border-primary hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[140px]"
+                  >
+                    <span className="rounded-full bg-primary/10 p-4 text-primary transition-all duration-200 group-hover:bg-primary group-hover:text-white group-hover:scale-110">
+                      <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M11 9V4a1 1 0 10-2 0v5H4a1 1 0 100 2h5v5a1 1 0 102 0v-5h5a1 1 0 100-2h-5z" />
+                      </svg>
+                    </span>
+                    <span className="text-lg font-semibold text-secondary dark:text-alabaster">
+                      Create Form
+                    </span>
+                  </button>
+                </Tooltip>
+
+                <Tooltip content="Send an existing form to this client with an expiration date." className="w-full block">
+                  <button
+                    onClick={() => {
+                      setEditingForm(null);
+                      setShowCreateCheckInForm(false);
+                      setShowViewForms(false);
+                      setShowSendCheckInForm(true);
+                    }}
+                    className="group w-full rounded-xl border border-gray-light dark:border-davyGray bg-white dark:bg-night p-8 flex flex-col items-center justify-center gap-4 shadow-sm transition-all duration-200 hover:border-primary hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[140px]"
+                  >
+                    <span className="rounded-full bg-primary/10 p-4 text-primary transition-all duration-200 group-hover:bg-primary group-hover:text-white group-hover:scale-110">
+                      <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M2.94 2.94a1.5 1.5 0 011.58-.33l12 4.5a1.5 1.5 0 010 2.78l-12 4.5A1.5 1.5 0 012 13.5v-3.086a1 1 0 01.293-.707L5 7.293a1 1 0 011.414 1.414L4.414 10H8a1 1 0 010 2H4.414l1.999 1.999A1 1 0 014.999 15h-.003a1 1 0 01-.706-.293L2.293 12.707A1 1 0 012 12v-9a1 1 0 01.94-.06z" />
+                      </svg>
+                    </span>
+                    <span className="text-lg font-semibold text-secondary dark:text-alabaster">
+                      Send Form
+                    </span>
+                  </button>
+                </Tooltip>
+
+                <Tooltip content="Review and edit the forms you've already created." className="w-full block">
+                  <button
+                    onClick={() => {
+                      setEditingForm(null);
+                      setShowCreateCheckInForm(false);
+                      setShowSendCheckInForm(false);
+                      setShowViewForms(true);
+                    }}
+                    className="group w-full rounded-xl border border-gray-light dark:border-davyGray bg-white dark:bg-night p-8 flex flex-col items-center justify-center gap-4 shadow-sm transition-all duration-200 hover:border-primary hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[140px]"
+                  >
+                    <span className="rounded-full bg-primary/10 p-4 text-primary transition-all duration-200 group-hover:bg-primary group-hover:text-white group-hover:scale-110">
+                      <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zM7 9a1 1 0 012 0v3a1 1 0 11-2 0V9zm4-1a1 1 0 100 2h1a1 1 0 110 2h-1a1 1 0 100 2 1 1 0 100 2h1a3 3 0 000-6h-1V8a1 1 0 10-2 0z" clipRule="evenodd" />
+                      </svg>
+                    </span>
+                    <span className="text-lg font-semibold text-secondary dark:text-alabaster">
+                      View Forms
+                    </span>
+                  </button>
+                </Tooltip>
+              </div>
+            </Card>
+
             {/* Updates to Client */}
             <Card
               title={
@@ -1131,18 +1226,6 @@ export default function ClientDetails() {
                       className="text-xs text-primary hover:underline"
                     >
                       History
-                    </button>
-                    <button
-                      onClick={() => setShowCreateCheckInForm(true)}
-                      className="text-xs text-primary hover:underline"
-                    >
-                      Create Form
-                    </button>
-                    <button
-                      onClick={() => setShowSendCheckInForm(true)}
-                      className="text-xs text-primary hover:underline"
-                    >
-                      Send Form
                     </button>
                     <button
                       onClick={() => setShowAddMessage(true)}
@@ -1489,8 +1572,13 @@ export default function ClientDetails() {
         {/* Check-In Form Modals */}
         <CreateCheckInFormModal
           isOpen={showCreateCheckInForm}
-          onClose={() => setShowCreateCheckInForm(false)}
-          onSubmit={handleCreateCheckInForm}
+          onClose={() => {
+            setShowCreateCheckInForm(false);
+            setEditingForm(null);
+          }}
+          onSubmit={handleSaveCheckInForm}
+          initialForm={editingForm}
+          mode={editingForm ? "edit" : "create"}
         />
 
         <SendCheckInFormModal
@@ -1499,6 +1587,17 @@ export default function ClientDetails() {
           clientId={client.id}
           clientName={client.name}
           onSubmit={handleSendCheckInForm}
+        />
+
+        <ViewCheckInFormsModal
+          isOpen={showViewForms}
+          onClose={() => setShowViewForms(false)}
+          onEdit={(form) => {
+            setEditingForm(form);
+            setShowViewForms(false);
+            setShowCreateCheckInForm(true);
+          }}
+          refreshToken={formsRefreshToken}
         />
 
         {/* Form Response Viewer Modal */}

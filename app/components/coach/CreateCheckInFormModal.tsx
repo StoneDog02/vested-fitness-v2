@@ -1,31 +1,56 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Modal from "~/components/ui/Modal";
 import Button from "~/components/ui/Button";
 
 export interface FormQuestion {
   id: string;
   question_text: string;
-  question_type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+  question_type: "text" | "textarea" | "number" | "select" | "radio" | "checkbox";
   is_required: boolean;
   options?: string[];
   order_index: number;
+  persistedId?: number;
+}
+
+export interface FormTemplate {
+  id?: string;
+  title: string;
+  description: string;
+  questions: FormQuestion[];
 }
 
 interface CreateCheckInFormModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (formData: { title: string; description: string; questions: FormQuestion[] }) => void;
+  onSubmit: (formData: FormTemplate) => Promise<void> | void;
+  initialForm?: FormTemplate | null;
+  mode?: "create" | "edit";
 }
 
 export default function CreateCheckInFormModal({
   isOpen,
   onClose,
   onSubmit,
+  initialForm = null,
+  mode = "create",
 }: CreateCheckInFormModalProps) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [questions, setQuestions] = useState<FormQuestion[]>([]);
+  const [title, setTitle] = useState(initialForm?.title ?? "");
+  const [description, setDescription] = useState(initialForm?.description ?? "");
+  const [questions, setQuestions] = useState<FormQuestion[]>(initialForm?.questions ?? []);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setTitle(initialForm?.title ?? "");
+      setDescription(initialForm?.description ?? "");
+      setQuestions(initialForm?.questions ?? []);
+    } else if (mode === "create") {
+      // Reset state when closing in create mode
+      setTitle("");
+      setDescription("");
+      setQuestions([]);
+    }
+  }, [isOpen, initialForm, mode]);
 
   const addQuestion = () => {
     const newQuestion: FormQuestion = {
@@ -94,13 +119,21 @@ export default function CreateCheckInFormModal({
     setIsSubmitting(true);
     try {
       await onSubmit({
+        id: initialForm?.id,
         title: title.trim(),
         description: description.trim(),
-        questions: questions.filter(q => q.question_text.trim()),
+        questions: questions
+          .filter((q) => q.question_text.trim())
+          .map((q, index) => ({
+            ...q,
+            order_index: index,
+          })),
       });
-      setTitle("");
-      setDescription("");
-      setQuestions([]);
+      if (mode === "create") {
+        setTitle("");
+        setDescription("");
+        setQuestions([]);
+      }
       onClose();
     } catch (error) {
       console.error('Error creating form:', error);
@@ -122,7 +155,7 @@ export default function CreateCheckInFormModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Create Check-In Form"
+      title={mode === "edit" ? "Edit Check-In Form" : "Create Check-In Form"}
       size="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -303,7 +336,13 @@ export default function CreateCheckInFormModal({
             variant="primary"
             disabled={!title.trim() || isSubmitting}
           >
-            {isSubmitting ? 'Creating...' : 'Create Form'}
+            {isSubmitting
+              ? mode === "edit"
+                ? "Saving..."
+                : "Creating..."
+              : mode === "edit"
+              ? "Save Changes"
+              : "Create Form"}
           </Button>
         </div>
       </form>
