@@ -61,7 +61,17 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "Only coaches can create products" }, { status: 403 });
     }
 
-    // Parse request body
+    // Parse request body (supports JSON and form submissions)
+    const contentType = request.headers.get("content-type") || "";
+    let parsedBody: Record<string, unknown> = {};
+
+    if (contentType.includes("application/json")) {
+      parsedBody = await request.json();
+    } else {
+      const formData = await request.formData();
+      parsedBody = Object.fromEntries(formData.entries());
+    }
+
     const {
       name,
       description,
@@ -69,14 +79,32 @@ export async function action({ request }: ActionFunctionArgs) {
       currency = "usd",
       interval = "month",
       intervalCount = 1,
-    } = await request.json();
+    } = parsedBody as {
+      name?: string;
+      description?: string;
+      amount?: string | number;
+      currency?: string;
+      interval?: string;
+      intervalCount?: string | number;
+    };
 
     if (!name || !amount) {
       return json({ error: "Name and amount are required" }, { status: 400 });
     }
 
     // Convert amount to cents (Stripe uses cents)
-    const amountInCents = Math.round(parseFloat(amount) * 100);
+    const amountValue =
+      typeof amount === "number"
+        ? amount
+        : typeof amount === "string"
+        ? parseFloat(amount)
+        : NaN;
+
+    if (!Number.isFinite(amountValue)) {
+      return json({ error: "Amount must be a valid number" }, { status: 400 });
+    }
+
+    const amountInCents = Math.round(amountValue * 100);
 
     if (amountInCents <= 0) {
       return json({ error: "Amount must be greater than 0" }, { status: 400 });
@@ -96,7 +124,10 @@ export async function action({ request }: ActionFunctionArgs) {
       currency,
       recurring: {
         interval: interval as "day" | "week" | "month" | "year",
-        interval_count: intervalCount,
+        interval_count:
+          typeof intervalCount === "number"
+            ? intervalCount
+            : parseInt(intervalCount ?? "1", 10) || 1,
       },
       active: true,
     });
