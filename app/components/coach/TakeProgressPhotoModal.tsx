@@ -48,9 +48,26 @@ export default function TakeProgressPhotoModal({
       });
       
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Upload response:', response.status, errorText);
-        throw new Error(`Failed to upload photo: ${response.status} ${errorText}`);
+        let errorMessage = 'Failed to upload progress photo. Please try again.';
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorMessage;
+            if (errorData.details) {
+              console.error('Upload error details:', errorData.details);
+            }
+          } catch (e) {
+            console.error('Failed to parse error response:', e);
+          }
+        } else {
+          const errorText = await response.text();
+          console.error('Upload response:', response.status, errorText);
+          if (errorText) {
+            errorMessage = errorText;
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
@@ -60,7 +77,8 @@ export default function TakeProgressPhotoModal({
       onClose();
     } catch (error) {
       console.error('Error uploading progress photo:', error);
-      alert('Failed to upload progress photo. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload progress photo. Please try again.';
+      alert(errorMessage);
     } finally {
       setIsUploading(false);
     }

@@ -74,6 +74,45 @@ export const action = async ({ request }: { request: Request }) => {
       return json({ error: "Missing file or clientId" }, { status: 400 });
     }
 
+    // Validate file type
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+    if (!allowedTypes.includes(file.type.toLowerCase())) {
+      console.error("Invalid file type:", { 
+        fileType: file.type, 
+        fileName: file.name, 
+        fileSize: file.size,
+        clientId 
+      });
+      return json({ 
+        error: "Invalid file type. Please upload an image file (JPEG, PNG, GIF, or WebP).",
+        fileType: file.type 
+      }, { status: 400 });
+    }
+
+    // Validate file size (max 10MB - matching frontend validation)
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    if (file.size > MAX_FILE_SIZE) {
+      console.error("File too large:", { 
+        fileSize: file.size, 
+        maxSize: MAX_FILE_SIZE,
+        fileName: file.name,
+        clientId 
+      });
+      return json({ 
+        error: `File size exceeds the 10MB limit. Your file is ${(file.size / (1024 * 1024)).toFixed(2)}MB. Please compress or resize the image.`,
+        fileSize: file.size,
+        maxSize: MAX_FILE_SIZE
+      }, { status: 400 });
+    }
+
+    console.log("Uploading progress photo:", {
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      clientId,
+      userId: user.id
+    });
+
     // Verify user has access to this client
     if (user.role === "client") {
       // Clients can only upload their own photos
@@ -113,8 +152,29 @@ export const action = async ({ request }: { request: Request }) => {
       });
 
     if (uploadError) {
-      console.error("Upload error:", uploadError);
-      return json({ error: "Failed to upload file" }, { status: 500 });
+      console.error("Upload error:", {
+        error: uploadError,
+        message: uploadError.message,
+        fileName: filename,
+        fileSize: buffer.length,
+        clientId,
+        userId: user.id
+      });
+      
+      // Provide more specific error messages based on the error type
+      let errorMessage = "Failed to upload file";
+      if (uploadError.message?.includes("size") || uploadError.message?.includes("large")) {
+        errorMessage = "File is too large. Please compress or resize the image and try again.";
+      } else if (uploadError.message?.includes("permission") || uploadError.message?.includes("unauthorized")) {
+        errorMessage = "Permission denied. Please check your access rights.";
+      } else if (uploadError.message?.includes("quota") || uploadError.message?.includes("limit")) {
+        errorMessage = "Storage quota exceeded. Please contact support.";
+      }
+      
+      return json({ 
+        error: errorMessage,
+        details: uploadError.message 
+      }, { status: 500 });
     }
 
     // Get public URL
@@ -135,8 +195,19 @@ export const action = async ({ request }: { request: Request }) => {
       .single();
 
     if (dbError) {
-      console.error("Database error:", dbError);
-      return json({ error: "Failed to save photo data" }, { status: 500 });
+      console.error("Database error:", {
+        error: dbError,
+        message: dbError.message,
+        details: dbError.details,
+        hint: dbError.hint,
+        clientId,
+        userId: user.id,
+        photoUrl: urlData.publicUrl
+      });
+      return json({ 
+        error: "Failed to save photo data",
+        details: dbError.message 
+      }, { status: 500 });
     }
 
     return json({ 
@@ -146,8 +217,15 @@ export const action = async ({ request }: { request: Request }) => {
     });
 
   } catch (error) {
-    console.error("Upload progress photo error:", error);
-    return json({ error: "Internal server error" }, { status: 500 });
+    console.error("Upload progress photo error:", {
+      error,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    return json({ 
+      error: "Internal server error",
+      message: error instanceof Error ? error.message : "An unexpected error occurred"
+    }, { status: 500 });
   }
 };
 
