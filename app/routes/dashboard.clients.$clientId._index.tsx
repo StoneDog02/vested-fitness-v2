@@ -1598,6 +1598,7 @@ export default function ClientDetails() {
             setShowCreateCheckInForm(true);
           }}
           refreshToken={formsRefreshToken}
+          onDeleteSuccess={() => setFormsRefreshToken((prev) => prev + 1)}
         />
 
         {/* Form Response Viewer Modal */}
