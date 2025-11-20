@@ -3,12 +3,15 @@ import { json } from "@remix-run/node";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import { useMatches, useLoaderData } from "@remix-run/react";
 import { useState } from "react";
+import React from "react";
+import { useFetcher } from "@remix-run/react";
 import Button from "~/components/ui/Button";
 import CreateSubscriptionModal from "~/components/coach/CreateSubscriptionModal";
 import Card from "~/components/ui/Card";
 import dayjs from "dayjs";
 import { CheckCircleIcon, ClockIcon, CreditCardIcon, CalendarIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 import Tooltip from "~/components/ui/Tooltip";
+import { useToast } from "~/context/ToastContext";
 
 export const meta: MetaFunction = () => {
   return [
@@ -67,6 +70,8 @@ export default function ClientSubscription() {
   const matches = useMatches();
   const loaderData = useLoaderData<typeof loader>();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const reactivateFetcher = useFetcher();
+  const toast = useToast();
 
   // Find the parent route with client loader data for avatar/name
   const parentData = matches.find(
@@ -75,21 +80,11 @@ export default function ClientSubscription() {
     client: { id: string; name?: string; email?: string; created_at?: string } | null;
   };
 
-  // Defensive: handle missing client
-  if (!parentData?.client) {
-    return (
-      <ClientDetailLayout>
-        <div className="p-6 text-center text-red-600">
-          Client not found or unavailable.
-        </div>
-      </ClientDetailLayout>
-    );
-  }
-
-  const client = parentData.client;
+  const client = parentData?.client || null;
   const subscription = loaderData.subscription;
   const paymentMethods = loaderData.paymentMethods || [];
   const paymentIntentDetails = loaderData.paymentIntentDetails || null;
+  const retryInfo = loaderData.retryInfo || null;
   const hasPaymentMethod = paymentMethods.length > 0;
   
   // Debug: Log payment intent details when subscription is incomplete
@@ -182,6 +177,43 @@ export default function ClientSubscription() {
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
   };
 
+  // Handle subscription reactivation
+  const handleReactivateSubscription = () => {
+    if (!subscription || !subscriptionDetails) return;
+    
+    reactivateFetcher.submit(
+      {
+        subscriptionId: subscriptionDetails.id,
+        clientId: client.id,
+      },
+      {
+        method: "POST",
+        action: "/api/reactivate-subscription",
+      }
+    );
+  };
+
+  // Handle reactivation response
+  React.useEffect(() => {
+    if (reactivateFetcher.state === "idle" && reactivateFetcher.data) {
+      if (reactivateFetcher.data.success) {
+        toast.success(
+          "Subscription Reactivated",
+          "The subscription has been successfully reactivated and payment has been processed."
+        );
+        // Reload the page to show updated subscription status
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        toast.error(
+          "Reactivation Failed",
+          reactivateFetcher.data.error || "Unable to reactivate the subscription. Please try again."
+        );
+      }
+    }
+  }, [reactivateFetcher.state, reactivateFetcher.data, toast]);
+
   // Helper function to get user-friendly decline code messages
   const getDeclineCodeMessage = (declineCode: string): string => {
     const messages: Record<string, string> = {
@@ -204,6 +236,16 @@ export default function ClientSubscription() {
     };
     return messages[declineCode] || declineCode.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
+
+  if (!client) {
+    return (
+      <ClientDetailLayout>
+        <div className="p-6 text-center text-red-600">
+          Client not found or unavailable.
+        </div>
+      </ClientDetailLayout>
+    );
+  }
 
   return (
     <ClientDetailLayout>
@@ -244,11 +286,11 @@ export default function ClientSubscription() {
           </div>
         )}
 
-        {/* Active Subscription State */}
+        {/* Subscription State (Active, Incomplete, or Expired) */}
         {subscription && subscriptionDetails && (
           <div className="space-y-6">
             {/* Subscription Overview Card */}
-            <Card title="Active Subscription">
+            <Card title={subscriptionDetails.status === "incomplete_expired" ? "Expired Subscription" : "Active Subscription"}>
               <div className="space-y-6">
                 {/* Status Badge */}
                 <div className="flex items-center justify-between">
@@ -259,6 +301,8 @@ export default function ClientSubscription() {
                       ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
                       : subscriptionDetails.status === "incomplete"
                       ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400"
+                      : subscriptionDetails.status === "incomplete_expired"
+                      ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
                       : subscriptionDetails.status === "past_due"
                       ? "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400"
                       : subscriptionDetails.status === "canceled" || subscriptionDetails.status === "unpaid"
@@ -278,10 +322,51 @@ export default function ClientSubscription() {
                       </span>
                     )}
                     {subscriptionDetails.status === "past_due" && (
-                      <span className="flex items-center gap-1">
-                        <ClockIcon className="w-4 h-4" />
-                        Past Due
-                      </span>
+                      <Tooltip
+                        content={
+                          (() => {
+                            const reason = paymentIntentDetails?.decline_code
+                              ? getDeclineCodeMessage(paymentIntentDetails.decline_code)
+                              : subscriptionDetails.cancellationReason
+                              ? subscriptionDetails.cancellationReason
+                              : "Payment past due";
+                            return (
+                              <div>
+                                <div className="font-semibold mb-1">Past Due: Payment Required</div>
+                                <div className="text-xs opacity-90">
+                                  {paymentIntentDetails?.decline_code && (
+                                    <div className="mb-1"><strong>Reason:</strong> {reason}</div>
+                                  )}
+                                  {paymentIntentDetails?.message && (
+                                    <div className="mb-1">{paymentIntentDetails.message.replace(/^Your /i, 'Client ')}</div>
+                                  )}
+                                  {retryInfo && retryInfo.isRetrying ? (
+                                    <>
+                                      <div className="mb-1">{retryInfo.message}</div>
+                                      {retryInfo.lastAttemptMessage && (
+                                        <div className="mb-1">{retryInfo.lastAttemptMessage}</div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="mb-1">{retryInfo?.message || "Stripe is no longer attempting payment automatically."}</div>
+                                      {retryInfo?.lastAttemptMessage && (
+                                        <div className="mb-1">{retryInfo.lastAttemptMessage}</div>
+                                      )}
+                                    </>
+                                  )}
+                                  <div>Please ensure the client's payment method has sufficient funds or update their payment method.</div>
+                                </div>
+                              </div>
+                            );
+                          })()
+                        }
+                      >
+                        <span className="flex items-center gap-1 cursor-help">
+                          <ClockIcon className="w-4 h-4" />
+                          Past Due
+                        </span>
+                      </Tooltip>
                     )}
                     {subscriptionDetails.status === "canceled" && (
                       <span className="flex items-center gap-1">
@@ -298,22 +383,36 @@ export default function ClientSubscription() {
                     {subscriptionDetails.status === "incomplete" && (
                       <Tooltip
                         content={
-                          paymentIntentDetails
-                            ? (() => {
-                                const reason = paymentIntentDetails.decline_code
-                                  ? getDeclineCodeMessage(paymentIntentDetails.decline_code)
-                                  : paymentIntentDetails.message?.replace(/^Your /i, 'Client ') || "Payment failed";
-                                return (
-                                  <div>
-                                    <div className="font-semibold mb-1">Incomplete: {paymentIntentDetails.message?.replace(/^Your /i, 'Client ') || "Payment failed"}</div>
-                                    <div className="text-xs opacity-90">
-                                      <div className="mb-1"><strong>Reason:</strong> {reason}</div>
-                                      <div>Stripe will automatically retry payment over the next 3 days. If payment succeeds, the subscription will become active automatically.</div>
-                                    </div>
-                                  </div>
-                                );
-                              })()
-                            : "Payment is pending. Stripe will automatically retry payment over the next 3 days."
+                          (() => {
+                            const reason = paymentIntentDetails?.decline_code
+                              ? getDeclineCodeMessage(paymentIntentDetails.decline_code)
+                              : paymentIntentDetails?.message?.replace(/^Your /i, 'Client ') || "Payment failed";
+                            return (
+                              <div>
+                                <div className="font-semibold mb-1">Incomplete: {paymentIntentDetails?.message?.replace(/^Your /i, 'Client ') || "Payment failed"}</div>
+                                <div className="text-xs opacity-90">
+                                  {paymentIntentDetails?.decline_code && (
+                                    <div className="mb-1"><strong>Reason:</strong> {reason}</div>
+                                  )}
+                                  {retryInfo && retryInfo.isRetrying ? (
+                                    <>
+                                      <div className="mb-1">{retryInfo.message}</div>
+                                      {retryInfo.lastAttemptMessage && (
+                                        <div className="mb-1">{retryInfo.lastAttemptMessage}</div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="mb-1">Stripe will automatically retry payment over the next 23 hours. If payment succeeds, the subscription will become active automatically.</div>
+                                      {retryInfo?.lastAttemptMessage && (
+                                        <div className="mb-1">{retryInfo.lastAttemptMessage}</div>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()
                         }
                       >
                         <span className="flex items-center gap-1 cursor-help">
@@ -322,31 +421,57 @@ export default function ClientSubscription() {
                         </span>
                       </Tooltip>
                     )}
-                    {!["active", "trialing", "past_due", "canceled", "unpaid", "incomplete"].includes(subscriptionDetails.status) && (
+                    {subscriptionDetails.status === "incomplete_expired" && (
+                      <span className="flex items-center gap-1">
+                        <ClockIcon className="w-4 h-4" />
+                        Expired
+                      </span>
+                    )}
+                    {!["active", "trialing", "past_due", "canceled", "unpaid", "incomplete", "incomplete_expired"].includes(subscriptionDetails.status) && (
                       <span className="capitalize">{subscriptionDetails.status}</span>
                     )}
                   </div>
                 </div>
 
-                {/* Incomplete Subscription with Payment Error Details */}
-                {subscriptionDetails.status === "incomplete" && paymentIntentDetails && (
-                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                {/* Incomplete Subscription with Payment Error Details - Mobile Only */}
+                {subscriptionDetails.status === "incomplete" && (
+                  <div className="md:hidden bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
                     <div className="flex items-start gap-2">
                       <InformationCircleIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
                       <div className="flex-1">
                         <div className="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-1">
-                          Incomplete: {paymentIntentDetails.message ? paymentIntentDetails.message.replace(/^Your /i, 'Client ') : "Payment failed"}
+                          Incomplete: {paymentIntentDetails?.message ? paymentIntentDetails.message.replace(/^Your /i, 'Client ') : "Payment failed"}
                         </div>
                         <div className="text-sm text-yellow-700 dark:text-yellow-300 space-y-1">
-                          {paymentIntentDetails.decline_code && (
+                          {paymentIntentDetails?.decline_code && (
                             <p>
                               <strong>Reason:</strong> {getDeclineCodeMessage(paymentIntentDetails.decline_code)}
                             </p>
                           )}
-                          <p>
-                            Stripe will automatically retry payment over the next 3 days. If payment succeeds, the subscription will become active automatically.
-                          </p>
-                          {paymentIntentDetails.advice_code === 'try_again_later' && (
+                          {retryInfo && retryInfo.isRetrying ? (
+                            <>
+                              <p>
+                                <strong>Retry Status:</strong> {retryInfo.message}
+                              </p>
+                              {retryInfo.lastAttemptMessage && (
+                                <p>
+                                  <strong>{retryInfo.lastAttemptMessage}</strong>
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <p>
+                                Stripe will automatically retry payment over the next 23 hours. If payment succeeds, the subscription will become active automatically.
+                              </p>
+                              {retryInfo?.lastAttemptMessage && (
+                                <p>
+                                  <strong>{retryInfo.lastAttemptMessage}</strong>
+                                </p>
+                              )}
+                            </>
+                          )}
+                          {paymentIntentDetails?.advice_code === 'try_again_later' && (
                             <p className="text-xs italic">
                               Tip: The client should ensure their payment method has sufficient funds.
                             </p>
@@ -357,8 +482,108 @@ export default function ClientSubscription() {
                   </div>
                 )}
 
-                {/* Cancellation/Payment Failure Reason */}
-                {subscriptionDetails.cancellationReason && (
+                {/* Expired Subscription with Reactivate Option */}
+                {subscriptionDetails.status === "incomplete_expired" && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div className="flex items-start gap-2">
+                      <InformationCircleIcon className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-red-800 dark:text-red-200 mb-1">
+                          Subscription Expired
+                        </div>
+                        <div className="text-sm text-red-700 dark:text-red-300 space-y-1 mb-4">
+                          {paymentIntentDetails && paymentIntentDetails.decline_code ? (
+                            <>
+                              <p>
+                                <strong>Reason:</strong> {getDeclineCodeMessage(paymentIntentDetails.decline_code)}
+                              </p>
+                              {paymentIntentDetails.message && (
+                                <p>
+                                  {paymentIntentDetails.message.replace(/^Your /i, 'Client ')}
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <p>
+                              Payment could not be processed. The subscription has expired.
+                            </p>
+                          )}
+                          <p className="text-xs italic mt-2">
+                            You can reactivate this subscription below. The same billing date and amount will be used.
+                          </p>
+                        </div>
+                        <Button
+                          variant="primary"
+                          onClick={() => handleReactivateSubscription()}
+                          className="mt-2"
+                          disabled={reactivateFetcher.state !== "idle"}
+                        >
+                          {reactivateFetcher.state !== "idle" ? "Reactivating..." : "Reactivate Subscription"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Past Due Subscription - Mobile Only */}
+                {subscriptionDetails.status === "past_due" && (
+                  <div className="md:hidden bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+                    <div className="flex items-start gap-2">
+                      <InformationCircleIcon className="w-5 h-5 text-orange-600 dark:text-orange-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-orange-800 dark:text-orange-200 mb-1">
+                          Past Due: Payment Required
+                        </div>
+                        <div className="text-sm text-orange-700 dark:text-orange-300 space-y-1">
+                          {paymentIntentDetails?.decline_code && (
+                            <p>
+                              <strong>Reason:</strong> {getDeclineCodeMessage(paymentIntentDetails.decline_code)}
+                            </p>
+                          )}
+                          {paymentIntentDetails?.message && (
+                            <p>
+                              {paymentIntentDetails.message.replace(/^Your /i, 'Client ')}
+                            </p>
+                          )}
+                          {subscriptionDetails.cancellationReason && !paymentIntentDetails?.decline_code && (
+                            <p>
+                              {subscriptionDetails.cancellationReason}
+                            </p>
+                          )}
+                          {retryInfo && retryInfo.isRetrying ? (
+                            <>
+                              <p>
+                                <strong>Retry Status:</strong> {retryInfo.message}
+                              </p>
+                              {retryInfo.lastAttemptMessage && (
+                                <p>
+                                  <strong>{retryInfo.lastAttemptMessage}</strong>
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <p>
+                                {retryInfo?.message || "Stripe is no longer attempting payment automatically."}
+                              </p>
+                              {retryInfo?.lastAttemptMessage && (
+                                <p>
+                                  <strong>{retryInfo.lastAttemptMessage}</strong>
+                                </p>
+                              )}
+                            </>
+                          )}
+                          <p>
+                            Please ensure the client's payment method has sufficient funds or update their payment method.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Cancellation/Payment Failure Reason - For other inactive statuses */}
+                {subscriptionDetails.cancellationReason && subscriptionDetails.status !== "past_due" && (
                   <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                     <div className="flex items-start gap-2">
                       <InformationCircleIcon className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />

@@ -5,6 +5,7 @@ import { Buffer } from "buffer";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import { stripe } from "~/utils/stripe.server";
+import dayjs from "dayjs";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -195,9 +196,170 @@ export async function loader({ request }: LoaderFunctionArgs) {
       });
     });
 
+    // Calculate actual revenue collected so far this month (rolling actuals)
+    const monthStartUnix = dayjs().startOf("month").unix();
+    let actualMonthlyRevenue = 0;
+    const actualPaymentsBreakdown: Array<{
+      invoiceId: string;
+      amount: number;
+      created: number;
+      customerId: string;
+      clientName?: string;
+    }> = [];
+
+    for (const customerId of coachClientCustomerIds) {
+      let hasMore = true;
+      let startingAfter: string | undefined;
+
+      while (hasMore) {
+        const invoices = await stripe.invoices.list({
+          customer: customerId,
+          status: "paid",
+          limit: 100,
+          created: { gte: monthStartUnix },
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+        });
+
+        invoices.data.forEach((invoice) => {
+          if (invoice.amount_paid) {
+            actualMonthlyRevenue += invoice.amount_paid;
+          } else if (invoice.total) {
+            actualMonthlyRevenue += invoice.total;
+          }
+
+          const amountCaptured = invoice.amount_paid ?? invoice.total ?? 0;
+          if (amountCaptured > 0) {
+            actualPaymentsBreakdown.push({
+              invoiceId: invoice.id,
+              amount: amountCaptured,
+              created: invoice.created,
+              customerId,
+              clientName: customerIdToClientName[customerId],
+            });
+          }
+        });
+
+        hasMore = invoices.has_more;
+        startingAfter =
+          hasMore && invoices.data.length > 0
+            ? invoices.data[invoices.data.length - 1].id
+            : undefined;
+      }
+    }
+
+    // Fetch refunds issued this month for these clients
+    let refundsThisMonth = 0;
+    const refundsBreakdown: Array<{
+      refundId: string;
+      amount: number;
+      created: number;
+      customerId?: string;
+      clientName?: string;
+    }> = [];
+
+    let refundsHasMore = true;
+    let refundsStartingAfter: string | undefined;
+
+    while (refundsHasMore) {
+      const refunds = await stripe.refunds.list({
+        limit: 100,
+        created: { gte: monthStartUnix },
+        ...(refundsStartingAfter ? { starting_after: refundsStartingAfter } : {}),
+        expand: ["data.charge"],
+      });
+
+      for (const refund of refunds.data) {
+        const charge = typeof refund.charge === "object" ? refund.charge : null;
+        let customerId: string | undefined;
+
+        if (charge) {
+          if (typeof charge.customer === "string") {
+            customerId = charge.customer;
+          } else if (charge.customer && typeof charge.customer === "object") {
+            customerId = charge.customer.id;
+          }
+        } else if (typeof refund.charge === "string") {
+          try {
+            const fetchedCharge = await stripe.charges.retrieve(refund.charge);
+            if (typeof fetchedCharge.customer === "string") {
+              customerId = fetchedCharge.customer;
+            } else if (
+              fetchedCharge.customer &&
+              typeof fetchedCharge.customer === "object"
+            ) {
+              customerId = fetchedCharge.customer.id;
+            }
+          } catch (chargeError) {
+            console.error("Error retrieving charge for refund:", chargeError);
+          }
+        }
+
+        if (
+          customerId &&
+          coachClientCustomerIds.includes(customerId) &&
+          refund.amount
+        ) {
+          refundsThisMonth += refund.amount;
+          refundsBreakdown.push({
+            refundId: refund.id,
+            amount: refund.amount,
+            created: refund.created,
+            customerId,
+            clientName: customerIdToClientName[customerId],
+          });
+        }
+      }
+
+      refundsHasMore = refunds.has_more;
+      refundsStartingAfter =
+        refundsHasMore && refunds.data.length > 0
+          ? refunds.data[refunds.data.length - 1].id
+          : undefined;
+    }
+
+    // Calculate expected monthly recurring revenue (Expected MRR)
+    // Based on the price of each client on each product/price they are assigned to
+    let expectedMonthlyRevenue = 0;
+    productsWithPrices.forEach((product) => {
+      product.prices.forEach((price) => {
+        if (price.amount && price.interval && price.activeClients > 0) {
+          const amount = price.amount;
+          const interval = price.interval;
+          const intervalCount = price.interval_count || 1;
+          const clientCount = price.activeClients;
+          
+          // Convert to monthly equivalent per client
+          let monthlyAmountPerClient = 0;
+          if (interval === 'month') {
+            monthlyAmountPerClient = amount / intervalCount;
+          } else if (interval === 'year') {
+            monthlyAmountPerClient = (amount / intervalCount) / 12;
+          } else if (interval === 'week') {
+            monthlyAmountPerClient = (amount / intervalCount) * 4.33; // ~4.33 weeks per month
+          } else if (interval === 'day') {
+            monthlyAmountPerClient = (amount / intervalCount) * 30; // ~30 days per month
+          }
+          
+          // Multiply by number of clients on this price
+          expectedMonthlyRevenue += monthlyAmountPerClient * clientCount;
+        }
+      });
+    });
+
+    const netMonthlyRevenue = Math.max(
+      0,
+      actualMonthlyRevenue - refundsThisMonth
+    );
+
     return json({ 
       products: productsWithPrices,
       totalMonthlyRevenue: Math.round(totalMonthlyRevenue),
+      expectedMonthlyRevenue: Math.round(expectedMonthlyRevenue),
+      actualMonthlyRevenue: Math.round(netMonthlyRevenue),
+      actualPaymentsBreakdown: actualPaymentsBreakdown
+        .sort((a, b) => b.created - a.created),
+      refundsThisMonth: Math.round(refundsThisMonth),
+      refundsBreakdown: refundsBreakdown.sort((a, b) => b.created - a.created),
       // Debug info
       debug: {
         totalClients,

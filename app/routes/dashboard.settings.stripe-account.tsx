@@ -100,6 +100,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       account: accountData.account,
       products: productsData.products || [],
       totalMonthlyRevenue: productsData.totalMonthlyRevenue || 0,
+      expectedMonthlyRevenue: productsData.expectedMonthlyRevenue || 0,
+      actualMonthlyRevenue: productsData.actualMonthlyRevenue || 0,
+      refundsThisMonth: productsData.refundsThisMonth || 0,
       debug: productsData.debug,
       clients: clients || [],
     });
@@ -110,7 +113,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function StripeAccount() {
-  const { account, products, totalMonthlyRevenue, debug, clients } = useLoaderData<typeof loader>();
+  const {
+    account,
+    products,
+    totalMonthlyRevenue,
+    expectedMonthlyRevenue,
+    actualMonthlyRevenue,
+    refundsThisMonth,
+    debug,
+    clients,
+  } = useLoaderData<typeof loader>();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -247,10 +259,23 @@ export default function StripeAccount() {
             <div className="space-y-4">
               <div className="text-center">
                 <div className="text-4xl font-bold text-primary dark:text-primary mb-2">
-                  {formatPrice(totalMonthlyRevenue)}
+                  {formatPrice(actualMonthlyRevenue)}
                 </div>
                 <div className="text-sm text-gray-dark dark:text-gray-light">
-                  Monthly Recurring Revenue (MRR)
+                  Monthly Recurring Revenue (MRR) (Actual)
+                </div>
+                {refundsThisMonth > 0 && (
+                  <div className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    Includes {formatPrice(refundsThisMonth)} in refunds this month
+                  </div>
+                )}
+              </div>
+              <div className="text-center pt-2 border-t border-gray-light dark:border-davyGray">
+                <div className="text-3xl font-bold text-secondary dark:text-alabaster mb-2">
+                  {formatPrice(expectedMonthlyRevenue)}
+                </div>
+                <div className="text-sm text-gray-dark dark:text-gray-light">
+                  Expected MRR
                 </div>
               </div>
               <div className="pt-4 border-t border-gray-light dark:border-davyGray">

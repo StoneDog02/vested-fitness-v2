@@ -94,13 +94,364 @@ export async function loader({ request }: LoaderFunctionArgs) {
     let subscription = null;
     let paymentMethods: any[] = [];
     let paymentIntentDetails: any = null;
+    let retryInfo: any = null;
     
     if (client.stripe_customer_id) {
       try {
         subscription = await getSubscriptionInfo(client.stripe_customer_id);
         
-        // If subscription is incomplete, fetch payment intent details for helpful error messages
-        if (subscription && (subscription as any).status === 'incomplete') {
+        // If subscription is incomplete, expired, or past_due, fetch payment intent details and retry information
+        if (subscription && ((subscription as any).status === 'incomplete' || (subscription as any).status === 'incomplete_expired' || (subscription as any).status === 'past_due')) {
+          const subscriptionData = subscription as any;
+          
+          // Calculate retry information for incomplete subscriptions
+          // Note: past_due subscriptions don't have retry schedules, they're handled differently
+          if (subscriptionData.status === 'incomplete') {
+            // Get the latest invoice to check next_payment_attempt
+            let latestInvoice = subscriptionData.latest_invoice;
+            let invoiceId: string | null = null;
+            
+            if (latestInvoice) {
+              if (typeof latestInvoice === 'string') {
+                invoiceId = latestInvoice;
+              } else if (typeof latestInvoice === 'object' && latestInvoice.id) {
+                invoiceId = latestInvoice.id;
+              }
+            }
+            
+            // If we don't have the invoice expanded, retrieve it
+            let invoiceObj: any = null;
+            if (invoiceId && (typeof latestInvoice !== 'object' || !latestInvoice.next_payment_attempt)) {
+              try {
+                invoiceObj = await stripe.invoices.retrieve(invoiceId, {
+                  expand: ['payment_intent', 'charge'],
+                });
+              } catch (err) {
+                console.error('[API] Error retrieving invoice for retry info:', err);
+              }
+            } else if (typeof latestInvoice === 'object') {
+              invoiceObj = latestInvoice;
+            }
+            
+            // Get last payment attempt time for incomplete subscriptions
+            let lastAttemptTime: number | null = null;
+            let lastAttemptMessage = '';
+            
+            if (invoiceObj) {
+              // Try to get last attempt from payment intent's last_payment_error
+              const paymentIntent = (invoiceObj as any).payment_intent;
+              if (paymentIntent) {
+                const pi = typeof paymentIntent === 'string' 
+                  ? await stripe.paymentIntents.retrieve(paymentIntent)
+                  : paymentIntent;
+                
+                const lastError = (pi as any).last_payment_error;
+                if (lastError && lastError.charge) {
+                  try {
+                    const charge = await stripe.charges.retrieve(lastError.charge);
+                    if (charge.created) {
+                      lastAttemptTime = charge.created * 1000;
+                    }
+                  } catch (err) {
+                    // If we can't get the charge, use payment intent created time as fallback
+                    if ((pi as any).created) {
+                      lastAttemptTime = (pi as any).created * 1000;
+                    }
+                  }
+                } else if ((pi as any).created) {
+                  // Fallback to payment intent creation time
+                  lastAttemptTime = (pi as any).created * 1000;
+                }
+              }
+              
+              // Alternative: Check invoice's attempt_count and created/updated dates
+              if (!lastAttemptTime && invoiceObj.attempt_count) {
+                // If there were attempts, use the invoice's updated_at or created date
+                if (invoiceObj.updated) {
+                  lastAttemptTime = invoiceObj.updated * 1000;
+                } else if (invoiceObj.created) {
+                  lastAttemptTime = invoiceObj.created * 1000;
+                }
+              }
+              
+              // Format last attempt time
+              if (lastAttemptTime) {
+                const lastAttemptDate = new Date(lastAttemptTime);
+                const now = new Date();
+                const daysDiff = Math.floor((now.getTime() - lastAttemptTime) / (1000 * 60 * 60 * 24));
+                
+                if (daysDiff === 0) {
+                  // Today - show time
+                  lastAttemptMessage = `Last attempt: Today at ${lastAttemptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                } else if (daysDiff === 1) {
+                  // Yesterday
+                  lastAttemptMessage = `Last attempt: Yesterday at ${lastAttemptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                } else if (daysDiff < 7) {
+                  // This week - show day and time
+                  lastAttemptMessage = `Last attempt: ${lastAttemptDate.toLocaleDateString('en-US', { weekday: 'long' })} at ${lastAttemptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                } else {
+                  // Older - show full date and time
+                  lastAttemptMessage = `Last attempt: ${lastAttemptDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at ${lastAttemptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                }
+              }
+            }
+            
+            // Check if invoice has next_payment_attempt (Stripe's actual retry schedule)
+            if (invoiceObj && invoiceObj.next_payment_attempt) {
+              const nextRetryTime = invoiceObj.next_payment_attempt * 1000; // Convert to milliseconds
+              const now = Date.now();
+              const hoursUntilNextRetry = (nextRetryTime - now) / (1000 * 60 * 60);
+              
+              // Calculate which attempt this is based on subscription creation time
+              // Stripe's retry schedule: ~1h, ~6h, ~12h, ~23h after subscription creation
+              const subscriptionCreated = subscriptionData.created * 1000;
+              const hoursSinceCreation = (now - subscriptionCreated) / (1000 * 60 * 60);
+              
+              // Estimate attempt number based on time since creation
+              // Stripe retries at approximately: 1h, 6h, 12h, 23h
+              let attemptNumber = 1;
+              if (hoursSinceCreation >= 23) {
+                attemptNumber = 4; // Final attempt
+              } else if (hoursSinceCreation >= 12) {
+                attemptNumber = 4; // Should be on final attempt
+              } else if (hoursSinceCreation >= 6) {
+                attemptNumber = 3;
+              } else if (hoursSinceCreation >= 1) {
+                attemptNumber = 2;
+              } else {
+                attemptNumber = 1; // First attempt
+              }
+              
+              // Format time nicely
+              let timeMessage = '';
+              if (hoursUntilNextRetry > 0) {
+                if (hoursUntilNextRetry < 1) {
+                  const minutes = Math.round(hoursUntilNextRetry * 60);
+                  timeMessage = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+                } else if (hoursUntilNextRetry < 24) {
+                  const hours = Math.round(hoursUntilNextRetry * 10) / 10;
+                  timeMessage = `${hours} hour${hours !== 1 ? 's' : ''}`;
+                } else {
+                  const days = Math.round((hoursUntilNextRetry / 24) * 10) / 10;
+                  timeMessage = `${days} day${days !== 1 ? 's' : ''}`;
+                }
+              }
+              
+              if (hoursUntilNextRetry > 0) {
+                retryInfo = {
+                  isRetrying: true,
+                  retryAttempt: attemptNumber,
+                  totalRetries: 4,
+                  nextRetryTime: nextRetryTime,
+                  hoursUntilNextRetry: hoursUntilNextRetry,
+                  lastAttemptTime: lastAttemptTime,
+                  lastAttemptMessage: lastAttemptMessage,
+                  message: `Stripe will retry payment in approximately ${timeMessage} (attempt ${attemptNumber} of 4)`
+                };
+              } else {
+                // Retry is happening now or very soon
+                retryInfo = {
+                  isRetrying: true,
+                  retryAttempt: attemptNumber,
+                  totalRetries: 4,
+                  nextRetryTime: nextRetryTime,
+                  hoursUntilNextRetry: 0,
+                  lastAttemptTime: lastAttemptTime,
+                  lastAttemptMessage: lastAttemptMessage,
+                  message: `Stripe is currently retrying payment (attempt ${attemptNumber} of 4)`
+                };
+              }
+            } else {
+              // Fallback: Calculate based on subscription creation time
+              const subscriptionCreated = subscriptionData.created * 1000;
+              const now = Date.now();
+              const hoursSinceCreation = (now - subscriptionCreated) / (1000 * 60 * 60);
+              
+              // Stripe retry schedule: ~1h, ~6h, ~12h, ~23h after creation
+              const retrySchedule = [1, 6, 12, 23];
+              const nextRetryIndex = retrySchedule.findIndex(hours => hoursSinceCreation < hours);
+              
+              if (nextRetryIndex !== -1) {
+                const nextRetryHours = retrySchedule[nextRetryIndex];
+                const nextRetryTime = subscriptionCreated + (nextRetryHours * 60 * 60 * 1000);
+                const hoursUntilNextRetry = (nextRetryTime - now) / (1000 * 60 * 60);
+                
+                let timeMessage = '';
+                if (hoursUntilNextRetry < 1) {
+                  const minutes = Math.round(hoursUntilNextRetry * 60);
+                  timeMessage = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+                } else {
+                  const hours = Math.round(hoursUntilNextRetry * 10) / 10;
+                  timeMessage = `${hours} hour${hours !== 1 ? 's' : ''}`;
+                }
+                
+                retryInfo = {
+                  isRetrying: true,
+                  retryAttempt: nextRetryIndex + 1,
+                  totalRetries: 4,
+                  nextRetryTime: nextRetryTime,
+                  hoursUntilNextRetry: Math.max(0, hoursUntilNextRetry),
+                  lastAttemptTime: lastAttemptTime,
+                  lastAttemptMessage: lastAttemptMessage,
+                  message: hoursUntilNextRetry > 0 
+                    ? `Stripe will retry payment in approximately ${timeMessage} (attempt ${nextRetryIndex + 1} of 4)`
+                    : `Stripe is currently retrying payment (attempt ${nextRetryIndex + 1} of 4)`
+                };
+              } else {
+                // Past all retry attempts, should become expired soon
+                retryInfo = {
+                  isRetrying: false,
+                  lastAttemptTime: lastAttemptTime,
+                  lastAttemptMessage: lastAttemptMessage,
+                  message: "All automatic retry attempts have been exhausted. Subscription will expire soon if payment doesn't succeed."
+                };
+              }
+            }
+          } else if (subscriptionData.status === 'past_due') {
+            // For past_due subscriptions, check if Stripe is still attempting payment
+            // Get the latest invoice to check next_payment_attempt and last attempt info
+            let latestInvoice = subscriptionData.latest_invoice;
+            let invoiceId: string | null = null;
+            
+            if (latestInvoice) {
+              if (typeof latestInvoice === 'string') {
+                invoiceId = latestInvoice;
+              } else if (typeof latestInvoice === 'object' && latestInvoice.id) {
+                invoiceId = latestInvoice.id;
+              }
+            }
+            
+            // If we don't have the invoice expanded, retrieve it
+            let invoiceObj: any = null;
+            if (invoiceId && (typeof latestInvoice !== 'object' || !latestInvoice.next_payment_attempt)) {
+              try {
+                invoiceObj = await stripe.invoices.retrieve(invoiceId, {
+                  expand: ['payment_intent', 'charge'],
+                });
+              } catch (err) {
+                console.error('[API] Error retrieving invoice for past_due retry info:', err);
+              }
+            } else if (typeof latestInvoice === 'object') {
+              invoiceObj = latestInvoice;
+            }
+            
+            // Get last payment attempt time
+            let lastAttemptTime: number | null = null;
+            let lastAttemptMessage = '';
+            
+            if (invoiceObj) {
+              // Try to get last attempt from payment intent's last_payment_error
+              const paymentIntent = (invoiceObj as any).payment_intent;
+              if (paymentIntent) {
+                const pi = typeof paymentIntent === 'string' 
+                  ? await stripe.paymentIntents.retrieve(paymentIntent)
+                  : paymentIntent;
+                
+                const lastError = (pi as any).last_payment_error;
+                if (lastError && lastError.charge) {
+                  try {
+                    const charge = await stripe.charges.retrieve(lastError.charge);
+                    if (charge.created) {
+                      lastAttemptTime = charge.created * 1000;
+                    }
+                  } catch (err) {
+                    // If we can't get the charge, use payment intent created time as fallback
+                    if ((pi as any).created) {
+                      lastAttemptTime = (pi as any).created * 1000;
+                    }
+                  }
+                } else if ((pi as any).created) {
+                  // Fallback to payment intent creation time
+                  lastAttemptTime = (pi as any).created * 1000;
+                }
+              }
+              
+              // Alternative: Check invoice's attempt_count and created/updated dates
+              if (!lastAttemptTime && invoiceObj.attempt_count) {
+                // If there were attempts, use the invoice's updated_at or created date
+                if (invoiceObj.updated) {
+                  lastAttemptTime = invoiceObj.updated * 1000;
+                } else if (invoiceObj.created) {
+                  lastAttemptTime = invoiceObj.created * 1000;
+                }
+              }
+              
+              // Format last attempt time
+              if (lastAttemptTime) {
+                const lastAttemptDate = new Date(lastAttemptTime);
+                const now = new Date();
+                const daysDiff = Math.floor((now.getTime() - lastAttemptTime) / (1000 * 60 * 60 * 24));
+                
+                if (daysDiff === 0) {
+                  // Today - show time
+                  lastAttemptMessage = `Last attempt: Today at ${lastAttemptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                } else if (daysDiff === 1) {
+                  // Yesterday
+                  lastAttemptMessage = `Last attempt: Yesterday at ${lastAttemptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                } else if (daysDiff < 7) {
+                  // This week - show day and time
+                  lastAttemptMessage = `Last attempt: ${lastAttemptDate.toLocaleDateString('en-US', { weekday: 'long' })} at ${lastAttemptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                } else {
+                  // Older - show full date and time
+                  lastAttemptMessage = `Last attempt: ${lastAttemptDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at ${lastAttemptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                }
+              }
+            }
+            
+            // Check if invoice has next_payment_attempt (Stripe is still trying)
+            if (invoiceObj && invoiceObj.next_payment_attempt) {
+              const nextRetryTime = invoiceObj.next_payment_attempt * 1000; // Convert to milliseconds
+              const now = Date.now();
+              const hoursUntilNextRetry = (nextRetryTime - now) / (1000 * 60 * 60);
+              
+              // Format time nicely
+              let timeMessage = '';
+              if (hoursUntilNextRetry > 0) {
+                if (hoursUntilNextRetry < 1) {
+                  const minutes = Math.round(hoursUntilNextRetry * 60);
+                  timeMessage = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+                } else if (hoursUntilNextRetry < 24) {
+                  const hours = Math.round(hoursUntilNextRetry * 10) / 10;
+                  timeMessage = `${hours} hour${hours !== 1 ? 's' : ''}`;
+                } else {
+                  const days = Math.round((hoursUntilNextRetry / 24) * 10) / 10;
+                  timeMessage = `${days} day${days !== 1 ? 's' : ''}`;
+                }
+                
+                retryInfo = {
+                  isRetrying: true,
+                  nextRetryTime: nextRetryTime,
+                  hoursUntilNextRetry: hoursUntilNextRetry,
+                  lastAttemptTime: lastAttemptTime,
+                  lastAttemptMessage: lastAttemptMessage,
+                  message: `Stripe will retry payment in approximately ${timeMessage}`
+                };
+              } else {
+                // Retry is happening now or very soon
+                retryInfo = {
+                  isRetrying: true,
+                  nextRetryTime: nextRetryTime,
+                  hoursUntilNextRetry: 0,
+                  lastAttemptTime: lastAttemptTime,
+                  lastAttemptMessage: lastAttemptMessage,
+                  message: "Stripe is currently retrying payment"
+                };
+              }
+            } else {
+              // No next_payment_attempt means Stripe has stopped trying
+              retryInfo = {
+                isRetrying: false,
+                lastAttemptTime: lastAttemptTime,
+                lastAttemptMessage: lastAttemptMessage,
+                message: "Stripe is no longer attempting payment automatically. The subscription may become unpaid if payment is not collected manually."
+              };
+            }
+          } else if (subscriptionData.status === 'incomplete_expired') {
+            retryInfo = {
+              isRetrying: false,
+              message: "Subscription has expired. Stripe is no longer attempting payment. Use the Reactivate button to try again."
+            };
+          }
           try {
             const subscriptionId = (subscription as any).id;
             
@@ -228,6 +579,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       subscription,
       paymentMethods,
       paymentIntentDetails, // Include payment intent details for incomplete subscriptions
+      retryInfo, // Include retry information for incomplete subscriptions
       client: {
         id: client.id,
         name: client.name,
