@@ -92,6 +92,11 @@ export default function ClientSubscription() {
   const paymentIntentDetails = loaderData.paymentIntentDetails || null;
   const hasPaymentMethod = paymentMethods.length > 0;
   
+  // Debug: Log payment intent details when subscription is incomplete
+  if (subscription && (subscription as any).status === 'incomplete') {
+    console.log('[UI] Incomplete subscription - paymentIntentDetails:', paymentIntentDetails);
+  }
+  
   // Get the last 4 digits of the first payment method
   const paymentMethodLast4 = paymentMethods.length > 0 && paymentMethods[0]?.card?.last4 
     ? paymentMethods[0].card.last4 

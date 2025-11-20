@@ -102,49 +102,83 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // If subscription is incomplete, fetch payment intent details for helpful error messages
         if (subscription && (subscription as any).status === 'incomplete') {
           try {
-            // Get the latest invoice for this subscription
-            const invoices = await stripe.invoices.list({
-              customer: client.stripe_customer_id,
-              subscription: (subscription as any).id,
-              limit: 1,
-            });
+            const subscriptionId = (subscription as any).id;
             
-            if (invoices.data.length > 0) {
-              const latestInvoice = invoices.data[0];
-              
-              // Retrieve invoice with expanded payment intent
-              const invoiceWithPI = await stripe.invoices.retrieve(latestInvoice.id, {
-                expand: ['payment_intent'],
-              });
-              
-              const paymentIntent = (invoiceWithPI as any).payment_intent;
-              
-              if (paymentIntent) {
-                const pi = typeof paymentIntent === 'string' 
-                  ? await stripe.paymentIntents.retrieve(paymentIntent)
-                  : paymentIntent;
-                
-                // Extract helpful information
-                const lastError = (pi as any).last_payment_error;
-                if (lastError) {
-                  paymentIntentDetails = {
-                    decline_code: lastError.decline_code,
-                    code: lastError.code,
-                    message: lastError.message,
-                    type: lastError.type,
-                    advice_code: lastError.advice_code,
-                  };
-                } else if ((pi as any).status === 'requires_payment_method') {
-                  // Payment intent exists but needs a payment method
-                  paymentIntentDetails = {
-                    status: 'requires_payment_method',
-                    message: 'Payment method required',
-                  };
+            // First, try to get the payment intent from the already-expanded subscription object
+            let paymentIntent: any = null;
+            const latestInvoice = (subscription as any).latest_invoice;
+            
+            if (latestInvoice) {
+              // Check if invoice is expanded (object) or just an ID (string)
+              if (typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
+                // Payment intent is already expanded in the subscription
+                paymentIntent = latestInvoice.payment_intent;
+              } else {
+                // Invoice is not expanded, need to retrieve it
+                const invoiceId = typeof latestInvoice === 'string' ? latestInvoice : latestInvoice.id;
+                if (invoiceId) {
+                  const invoiceWithPI = await stripe.invoices.retrieve(invoiceId, {
+                    expand: ['payment_intent'],
+                  });
+                  paymentIntent = (invoiceWithPI as any).payment_intent;
                 }
               }
             }
+            
+            // If we still don't have a payment intent, try listing invoices
+            if (!paymentIntent) {
+              const invoices = await stripe.invoices.list({
+                customer: client.stripe_customer_id,
+                subscription: subscriptionId,
+                limit: 1,
+              });
+              
+              if (invoices.data.length > 0) {
+                const invoiceWithPI = await stripe.invoices.retrieve(invoices.data[0].id, {
+                  expand: ['payment_intent'],
+                });
+                paymentIntent = (invoiceWithPI as any).payment_intent;
+              }
+            }
+            
+            // Extract payment intent details
+            if (paymentIntent) {
+              const pi = typeof paymentIntent === 'string' 
+                ? await stripe.paymentIntents.retrieve(paymentIntent)
+                : paymentIntent;
+              
+              // Extract helpful information
+              const lastError = (pi as any).last_payment_error;
+              if (lastError) {
+                paymentIntentDetails = {
+                  decline_code: lastError.decline_code,
+                  code: lastError.code,
+                  message: lastError.message,
+                  type: lastError.type,
+                  advice_code: lastError.advice_code,
+                };
+                console.log('[API] Found payment intent error details:', paymentIntentDetails);
+              } else if ((pi as any).status === 'requires_payment_method') {
+                // Payment intent exists but needs a payment method
+                paymentIntentDetails = {
+                  status: 'requires_payment_method',
+                  message: 'Payment method required',
+                };
+              } else {
+                // Check the payment intent status
+                const piStatus = (pi as any).status;
+                if (piStatus) {
+                  paymentIntentDetails = {
+                    status: piStatus,
+                    message: `Payment intent status: ${piStatus}`,
+                  };
+                }
+              }
+            } else {
+              console.log('[API] No payment intent found for incomplete subscription:', subscriptionId);
+            }
           } catch (piError) {
-            // If we can't fetch payment intent details, that's ok
+            // If we can't fetch payment intent details, log but continue
             console.error("Error fetching payment intent details:", piError);
           }
         }
