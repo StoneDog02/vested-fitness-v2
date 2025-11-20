@@ -71,6 +71,8 @@ export default function ClientSubscription() {
   const loaderData = useLoaderData<typeof loader>();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const reactivateFetcher = useFetcher();
+  const retryPaymentFetcher = useFetcher();
+  const retryToastShownRef = React.useRef(false);
   const toast = useToast();
 
   // Find the parent route with client loader data for avatar/name
@@ -193,6 +195,22 @@ export default function ClientSubscription() {
     );
   };
 
+  const handleRetryPayment = () => {
+    if (!subscriptionDetails || !client) return;
+    retryToastShownRef.current = false;
+
+    retryPaymentFetcher.submit(
+      {
+        clientId: client.id,
+        subscriptionId: subscriptionDetails.id,
+      },
+      {
+        method: "POST",
+        action: "/api/retry-subscription-payment",
+      }
+    );
+  };
+
   // Handle reactivation response
   React.useEffect(() => {
     if (reactivateFetcher.state === "idle" && reactivateFetcher.data) {
@@ -213,6 +231,32 @@ export default function ClientSubscription() {
       }
     }
   }, [reactivateFetcher.state, reactivateFetcher.data, toast]);
+
+  React.useEffect(() => {
+    if (
+      retryPaymentFetcher.state === "idle" &&
+      retryPaymentFetcher.data &&
+      !retryToastShownRef.current
+    ) {
+      if (retryPaymentFetcher.data.success) {
+        toast.success(
+          "Payment Retry Started",
+          retryPaymentFetcher.data.message ||
+            "Stripe is attempting to charge the client's payment method again."
+        );
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        toast.error(
+          "Retry Failed",
+          retryPaymentFetcher.data.error ||
+            "Unable to retry the payment. Verify the client's payment method and try again."
+        );
+      }
+      retryToastShownRef.current = true;
+    }
+  }, [retryPaymentFetcher.state, retryPaymentFetcher.data, toast]);
 
   // Helper function to get user-friendly decline code messages
   const getDeclineCodeMessage = (declineCode: string): string => {
@@ -293,7 +337,7 @@ export default function ClientSubscription() {
             <Card title={subscriptionDetails.status === "incomplete_expired" ? "Expired Subscription" : "Active Subscription"}>
               <div className="space-y-6">
                 {/* Status Badge */}
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className={`px-3 py-1 rounded-full text-sm font-medium ${
                     subscriptionDetails.status === "active" 
                       ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
@@ -431,6 +475,19 @@ export default function ClientSubscription() {
                       <span className="capitalize">{subscriptionDetails.status}</span>
                     )}
                   </div>
+                  {subscriptionDetails.status === "incomplete" && (
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={handleRetryPayment}
+                        disabled={retryPaymentFetcher.state !== "idle"}
+                      >
+                        {retryPaymentFetcher.state !== "idle"
+                          ? "Retrying..."
+                          : "Retry Payment"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Incomplete Subscription with Payment Error Details - Mobile Only */}
@@ -476,6 +533,14 @@ export default function ClientSubscription() {
                               Tip: The client should ensure their payment method has sufficient funds.
                             </p>
                           )}
+                          <Button
+                            variant="secondary"
+                            onClick={handleRetryPayment}
+                            disabled={retryPaymentFetcher.state !== "idle"}
+                            className="mt-2 w-full"
+                          >
+                            {retryPaymentFetcher.state !== "idle" ? "Retrying..." : "Retry Payment"}
+                          </Button>
                         </div>
                       </div>
                     </div>
