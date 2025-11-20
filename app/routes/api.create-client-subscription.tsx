@@ -196,67 +196,138 @@ export async function action({ request }: ActionFunctionArgs) {
     // Check if this is a future-dated subscription
     const isFutureDated = billingCycleAnchor !== undefined;
     
-    if (!isFutureDated && invoice && typeof invoice === 'object' && 'id' in invoice) {
+    console.log(`[API] Subscription created: ${subscription.id}, status: ${subscriptionStatus}, isFutureDated: ${isFutureDated}`);
+    console.log(`[API] Invoice:`, invoice ? (typeof invoice === 'string' ? invoice : (invoice as any).id) : 'none');
+    
+    if (!isFutureDated) {
       // Start date is today or in the past - attempt to pay immediately
-      const invoiceId = typeof invoice.id === 'string' ? invoice.id : (invoice as any).id;
+      let invoiceId: string | null = null;
       
-      try {
-        // Retrieve the invoice to check its status
-        const invoiceObj = await stripe.invoices.retrieve(invoiceId);
+      // Extract invoice ID (it might be expanded or just an ID string)
+      if (invoice) {
+        if (typeof invoice === 'string') {
+          invoiceId = invoice;
+        } else if (typeof invoice === 'object' && 'id' in invoice) {
+          invoiceId = typeof invoice.id === 'string' ? invoice.id : String(invoice.id);
+        }
+      }
+      
+      if (!invoiceId) {
+        console.log(`[API] No invoice found for immediate subscription. Stripe will create one automatically.`);
+      } else {
+        console.log(`[API] Attempting to pay invoice ${invoiceId} for subscription ${subscription.id}`);
         
-        // Finalize draft invoices
-        if (invoiceObj.status === 'draft') {
-          await stripe.invoices.finalizeInvoice(invoiceId, {
-            auto_advance: true,
-          });
-          // Re-retrieve after finalization
-          const finalizedInvoice = await stripe.invoices.retrieve(invoiceId);
+        try {
+          // Small delay to ensure invoice is fully processed by Stripe
+          await new Promise(resolve => setTimeout(resolve, 500));
           
-          // If invoice is now open and we have a payment method, attempt to pay it
-          if (finalizedInvoice.status === 'open' && defaultPaymentMethodId) {
+          // Retrieve the invoice to check its status
+          const invoiceObj = await stripe.invoices.retrieve(invoiceId, {
+            expand: ['payment_intent'],
+          });
+          console.log(`[API] Invoice ${invoiceId} status: ${invoiceObj.status}`);
+          
+          // Check payment intent status if available
+          const paymentIntent = (invoiceObj as any).payment_intent;
+          if (paymentIntent) {
+            const piStatus = typeof paymentIntent === 'object' ? paymentIntent.status : 'unknown';
+            console.log(`[API] Payment intent status: ${piStatus}`);
+          }
+          
+          // Finalize draft invoices
+          if (invoiceObj.status === 'draft') {
+            console.log(`[API] Finalizing draft invoice ${invoiceId}`);
+            await stripe.invoices.finalizeInvoice(invoiceId, {
+              auto_advance: true,
+            });
+            // Re-retrieve after finalization
+            const finalizedInvoice = await stripe.invoices.retrieve(invoiceId);
+            console.log(`[API] Invoice ${invoiceId} after finalization: ${finalizedInvoice.status}`);
+            
+            // If invoice is now open and we have a payment method, attempt to pay it
+            if (finalizedInvoice.status === 'open' && defaultPaymentMethodId) {
+              try {
+                console.log(`[API] Paying invoice ${invoiceId} with payment method ${defaultPaymentMethodId}`);
+                const paidInvoice = await stripe.invoices.pay(invoiceId, {
+                  payment_method: defaultPaymentMethodId,
+                  off_session: true, // Indicate this is an off-session payment
+                });
+                console.log(`[API] Invoice payment result: ${paidInvoice.status}`);
+                
+                // Re-fetch subscription to get updated status
+                const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
+                const updatedStatus = (updatedSubscription as any).status;
+                console.log(`[API] Subscription ${subscription.id} status after payment: ${updatedStatus}`);
+                
+                return json({
+                  success: true,
+                  subscription: updatedSubscription,
+                  message: "Subscription created and payment processed successfully",
+                });
+              } catch (payError: any) {
+                // If payment fails, log the full error
+                console.error(`[API] Failed to pay invoice ${invoiceId}:`, {
+                  message: payError.message,
+                  type: payError.type,
+                  code: payError.code,
+                  decline_code: payError.decline_code,
+                  payment_intent: payError.payment_intent,
+                });
+              }
+            } else {
+              console.log(`[API] Cannot pay invoice ${invoiceId}: status=${finalizedInvoice.status}, hasPaymentMethod=${!!defaultPaymentMethodId}`);
+            }
+          } else if (invoiceObj.status === 'open' && defaultPaymentMethodId) {
+            // Invoice is already open, attempt to pay it
             try {
-              await stripe.invoices.pay(invoiceId, {
+              console.log(`[API] Paying open invoice ${invoiceId} with payment method ${defaultPaymentMethodId}`);
+              const paidInvoice = await stripe.invoices.pay(invoiceId, {
                 payment_method: defaultPaymentMethodId,
+                off_session: true, // Indicate this is an off-session payment
               });
-              console.log(`[API] Successfully paid invoice ${invoiceId} for subscription ${subscription.id}`);
+              console.log(`[API] Invoice payment result: ${paidInvoice.status}`);
               
               // Re-fetch subscription to get updated status
               const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
+              const updatedStatus = (updatedSubscription as any).status;
+              console.log(`[API] Subscription ${subscription.id} status after payment: ${updatedStatus}`);
+              
               return json({
                 success: true,
                 subscription: updatedSubscription,
                 message: "Subscription created and payment processed successfully",
               });
             } catch (payError: any) {
-              // If payment fails, log but don't fail the subscription creation
-              // The subscription will remain incomplete and Stripe will retry
-              console.error(`[API] Failed to pay invoice ${invoiceId}:`, payError.message || payError);
+              console.error(`[API] Failed to pay open invoice ${invoiceId}:`, {
+                message: payError.message,
+                type: payError.type,
+                code: payError.code,
+                decline_code: payError.decline_code,
+                payment_intent: payError.payment_intent,
+              });
             }
-          }
-        } else if (invoiceObj.status === 'open' && defaultPaymentMethodId) {
-          // Invoice is already open, attempt to pay it
-          try {
-            await stripe.invoices.pay(invoiceId, {
-              payment_method: defaultPaymentMethodId,
-            });
-            console.log(`[API] Successfully paid open invoice ${invoiceId} for subscription ${subscription.id}`);
-            
-            // Re-fetch subscription to get updated status
+          } else if (invoiceObj.status === 'paid') {
+            // Invoice is already paid
+            console.log(`[API] Invoice ${invoiceId} is already paid`);
             const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
             return json({
               success: true,
               subscription: updatedSubscription,
               message: "Subscription created and payment processed successfully",
             });
-          } catch (payError: any) {
-            console.error(`[API] Failed to pay open invoice ${invoiceId}:`, payError.message || payError);
+          } else {
+            console.log(`[API] Invoice ${invoiceId} is in status ${invoiceObj.status}, cannot pay at this time`);
           }
+        } catch (invoiceError: any) {
+          // If invoice retrieval/finalization fails, log the full error
+          console.error("[API] Error handling invoice:", {
+            message: invoiceError.message,
+            type: invoiceError.type,
+            code: invoiceError.code,
+          });
         }
-      } catch (invoiceError) {
-        // If invoice retrieval/finalization fails, log but don't fail the subscription creation
-        console.error("[API] Error handling invoice:", invoiceError);
       }
-    } else if (isFutureDated) {
+    } else {
       // Future-dated subscription - payment will be attempted on the scheduled date
       console.log(`[API] Future-dated subscription created. Payment will be processed on ${startDate}`);
     }
