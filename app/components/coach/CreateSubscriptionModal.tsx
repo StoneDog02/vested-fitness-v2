@@ -5,7 +5,7 @@ import DatePicker from "~/components/ui/DatePicker";
 import { useFetcher } from "@remix-run/react";
 import dayjs from "dayjs";
 import { getTodayString } from "~/lib/dateUtils";
-import { InformationCircleIcon, ClockIcon, ArrowPathIcon, LightBulbIcon } from "@heroicons/react/24/outline";
+import { InformationCircleIcon, ClockIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 
 interface Plan {
   id: string;
@@ -84,10 +84,6 @@ export default function CreateSubscriptionModal({
     ? Math.round(baseAmount * (parseFloat(taxPercentage) / 100))
     : 0;
   const invoiceTotal = baseAmount + taxAmount;
-  
-  // Stripe processing fees: 2.9% + $0.30
-  const processingFee = Math.round(invoiceTotal * 0.029 + 30);
-  const netIncome = invoiceTotal - processingFee;
 
   const formatPrice = (amount: number | null, currency: string = "usd") => {
     if (amount == null) return "$0.00";
@@ -270,20 +266,9 @@ export default function CreateSubscriptionModal({
                 <span className="text-secondary dark:text-alabaster">{formatPrice(taxAmount)}</span>
               </div>
             )}
-            <div className="flex justify-between">
-              <span className="text-gray-dark dark:text-gray-light">Invoice total (client pays):</span>
-              <span className="text-secondary dark:text-alabaster">{formatPrice(invoiceTotal)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-gray-dark dark:text-gray-light flex items-center gap-1">
-                Processing fees
-                <InformationCircleIcon className="w-4 h-4 text-red-500" />
-              </span>
-              <span className="text-red-600 dark:text-red-400">-{formatPrice(processingFee)}</span>
-            </div>
             <div className="flex justify-between pt-2 border-t border-gray-light dark:border-davyGray">
-              <span className="font-medium text-green-600 dark:text-green-400">Net income per month:</span>
-              <span className="font-medium text-green-600 dark:text-green-400">{formatPrice(netIncome)}</span>
+              <span className="font-medium text-secondary dark:text-alabaster">Invoice total (client pays):</span>
+              <span className="font-medium text-secondary dark:text-alabaster">{formatPrice(invoiceTotal)}</span>
             </div>
           </div>
 
@@ -299,22 +284,6 @@ export default function CreateSubscriptionModal({
             </div>
           </div>
 
-          {/* Processing Fee Breakdown */}
-          <div className="mt-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-            <div className="flex items-start gap-2">
-              <LightBulbIcon className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-              <div className="text-sm">
-                <div className="font-medium text-blue-800 dark:text-blue-200 mb-1">
-                  Processing Fee Breakdown:
-                </div>
-                <ul className="text-xs text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
-                  <li>Stripe charges 2.9% + $0.30 per transaction</li>
-                  <li>Fee is deducted from the total amount charged</li>
-                  <li>Client pays the invoice total, you receive the net amount</li>
-                </ul>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Notes */}

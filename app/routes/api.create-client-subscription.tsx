@@ -172,11 +172,11 @@ export async function action({ request }: ActionFunctionArgs) {
       subscriptionParams.billing_cycle_anchor = billingCycleAnchor;
     }
 
+    // Create subscription
+    const subscription = await stripe.subscriptions.create(subscriptionParams);
+    
     // Add tax if provided
     if (taxAmount > 0) {
-      // Create subscription first
-      const subscription = await stripe.subscriptions.create(subscriptionParams);
-
       // Add tax as a recurring invoice item that will be included in every billing cycle
       await stripe.invoiceItems.create({
         customer: customerId,
@@ -186,35 +186,93 @@ export async function action({ request }: ActionFunctionArgs) {
         description: `Tax (${taxPercent}%)`,
         // Don't specify period - this makes it recurring for the subscription
       });
-
-      // Only finalize invoice if one exists (might not exist for future-dated subscriptions)
-      if (subscription.latest_invoice && typeof subscription.latest_invoice === 'string') {
-        try {
-          const invoice = await stripe.invoices.retrieve(subscription.latest_invoice);
-          if (invoice.status === 'draft') {
-            await stripe.invoices.finalizeInvoice(invoice.id, {
-              auto_advance: true,
-            });
-          }
-        } catch (invoiceError) {
-          // If invoice retrieval/finalization fails, log but don't fail the subscription creation
-          console.error("Error handling invoice:", invoiceError);
-        }
-      }
-
-      return json({
-        success: true,
-        subscription,
-        message: "Subscription created successfully",
-      });
-    } else {
-      const subscription = await stripe.subscriptions.create(subscriptionParams);
-      return json({
-        success: true,
-        subscription,
-        message: "Subscription created successfully",
-      });
     }
+
+    // Only attempt to pay immediately if start date is today or in the past
+    // If start date is in the future, Stripe will handle payment on the scheduled date
+    const subscriptionStatus = (subscription as any).status;
+    const invoice = subscription.latest_invoice;
+    
+    // Check if this is a future-dated subscription
+    const isFutureDated = billingCycleAnchor !== undefined;
+    
+    if (!isFutureDated && invoice && typeof invoice === 'object' && 'id' in invoice) {
+      // Start date is today or in the past - attempt to pay immediately
+      const invoiceId = typeof invoice.id === 'string' ? invoice.id : (invoice as any).id;
+      
+      try {
+        // Retrieve the invoice to check its status
+        const invoiceObj = await stripe.invoices.retrieve(invoiceId);
+        
+        // Finalize draft invoices
+        if (invoiceObj.status === 'draft') {
+          await stripe.invoices.finalizeInvoice(invoiceId, {
+            auto_advance: true,
+          });
+          // Re-retrieve after finalization
+          const finalizedInvoice = await stripe.invoices.retrieve(invoiceId);
+          
+          // If invoice is now open and we have a payment method, attempt to pay it
+          if (finalizedInvoice.status === 'open' && defaultPaymentMethodId) {
+            try {
+              await stripe.invoices.pay(invoiceId, {
+                payment_method: defaultPaymentMethodId,
+              });
+              console.log(`[API] Successfully paid invoice ${invoiceId} for subscription ${subscription.id}`);
+              
+              // Re-fetch subscription to get updated status
+              const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
+              return json({
+                success: true,
+                subscription: updatedSubscription,
+                message: "Subscription created and payment processed successfully",
+              });
+            } catch (payError: any) {
+              // If payment fails, log but don't fail the subscription creation
+              // The subscription will remain incomplete and Stripe will retry
+              console.error(`[API] Failed to pay invoice ${invoiceId}:`, payError.message || payError);
+            }
+          }
+        } else if (invoiceObj.status === 'open' && defaultPaymentMethodId) {
+          // Invoice is already open, attempt to pay it
+          try {
+            await stripe.invoices.pay(invoiceId, {
+              payment_method: defaultPaymentMethodId,
+            });
+            console.log(`[API] Successfully paid open invoice ${invoiceId} for subscription ${subscription.id}`);
+            
+            // Re-fetch subscription to get updated status
+            const updatedSubscription = await stripe.subscriptions.retrieve(subscription.id);
+            return json({
+              success: true,
+              subscription: updatedSubscription,
+              message: "Subscription created and payment processed successfully",
+            });
+          } catch (payError: any) {
+            console.error(`[API] Failed to pay open invoice ${invoiceId}:`, payError.message || payError);
+          }
+        }
+      } catch (invoiceError) {
+        // If invoice retrieval/finalization fails, log but don't fail the subscription creation
+        console.error("[API] Error handling invoice:", invoiceError);
+      }
+    } else if (isFutureDated) {
+      // Future-dated subscription - payment will be attempted on the scheduled date
+      console.log(`[API] Future-dated subscription created. Payment will be processed on ${startDate}`);
+    }
+
+    // Return subscription
+    // For future-dated subscriptions, status will be 'incomplete' until payment date
+    // For immediate subscriptions, status may be 'incomplete' if payment failed
+    return json({
+      success: true,
+      subscription,
+      message: isFutureDated
+        ? `Subscription created successfully. Payment will be processed on ${startDate}.`
+        : subscriptionStatus === 'active' 
+          ? "Subscription created and payment processed successfully"
+          : "Subscription created successfully. Payment will be processed automatically.",
+    });
   } catch (error: any) {
     console.error("Error creating subscription:", error);
     const errorMessage = error?.message || error?.toString() || "Internal server error";
