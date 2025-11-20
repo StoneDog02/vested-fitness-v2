@@ -402,7 +402,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           shouldShowWorkout = activatedDate < todayStr; // Only show if activated before today
         }
         
-        if (shouldShowWorkout && !isFlexibleSchedule) {
+        if (!isFlexibleSchedule) {
           // Only fetch fixed schedule workouts - flexible schedules are handled in the workouts page
           const workoutPlanId = workoutPlan.id;
           const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -418,7 +418,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             const day = daysRaw[0];
             planName = day.workout_name || null;
             isRestDay = day.is_rest;
-            if (!day.is_rest) {
+            if (shouldShowWorkout && !day.is_rest) {
               // Fetch all exercises for this day
               const { data: exercisesRaw } = await supabase
                 .from("workout_exercises")
@@ -457,7 +457,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           }
         }
       }
-      }
+    }
 
       // Process today's workout completion
       let todaysWorkoutCompletion = null;
@@ -832,6 +832,21 @@ export default function Dashboard() {
   const { clientData, coachId, totalClients, activeClients, inactiveClients, compliance, percentChange, recentClients: loaderRecentClients, recentActivity: loaderRecentActivity } = useLoaderData<LoaderData>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const { checkedMeals, isHydrated } = useMealCompletion();
+  const nextMealInfo = React.useMemo(() => {
+    if (!isHydrated) {
+      return { status: "loading", label: "Loading meals..." };
+    }
+    if (!clientData?.meals || clientData.meals.length === 0) {
+      return { status: "empty", label: "No meals planned for today." };
+    }
+    const createMealKey = (meal: { id?: string | number; name: string; time: string }) => `${meal.id}-${meal.name}-${meal.time.slice(0, 5)}`;
+    const checkedMealKeys = checkedMeals ?? [];
+    const nextMeal = (clientData.meals ?? []).find((meal) => !checkedMealKeys.includes(createMealKey(meal)));
+    if (!nextMeal) {
+      return { status: "complete", label: "All meals completed for today!" };
+    }
+    return { status: "upcoming", meal: nextMeal };
+  }, [clientData?.meals, checkedMeals, isHydrated]);
   const matches = useMatches();
   // Get parent loader data from dashboard route (role, user, currentInvoice)
   const parentMatch = useMatches().find((m) => m.id === "routes/dashboard");
@@ -1276,7 +1291,7 @@ export default function Dashboard() {
         <div className="space-y-8 animate-fade-in">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-4xl font-bold text-gradient mb-2">Your Dashboard</h1>
+              <h1 className="text-4xl font-bold text-gradient mb-2">My Dashboard</h1>
               <p className="text-gray-600 dark:text-gray-400">Track your progress and stay on top of your fitness journey</p>
             </div>
             <Button
@@ -1294,267 +1309,137 @@ export default function Dashboard() {
           </div>
 
           {/* Client Metrics Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-            <Card variant="elevated" className="p-6 animate-scale-in">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center shadow-soft">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 7 days</p>
-                </div>
-              </div>
-              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Workout Compliance</h3>
-              <p className="text-3xl font-bold text-gradient">
-                {typeof clientData?.workoutCompliance === "number" && !isNaN(clientData.workoutCompliance)
-                  ? `${clientData.workoutCompliance}%`
-                  : "-%"}
-              </p>
-            </Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="flex flex-col h-full">
+              <Link
+                to="/dashboard/coach-access?addWeight=1#weight-progress"
+                className="block h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary rounded-2xl"
+              >
+                <Card variant="elevated" className="p-6 animate-scale-in cursor-pointer transition-transform hover:-translate-y-1 h-full flex flex-col justify-between">
+                  <div>
+                    <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Weight Change</h3>
+                    <p className="text-3xl font-bold text-gradient">
+                      {typeof weightChange === "number" && !isNaN(weightChange)
+                        ? `${weightChange > 0 ? "+" : ""}${weightChange} lbs`
+                        : "- lbs"}
+                    </p>
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">Since sign up</p>
+                </Card>
+              </Link>
+            </div>
 
-            <Card variant="elevated" className="p-6 animate-scale-in" style={{animationDelay: '0.1s'}}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-info-500 to-info-600 rounded-xl flex items-center justify-center shadow-soft">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                  </svg>
+            <div className="space-y-3">
+              <Link to="/dashboard/workouts" className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary rounded-2xl">
+                <Card variant="elevated" className="p-6 animate-scale-in cursor-pointer transition-transform hover:-translate-y-1">
+                  <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">My Workouts</h3>
+                  <p className="text-3xl font-bold text-gradient">
+                    {clientData?.isRestDay
+                      ? "Rest Day"
+                      : clientData?.planName ||
+                        clientData?.todaysWorkoutCompletion?.workoutName ||
+                        "Today's Workout"}
+                  </p>
+                </Card>
+              </Link>
+              <Card variant="elevated" className="px-4 py-2 animate-scale-in">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Compliance</p>
+                    <p className="text-xs text-secondary dark:text-alabaster">This Week</p>
+                  </div>
+                  <p className="text-xl font-bold text-gradient leading-none">
+                    {typeof clientData?.workoutCompliance === "number" && !isNaN(clientData.workoutCompliance)
+                      ? `${clientData.workoutCompliance}%`
+                      : "-%"}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 7 days</p>
-                </div>
-              </div>
-              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Rest Day Compliance</h3>
-              <p className="text-3xl font-bold text-info-600">
-                {typeof clientData?.restDayCompliance === "number" && !isNaN(clientData.restDayCompliance)
-                  ? `${clientData.restDayCompliance}%`
-                  : "-%"}
-              </p>
-            </Card>
+              </Card>
+            </div>
 
-            <Card variant="elevated" className="p-6 animate-scale-in" style={{animationDelay: '0.2s'}}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-success-500 to-success-600 rounded-xl flex items-center justify-center shadow-soft">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0l-2.5 5M7 13l2.5 5m6-5v6a2 2 0 01-2 2H9a2 2 0 01-2-2v-6m6 0V9a2 2 0 00-2-2H9a2 2 0 00-2 2v4.01" />
-                  </svg>
+            <div className="space-y-3">
+              <Link to="/dashboard/meals" className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary rounded-2xl">
+                <Card variant="elevated" className="p-6 animate-scale-in cursor-pointer transition-transform hover:-translate-y-1" style={{animationDelay: '0.1s'}}>
+                  <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">My Meals</h3>
+                {nextMealInfo.status === "upcoming" ? (
+                  <p className="text-3xl font-bold bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500 text-transparent bg-clip-text">
+                    {nextMealInfo.meal.name}
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {nextMealInfo.label}
+                  </p>
+                )}
+                </Card>
+              </Link>
+              <Card variant="elevated" className="px-4 py-2 animate-scale-in">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Compliance</p>
+                    <p className="text-xs text-secondary dark:text-alabaster">This Week</p>
+                  </div>
+                  <p className="text-xl font-bold text-gradient leading-none">
+                    {typeof clientData?.mealCompliance === "number" && !isNaN(clientData.mealCompliance)
+                      ? `${clientData.mealCompliance}%`
+                      : "-%"}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 7 days</p>
-                </div>
-              </div>
-              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Meal Compliance</h3>
-              <p className="text-3xl font-bold text-success-600">
-                {typeof clientData?.mealCompliance === "number" && !isNaN(clientData.mealCompliance)
-                  ? `${clientData.mealCompliance}%`
-                  : "-%"}
-              </p>
-            </Card>
+              </Card>
+            </div>
 
-            <Card variant="elevated" className="p-6 animate-scale-in" style={{animationDelay: '0.3s'}}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-warning-500 to-warning-600 rounded-xl flex items-center justify-center shadow-soft">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                  </svg>
+            <div className="space-y-3">
+              <Link to="/dashboard/supplements" className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary rounded-2xl">
+                <Card variant="elevated" className="p-6 animate-scale-in cursor-pointer transition-transform hover:-translate-y-1" style={{animationDelay: '0.2s'}}>
+                  <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">My Supplements</h3>
+                  {clientData?.supplements?.length ? (
+                    <p className="text-3xl font-bold bg-gradient-to-r from-purple-400 via-purple-500 to-indigo-500 text-transparent bg-clip-text">
+                      {clientData.supplements.length}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">No supplements scheduled for today.</p>
+                  )}
+                </Card>
+              </Link>
+              <Card variant="elevated" className="px-4 py-2 animate-scale-in">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Compliance</p>
+                    <p className="text-xs text-secondary dark:text-alabaster">This Week</p>
+                  </div>
+                  <p className="text-xl font-bold text-gradient leading-none">
+                    {typeof clientData?.supplementCompliance === "number" && !isNaN(clientData.supplementCompliance)
+                      ? `${clientData.supplementCompliance}%`
+                      : "-%"}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Last 7 days</p>
-                </div>
-              </div>
-              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Supplement Compliance</h3>
-              <p className="text-3xl font-bold text-warning-600">
-                {typeof clientData?.supplementCompliance === "number" && !isNaN(clientData.supplementCompliance)
-                  ? `${clientData.supplementCompliance}%`
-                  : "-%"}
-              </p>
-            </Card>
+              </Card>
+            </div>
 
-            <Card variant="elevated" className="p-6 animate-scale-in" style={{animationDelay: '0.4s'}}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center shadow-soft">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                  </svg>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Since sign up</p>
-                </div>
-              </div>
-              <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Weight Change</h3>
-              <p className="text-3xl font-bold text-gradient">
-                {typeof weightChange === "number" && !isNaN(weightChange)
-                  ? `${weightChange > 0 ? "+" : ""}${weightChange} lbs`
-                  : "- lbs"}
-              </p>
-            </Card>
           </div>
 
-          {/* Four Card Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Recent Updates */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-4">Recent Updates</h3>
-              <div className="space-y-4">
-                {clientData?.updates && clientData.updates.length > 0 ? (
-                  clientData.updates.map((update, index) => (
-                    <div key={index} className="flex items-start gap-3">
-                      <div className="w-2 h-2 mt-2 rounded-full bg-primary" />
-                      <div>
-                        <p className="text-sm text-secondary dark:text-alabaster">
-                          {update.message}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {update.timestamp}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-gray-dark dark:text-gray-light text-sm">No Updates From Coach</div>
-                )}
-              </div>
-            </Card>
-
-            {/* Next Meal */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-4">Next Meal</h3>
-              <div className="rounded-xl bg-gray-50 dark:bg-gray-800 shadow p-6 space-y-6">
-                {!isHydrated ? (
-                  <div className="text-gray-500 dark:text-gray-400">Loading meals...</div>
-                ) : (!clientData?.meals || clientData.meals.length === 0) ? (
-                  <div className="text-gray-500 dark:text-gray-400">No meals planned for today.</div>
-                ) : (() => {
-                    // Create meal key function to match the one used in meals page
-                    const createMealKey = (meal: { id?: string | number; name: string; time: string }) => {
-                      return `${meal.id}-${meal.name}-${meal.time.slice(0,5)}`;
-                    };
-                    // Use checkedMeals from MealCompletionContext for instant UI
-                    const checkedMealKeys = checkedMeals ?? [];
-                    const nextMeal = (clientData.meals ?? []).find((meal) => {
-                      const mealKey = createMealKey(meal);
-                      const isChecked = checkedMealKeys.includes(mealKey);
-                      return !isChecked;
-                    });
-                    if (!nextMeal) {
-                      return <div className="text-green-600 dark:text-green-400 font-semibold">All meals completed for today!</div>;
-                    }
-                    return (
-                      <div className="rounded-lg bg-white dark:bg-gray-700 shadow-sm p-5">
-                        <div className="flex justify-between items-center">
-                          <div>
-                            <div className="text-xl font-semibold text-secondary dark:text-alabaster">{nextMeal.name}</div>
-                            <div className="text-gray-500 dark:text-gray-400">{nextMeal.time.slice(0, 5)}</div>
-                          </div>
-                          <div className="flex flex-col items-end">
-                            <span className="font-bold text-lg text-secondary dark:text-alabaster">{nextMeal.calories} cal</span>
-                            <div className="flex gap-2 mt-1">
-                              <span className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full px-2 py-0.5 text-xs font-medium">P: {nextMeal.protein}g</span>
-                              <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full px-2 py-0.5 text-xs font-medium">C: {nextMeal.carbs}g</span>
-                              <span className="bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full px-2 py-0.5 text-xs font-medium">F: {nextMeal.fat}g</span>
-                            </div>
-                          </div>
-                        </div>
-                        <ul className="mt-3 pl-4 border-l-2 border-gray-100 dark:border-gray-600 space-y-1">
-                          {nextMeal.foods.map(food => (
-                            <li key={food.id} className="text-gray-700 dark:text-gray-300">
-                              <span className="font-medium">{food.name}</span> ({food.portion}) – 
-                              <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
-                                {food.calories} cal, P: {food.protein}g, C: {food.carbs}g, F: {food.fat}g
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    );
-                  })()
-                }
-              </div>
-            </Card>
-
-            {/* Today's Workouts */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-4">Today's Workouts</h3>
-              <div className="rounded-xl bg-gray-50 dark:bg-gray-800 shadow p-6 space-y-6 max-h-96 overflow-y-auto">
-                {clientData?.todaysWorkoutCompletion ? (
-                  // Show today's completed workout/rest day
-                  <div className="text-center py-6">
-                    <div className="text-green-600 dark:text-green-400 mb-4">
-                      <div className="font-semibold text-lg mb-2">✅ Completed Today</div>
-                      <div className="text-xl font-bold">
-                        {clientData.todaysWorkoutCompletion.isRestDay ? "Rest Day" : clientData.todaysWorkoutCompletion.workoutName}
-                      </div>
-                      {clientData.todaysWorkoutCompletion.isRestDay && (
-                        <div className="text-sm text-gray-600 dark:text-gray-400 mt-2">Take time to recover and recharge</div>
-                      )}
+          {/* Recent Updates */}
+          <Card className="p-6 w-full">
+            <h3 className="font-semibold text-lg mb-4">Recent Updates</h3>
+            <div className="space-y-4">
+              {clientData?.updates && clientData.updates.length > 0 ? (
+                clientData.updates.map((update, index) => (
+                  <div key={index} className="flex items-start gap-3">
+                    <div className="w-2 h-2 mt-2 rounded-full bg-primary" />
+                    <div>
+                      <p className="text-sm text-secondary dark:text-alabaster">
+                        {update.message}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {update.timestamp}
+                      </p>
                     </div>
                   </div>
-                ) : clientData?.isFlexibleSchedule ? (
-                  <div className="text-center py-8">
-                    <div className="text-gray-600 dark:text-gray-400 mb-4">
-                      <div className="font-semibold text-lg mb-2">Flexible Schedule Active</div>
-                      <div className="text-sm">Head to Workouts and pick your workout for today!</div>
-                    </div>
-                    <Link 
-                      to="/dashboard/workouts" 
-                      className="inline-block px-6 py-3 bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors"
-                    >
-                      Choose Today's Workout
-                    </Link>
-                  </div>
-                ) : clientData?.workouts?.length === 0 && clientData?.planName && clientData?.isRestDay ? (
-                  <div className="text-gray-500 dark:text-gray-400 text-center">
-                    <div className="font-semibold mb-1">Workout - {dayjs().tz('America/Denver').format('dddd')}</div>
-                    <div>Today is a Rest Day</div>
-                  </div>
-                ) : clientData?.workouts?.length === 0 ? (
-                  <div className="text-gray-500 dark:text-gray-400">No workouts planned for today.</div>
-                ) : (
-                  <div className="space-y-6">
-                    {(clientData?.workouts ?? []).map((workout) => (
-                      <div key={workout.id} className="rounded-lg bg-white dark:bg-gray-700 shadow-sm p-5">
-                        <div className="text-xl font-semibold mb-2 text-secondary dark:text-alabaster">{workout.name}</div>
-                        <div className="space-y-4">
-                          {workout.groups?.map(group => (
-                            <div key={group.type}>
-                              <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full px-3 py-1 text-xs font-medium mb-2 inline-block">{group.type}</span>
-                              <ul className="mt-2 pl-4 border-l-2 border-gray-100 dark:border-gray-600 space-y-2">
-                                {group.exercises.map((exercise) => {
-                                  const setsCount = exercise.sets.length;
-                                  const reps = setsCount > 0 ? exercise.sets[0].reps : "-";
-                                  return (
-                                    <li key={exercise.id} className="text-gray-700 dark:text-gray-300">
-                                      <span className="font-medium">{exercise.name}</span>
-                                      <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
-                                        {setsCount} set{setsCount !== 1 ? "s" : ""} x {reps} reps
-                                      </span>
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Card>
-
-            {/* Today's Supplements */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-lg mb-4">
-                Today&apos;s Supplements
-              </h3>
-              <ul className="list-disc pl-6 space-y-2">
-                {clientData?.supplements.map((supplement, index) => (
-                  <li key={index} className="font-medium">{supplement.name}</li>
-                ))}
-              </ul>
-            </Card>
-          </div>
+                ))
+              ) : (
+                <div className="text-gray-dark dark:text-gray-light text-sm">No Updates From Coach</div>
+              )}
+            </div>
+          </Card>
         </div>
       )}
       <ClientInviteModal

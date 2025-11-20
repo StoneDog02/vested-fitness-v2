@@ -1,8 +1,8 @@
 import type { MetaFunction , LoaderFunctionArgs } from "@remix-run/node";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
-import { useState, useEffect } from "react";
-import { useLoaderData, useFetcher } from "@remix-run/react";
+import { useState, useEffect, useRef } from "react";
+import { useLoaderData, useFetcher, useSearchParams } from "@remix-run/react";
 import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
@@ -307,6 +307,7 @@ export default function CoachAccess() {
   const toast = useToast();
   const { updates, goal, checkInNotes, allCheckIns = [], allUpdates = [], weightLogs: initialWeightLogs = [], paginatedCheckIns = [], hasMorePaginatedCheckIns = false, paginatedUpdates = [], hasMorePaginatedUpdates = false, mealLogs = [], paginatedMealLogs = [], hasMorePaginatedMealLogs = false, clientId, clientName } = useLoaderData<LoaderData>();
   const fetcher = useFetcher();
+  const [searchParams] = useSearchParams();
   const [showUpdateHistory, setShowUpdateHistory] = useState(false);
   const [showCheckInHistory, setShowCheckInHistory] = useState(false);
   const [showAddWeight, setShowAddWeight] = useState(false);
@@ -322,6 +323,10 @@ export default function CoachAccess() {
   } | null>(null);
   const [showTakePhoto, setShowTakePhoto] = useState(false);
   const [showProgressPhotos, setShowProgressPhotos] = useState(false);
+  const weightSectionRef = useRef<HTMLDivElement | null>(null);
+  const weightInputRef = useRef<HTMLInputElement | null>(null);
+  const [shouldScrollToWeight, setShouldScrollToWeight] = useState(searchParams.get("addWeight") === "1");
+  const [handledAddWeightParam, setHandledAddWeightParam] = useState(false);
   
   // Check-in form state
   const [pendingForms, setPendingForms] = useState<Array<{
@@ -380,6 +385,27 @@ export default function CoachAccess() {
   );
   const [hasMoreUpdates, setHasMoreUpdates] = useState(hasMorePaginatedUpdates);
   const updateFetcher = useFetcher();
+
+useEffect(() => {
+  if (!handledAddWeightParam && searchParams.get("addWeight") === "1") {
+    setShowAddWeight(true);
+    setShouldScrollToWeight(true);
+    setHandledAddWeightParam(true);
+  }
+}, [handledAddWeightParam, searchParams]);
+
+useEffect(() => {
+  if (showAddWeight) {
+    const focusTimeout = setTimeout(() => {
+      weightInputRef.current?.focus();
+      if (shouldScrollToWeight) {
+        weightSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setShouldScrollToWeight(false);
+      }
+    }, 0);
+    return () => clearTimeout(focusTimeout);
+  }
+}, [showAddWeight, shouldScrollToWeight]);
 
   // Fetch pending check-in forms
   useEffect(() => {
@@ -822,7 +848,7 @@ export default function CoachAccess() {
         </div>
 
         {/* Weight Chart */}
-        <div className="md:col-span-2">
+        <div className="md:col-span-2" ref={weightSectionRef} id="weight-progress">
           <Card title={
             <div className="flex items-center justify-between w-full">
               <span>Weight Progress</span>
@@ -855,6 +881,7 @@ export default function CoachAccess() {
                     onChange={e => setNewWeight(e.target.value)}
                     placeholder={hasWeightLogs ? "Enter weight (lbs)" : "Enter starting weight (lbs)"}
                     className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-md bg-white dark:bg-night text-secondary dark:text-alabaster text-center text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
+                    ref={weightInputRef}
                   />
                   <span className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                     {hasWeightLogs ? "Log your new weight for today." : "This will be your baseline for progress tracking."}
