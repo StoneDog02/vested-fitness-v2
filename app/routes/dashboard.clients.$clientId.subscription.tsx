@@ -88,6 +88,7 @@ export default function ClientSubscription() {
   const client = parentData.client;
   const subscription = loaderData.subscription;
   const paymentMethods = loaderData.paymentMethods || [];
+  const paymentIntentDetails = loaderData.paymentIntentDetails || null;
   const hasPaymentMethod = paymentMethods.length > 0;
   
   // Get the last 4 digits of the first payment method
@@ -175,6 +176,29 @@ export default function ClientSubscription() {
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
   };
 
+  // Helper function to get user-friendly decline code messages
+  const getDeclineCodeMessage = (declineCode: string): string => {
+    const messages: Record<string, string> = {
+      'insufficient_funds': 'Insufficient funds',
+      'card_declined': 'Card declined',
+      'expired_card': 'Expired card',
+      'incorrect_cvc': 'Incorrect CVC',
+      'incorrect_number': 'Incorrect card number',
+      'processing_error': 'Processing error',
+      'generic_decline': 'Card declined',
+      'lost_card': 'Lost card',
+      'stolen_card': 'Stolen card',
+      'pickup_card': 'Card pickup',
+      'restricted_card': 'Restricted card',
+      'security_violation': 'Security violation',
+      'service_not_allowed': 'Service not allowed',
+      'stop_payment_order': 'Stop payment order',
+      'testmode_decline': 'Test mode decline',
+      'withdrawal_count_limit_exceeded': 'Withdrawal limit exceeded',
+    };
+    return messages[declineCode] || declineCode.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
+
   return (
     <ClientDetailLayout>
       <div className="p-6">
@@ -227,8 +251,10 @@ export default function ClientSubscription() {
                       ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
                       : subscriptionDetails.status === "trialing"
                       ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
-                      : subscriptionDetails.status === "past_due"
+                      : subscriptionDetails.status === "incomplete"
                       ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400"
+                      : subscriptionDetails.status === "past_due"
+                      ? "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400"
                       : subscriptionDetails.status === "canceled" || subscriptionDetails.status === "unpaid"
                       ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
                       : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
@@ -263,11 +289,46 @@ export default function ClientSubscription() {
                         Unpaid
                       </span>
                     )}
-                    {!["active", "trialing", "past_due", "canceled", "unpaid"].includes(subscriptionDetails.status) && (
+                    {subscriptionDetails.status === "incomplete" && (
+                      <span className="flex items-center gap-1">
+                        <ClockIcon className="w-4 h-4" />
+                        Incomplete
+                      </span>
+                    )}
+                    {!["active", "trialing", "past_due", "canceled", "unpaid", "incomplete"].includes(subscriptionDetails.status) && (
                       <span className="capitalize">{subscriptionDetails.status}</span>
                     )}
                   </div>
                 </div>
+
+                {/* Incomplete Subscription with Payment Error Details */}
+                {subscriptionDetails.status === "incomplete" && paymentIntentDetails && (
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                    <div className="flex items-start gap-2">
+                      <InformationCircleIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-1">
+                          Incomplete: {paymentIntentDetails.message ? paymentIntentDetails.message.replace(/^Your /i, 'Client ') : "Payment failed"}
+                        </div>
+                        <div className="text-sm text-yellow-700 dark:text-yellow-300 space-y-1">
+                          {paymentIntentDetails.decline_code && (
+                            <p>
+                              <strong>Reason:</strong> {getDeclineCodeMessage(paymentIntentDetails.decline_code)}
+                            </p>
+                          )}
+                          <p>
+                            Stripe will automatically retry payment over the next 3 days. If payment succeeds, the subscription will become active automatically.
+                          </p>
+                          {paymentIntentDetails.advice_code === 'try_again_later' && (
+                            <p className="text-xs italic">
+                              Tip: The client should ensure their payment method has sufficient funds.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Cancellation/Payment Failure Reason */}
                 {subscriptionDetails.cancellationReason && (

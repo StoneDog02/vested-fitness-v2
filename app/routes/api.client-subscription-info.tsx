@@ -93,10 +93,61 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Fetch subscription info if customer exists
     let subscription = null;
     let paymentMethods: any[] = [];
+    let paymentIntentDetails: any = null;
     
     if (client.stripe_customer_id) {
       try {
         subscription = await getSubscriptionInfo(client.stripe_customer_id);
+        
+        // If subscription is incomplete, fetch payment intent details for helpful error messages
+        if (subscription && (subscription as any).status === 'incomplete') {
+          try {
+            // Get the latest invoice for this subscription
+            const invoices = await stripe.invoices.list({
+              customer: client.stripe_customer_id,
+              subscription: (subscription as any).id,
+              limit: 1,
+            });
+            
+            if (invoices.data.length > 0) {
+              const latestInvoice = invoices.data[0];
+              
+              // Retrieve invoice with expanded payment intent
+              const invoiceWithPI = await stripe.invoices.retrieve(latestInvoice.id, {
+                expand: ['payment_intent'],
+              });
+              
+              const paymentIntent = (invoiceWithPI as any).payment_intent;
+              
+              if (paymentIntent) {
+                const pi = typeof paymentIntent === 'string' 
+                  ? await stripe.paymentIntents.retrieve(paymentIntent)
+                  : paymentIntent;
+                
+                // Extract helpful information
+                const lastError = (pi as any).last_payment_error;
+                if (lastError) {
+                  paymentIntentDetails = {
+                    decline_code: lastError.decline_code,
+                    code: lastError.code,
+                    message: lastError.message,
+                    type: lastError.type,
+                    advice_code: lastError.advice_code,
+                  };
+                } else if ((pi as any).status === 'requires_payment_method') {
+                  // Payment intent exists but needs a payment method
+                  paymentIntentDetails = {
+                    status: 'requires_payment_method',
+                    message: 'Payment method required',
+                  };
+                }
+              }
+            }
+          } catch (piError) {
+            // If we can't fetch payment intent details, that's ok
+            console.error("Error fetching payment intent details:", piError);
+          }
+        }
         
         // Fetch attached payment methods
         const pmList = await listPaymentMethods(client.stripe_customer_id);
@@ -142,6 +193,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return json({
       subscription,
       paymentMethods,
+      paymentIntentDetails, // Include payment intent details for incomplete subscriptions
       client: {
         id: client.id,
         name: client.name,
