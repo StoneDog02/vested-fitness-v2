@@ -8,6 +8,7 @@ import CreateSubscriptionModal from "~/components/coach/CreateSubscriptionModal"
 import Card from "~/components/ui/Card";
 import dayjs from "dayjs";
 import { CheckCircleIcon, ClockIcon, CreditCardIcon, CalendarIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
+import Tooltip from "~/components/ui/Tooltip";
 
 export const meta: MetaFunction = () => {
   return [
@@ -290,10 +291,31 @@ export default function ClientSubscription() {
                       </span>
                     )}
                     {subscriptionDetails.status === "incomplete" && (
-                      <span className="flex items-center gap-1">
-                        <ClockIcon className="w-4 h-4" />
-                        Incomplete
-                      </span>
+                      <Tooltip
+                        content={
+                          paymentIntentDetails
+                            ? (() => {
+                                const reason = paymentIntentDetails.decline_code
+                                  ? getDeclineCodeMessage(paymentIntentDetails.decline_code)
+                                  : paymentIntentDetails.message?.replace(/^Your /i, 'Client ') || "Payment failed";
+                                return (
+                                  <div>
+                                    <div className="font-semibold mb-1">Incomplete: {paymentIntentDetails.message?.replace(/^Your /i, 'Client ') || "Payment failed"}</div>
+                                    <div className="text-xs opacity-90">
+                                      <div className="mb-1"><strong>Reason:</strong> {reason}</div>
+                                      <div>Stripe will automatically retry payment over the next 3 days. If payment succeeds, the subscription will become active automatically.</div>
+                                    </div>
+                                  </div>
+                                );
+                              })()
+                            : "Payment is pending. Stripe will automatically retry payment over the next 3 days."
+                        }
+                      >
+                        <span className="flex items-center gap-1 cursor-help">
+                          <ClockIcon className="w-4 h-4" />
+                          Incomplete
+                        </span>
+                      </Tooltip>
                     )}
                     {!["active", "trialing", "past_due", "canceled", "unpaid", "incomplete"].includes(subscriptionDetails.status) && (
                       <span className="capitalize">{subscriptionDetails.status}</span>
