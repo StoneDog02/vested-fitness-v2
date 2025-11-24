@@ -142,9 +142,10 @@ export const loader: LoaderFunction = async ({ request }) => {
         const dayExercises = (exercisesRaw || []).filter(ex => ex.workout_day_id === day.id);
         
         // Group exercises by their group type and sequence order
+        // Include day.id in group ID to ensure uniqueness across different workout days/templates
         const groupsMap = new Map();
         dayExercises.forEach((exercise) => {
-          const groupKey = `${exercise.sequence_order}-${exercise.group_type}`;
+          const groupKey = `${day.id}-${exercise.sequence_order}-${exercise.group_type}`;
           if (!groupsMap.has(groupKey)) {
             groupsMap.set(groupKey, {
               id: groupKey,
@@ -300,9 +301,10 @@ export const loader: LoaderFunction = async ({ request }) => {
         const dayExercises = (exercisesRaw || []).filter(ex => ex.workout_day_id === dayPlan.id);
         
         // Group exercises by their group type and sequence order
+        // Include dayPlan.id in group ID to ensure uniqueness across different workout days
         const groupsMap = new Map();
         dayExercises.forEach((exercise) => {
-          const groupKey = `${exercise.sequence_order}-${exercise.group_type}`;
+          const groupKey = `${dayPlan.id}-${exercise.sequence_order}-${exercise.group_type}`;
           if (!groupsMap.has(groupKey)) {
             groupsMap.set(groupKey, {
               id: groupKey,

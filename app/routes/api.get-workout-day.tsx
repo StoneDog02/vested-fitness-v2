@@ -160,9 +160,10 @@ export const loader: LoaderFunction = async ({ request }) => {
     .order("sequence_order", { ascending: true });
 
   // Group exercises by their group type and sequence order
+  // Include workoutDay.id in group ID to ensure uniqueness across different workout days
   const groupsMap = new Map();
   (exercisesRaw || []).forEach((exercise) => {
-    const groupKey = `${exercise.sequence_order}-${exercise.group_type}`;
+    const groupKey = `${workoutDay.id}-${exercise.sequence_order}-${exercise.group_type}`;
     if (!groupsMap.has(groupKey)) {
       groupsMap.set(groupKey, {
         id: groupKey,

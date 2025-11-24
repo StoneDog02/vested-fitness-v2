@@ -141,7 +141,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           name: plan.title,
           dayLabel: day.workout_name || `${day.day_of_week} Workout`,
           groups: day.exercises ? day.exercises.map(exercise => ({
-            id: `${exercise.sequence_order}-${exercise.group_type}`,
+            id: `${plan.id}-${day.day_of_week}-${exercise.sequence_order}-${exercise.group_type}`, // Include plan and day to ensure uniqueness
             type: exercise.group_type,
             exercises: [{
               id: `${plan.id}-${exercise.sequence_order}`,
