@@ -6,8 +6,6 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 
-const MAX_LOG_BLAMELESS_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
-
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, { status: 405 });
@@ -18,7 +16,7 @@ export async function action({ request }: ActionFunctionArgs) {
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  // Get user from cookie
+  // Get user from cookie with improved error handling
   const cookies = parse(request.headers.get("cookie") || "");
   const supabaseAuthCookieKey = Object.keys(cookies).find(
     (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
@@ -27,12 +25,25 @@ export async function action({ request }: ActionFunctionArgs) {
   let accessToken;
   if (supabaseAuthCookieKey) {
     try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
+      const cookieValue = cookies[supabaseAuthCookieKey];
+      const decoded = Buffer.from(cookieValue, "base64").toString("utf-8");
+      
+      // Handle different cookie formats
+      let parsed;
+      try {
+        parsed = JSON.parse(decoded);
+        // If it's already an array, use it directly
+        if (Array.isArray(parsed)) {
+          accessToken = parsed[0];
+        } else {
+          // If it's a string that needs another parse
+          parsed = JSON.parse(parsed);
+          accessToken = Array.isArray(parsed) ? parsed[0] : parsed;
+        }
+      } catch (parseError) {
+        // Try direct access if it's already a string
+        accessToken = decoded;
+      }
     } catch (e) {
       console.error("Error parsing auth cookie in upload:", e);
       accessToken = undefined;
@@ -53,7 +64,11 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (!authId) {
-    console.error("Authentication failed in upload: No valid auth ID found");
+    console.error("Authentication failed in upload: No valid auth ID found", {
+      hasCookie: !!supabaseAuthCookieKey,
+      hasAccessToken: !!accessToken,
+      cookieKeys: Object.keys(cookies)
+    });
     return json({ error: "Not authenticated - please log in again" }, { status: 401 });
   }
 
@@ -87,6 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const recordingType = formData.get("recordingType") as string;
     const duration = formData.get("duration") as string;
     const transcript = formData.get("transcript") as string;
+    const notes = formData.get("notes") as string; // Text notes from the coach
 
     console.log('Upload request received:', {
       clientId,
@@ -99,7 +115,8 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       hasTranscript: !!transcript,
       transcriptLength: transcript?.length,
-      transcriptPreview: transcript?.substring(0, 100)
+      hasNotes: !!notes,
+      notesLength: notes?.length
     });
 
     if (!file || !clientId || !recordingType) {
@@ -107,18 +124,29 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "Missing required fields: file, clientId, and recordingType are required" }, { status: 400 });
     }
 
-    // Validate file type
+    // Validate file is not empty or corrupted
+    if (file.size === 0) {
+      console.error('Empty file uploaded');
+      return json({ error: "File is empty. Please record again." }, { status: 400 });
+    }
+
+    // Validate file type - handle codec variants
     const allowedTypes = recordingType === 'video' 
       ? ['video/webm', 'video/mp4', 'video/quicktime']
       : ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/m4a', 'audio/mp4'];
 
     const fileType = file.type || '';
-    const baseMimeType = fileType.split(';')[0];
-    const isAllowedType = allowedTypes.includes(fileType) || allowedTypes.includes(baseMimeType);
+    const baseMimeType = fileType.split(';')[0].trim();
+    
+    // Check if base mime type matches (ignoring codec parameters)
+    const isAllowedType = allowedTypes.some(allowed => {
+      const allowedBase = allowed.split(';')[0].trim();
+      return baseMimeType === allowedBase || fileType.includes(allowedBase);
+    });
 
-    if (!isAllowedType) {
+    if (!isAllowedType && baseMimeType) {
       console.error('Invalid file type:', { fileType, baseMimeType, recordingType, allowedTypes });
-      return json({ error: `Invalid file type. Expected ${allowedTypes.join(', ')} but got ${fileType || 'unknown type'}` }, { status: 400 });
+      return json({ error: `Invalid file type. Expected ${allowedTypes.map(t => t.split(';')[0]).join(', ')} but got ${baseMimeType || 'unknown type'}` }, { status: 400 });
     }
 
     // Validate file size (50MB max for video, 10MB for audio)
@@ -128,6 +156,15 @@ export async function action({ request }: ActionFunctionArgs) {
       const fileSizeMB = Math.round(file.size / 1024 / 1024);
       console.error('File too large:', { fileSize: file.size, maxSize, fileSizeMB, maxSizeMB });
       return json({ error: `File too large. Maximum size is ${maxSizeMB}MB, but file is ${fileSizeMB}MB` }, { status: 400 });
+    }
+
+    // Check if storage bucket exists
+    const { data: buckets, error: bucketListError } = await supabase.storage.listBuckets();
+    const bucketExists = buckets?.some(b => b.name === 'checkin-media');
+    
+    if (!bucketExists) {
+      console.error('Storage bucket checkin-media does not exist');
+      return json({ error: "Storage bucket not configured. Please contact support." }, { status: 500 });
     }
 
     // Validate client exists and belongs to this coach (also get name for later use)
@@ -193,10 +230,10 @@ export async function action({ request }: ActionFunctionArgs) {
       if (
         uploadError.statusCode === '413' ||
         uploadError.message?.includes('too large') ||
-        uploadError.message?.toLowerCase().includes('payload too large') ||
-        (file?.size && Number(file.size) > MAX_LOG_BLAMELESS_SIZE_BYTES)
+        uploadError.message?.toLowerCase().includes('payload too large')
       ) {
-        return json({ error: "File is too large for upload" }, { status: 413 });
+        const maxSizeMB = recordingType === 'video' ? 50 : 10;
+        return json({ error: `File is too large. Maximum size is ${maxSizeMB}MB.` }, { status: 413 });
       }
       
       return json({ 
@@ -220,9 +257,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // Use client name from validation query above
     const clientName = client?.name || 'Client';
     const firstName = clientName.split(' ')[0]; // Get just the first name
-    const recordingLabel = transcript && transcript.trim() 
-      ? transcript 
-      : `${firstName}'s Check In`;
+    
+    // Prioritize: notes > transcript > default label
+    let recordingLabel: string;
+    if (notes && notes.trim()) {
+      recordingLabel = notes.trim();
+    } else if (transcript && transcript.trim()) {
+      recordingLabel = transcript.trim();
+    } else {
+      recordingLabel = `${firstName}'s Check In`;
+    }
 
     // Create check-in record
     const checkInData = {

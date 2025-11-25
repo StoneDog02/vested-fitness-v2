@@ -74,12 +74,19 @@ export default function AddCheckInModal({
 
       // If there's recording data, upload it first
       if (recordingData) {
+        // Validate blob is not empty
+        if (!recordingData.blob || recordingData.blob.size === 0) {
+          throw new Error('Recording is empty. Please record again.');
+        }
+        
         console.log('Uploading recording data:', {
           hasTranscript: !!recordingData.transcript,
           transcriptLength: recordingData.transcript?.length,
           transcriptPreview: recordingData.transcript?.substring(0, 100),
           fileSize: recordingData.blob.size,
-          duration: recordingData.duration
+          duration: recordingData.duration,
+          hasNotes: !!thisWeek.trim(),
+          notesLength: thisWeek.trim().length
         });
         
         setUploadProgress('Uploading...');
@@ -103,10 +110,15 @@ export default function AddCheckInModal({
         if (recordingData.transcript) {
           formData.append('transcript', recordingData.transcript);
         }
+        // Include text notes if provided
+        if (thisWeek.trim()) {
+          formData.append('notes', thisWeek.trim());
+        }
 
-        // Create AbortController for timeout
+        // Create AbortController for timeout - increased for large videos
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for large videos
+        // 5 minute timeout for large videos (50MB at slow speeds can take time)
+        const timeout = setTimeout(() => controller.abort(), 300000);
 
         const response = await fetch('/api/upload-checkin-media', {
           method: 'POST',
@@ -118,13 +130,25 @@ export default function AddCheckInModal({
 
         if (!response.ok) {
           const errorText = await response.text();
-          let errorMessage = `Upload failed: ${response.status}`;
+          let errorMessage = `Upload failed (${response.status})`;
 
           try {
             const errorData = JSON.parse(errorText);
             errorMessage = errorData.error || errorMessage;
           } catch {
-            errorMessage = errorText || errorMessage;
+            // If it's not JSON, try to extract meaningful error
+            if (errorText) {
+              errorMessage = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
+            }
+          }
+
+          // Provide more helpful error messages
+          if (response.status === 401) {
+            errorMessage = 'Session expired. Please log in again.';
+          } else if (response.status === 413) {
+            errorMessage = 'File is too large. Please record a shorter video or compress it.';
+          } else if (response.status === 500) {
+            errorMessage = 'Server error. Please try again or contact support if the problem persists.';
           }
 
           throw new Error(errorMessage);
