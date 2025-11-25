@@ -469,7 +469,7 @@ export const loader: LoaderFunction = async ({ request }) => {
           // For flexible schedules, we need to determine the workout name from the completed groups
           let workoutName = "Rest Day";
           if (!isRestDayCompletion) {
-            workoutName = "Workout Completed";
+            workoutName = "Completed";
           }
           
           todaysWorkoutCompletion = {
@@ -580,9 +580,12 @@ export const loader: LoaderFunction = async ({ request }) => {
       const activeClientIds = clients.filter(c => c.status === "active").map(c => c.id);
       let compliance = 0;
       if (activeClientIds.length > 0) {
-        const weekAgo = getCurrentDate().subtract(7, "day");
-        const weekAgoISO = weekAgo.toISOString();
-        const nowISO = getCurrentTimestampISO();
+        // Last 7 days including today (today is day 0, so go back 6 days)
+        const today = getCurrentDate();
+        const weekAgo = today.subtract(6, "day");
+        const weekAgoStr = weekAgo.format("YYYY-MM-DD");
+        const todayStr = today.format("YYYY-MM-DD");
+        const tomorrowStr = today.add(1, "day").format("YYYY-MM-DD");
         // First, fetch workoutPlansRaw and mealPlansRaw
         const [workoutPlansRaw, mealPlansRaw] = await Promise.all([
           supabase
@@ -609,20 +612,20 @@ export const loader: LoaderFunction = async ({ request }) => {
             .from("workout_completions")
             .select("id, completed_at, user_id, completed_groups")
             .in("user_id", activeClientIds)
-            .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO),
+            .gte("completed_at", weekAgoStr)
+            .lt("completed_at", tomorrowStr),
           supabase
             .from("meal_completions")
-            .select("id, completed_at, user_id")
+            .select("id, completed_at, user_id, meal_id")
             .in("user_id", activeClientIds)
-            .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO),
+            .gte("completed_at", weekAgoStr)
+            .lt("completed_at", tomorrowStr),
           supabase
             .from("supplement_completions")
-            .select("id, completed_at, user_id")
+            .select("id, completed_at, user_id, supplement_id")
             .in("user_id", activeClientIds)
-            .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO),
+            .gte("completed_at", weekAgoStr)
+            .lt("completed_at", tomorrowStr),
           supabase
             .from("workout_days")
             .select("workout_plan_id, day_of_week, is_rest")
@@ -633,7 +636,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .in("meal_plan_id", (mealPlansRaw.data ?? []).map((p: any) => p.id)),
           supabase
             .from("supplements")
-            .select("id, user_id")
+            .select("id, user_id, active_from")
             .in("user_id", activeClientIds)
         ]);
         // Group plans and data by user
@@ -703,23 +706,28 @@ export const loader: LoaderFunction = async ({ request }) => {
             }, {});
             expectedMeals = Object.keys(mealGroups).length * 7;
           }
-          // Expected supplements (7 days worth)
+          // Expected supplements (7 days worth) - only count supplements that are active
           const supplements = supplementsByUser[clientId] || [];
-          const expectedSupplements = supplements.length * 7;
+          // Filter supplements that are active (have active_from date that's <= today)
+          const activeSupplements = supplements.filter((supp: any) => {
+            if (!supp.active_from) return true; // If no active_from, assume active
+            return supp.active_from <= todayStr;
+          });
+          const expectedSupplements = activeSupplements.length * 7;
           // Completions - filter out completions on rest days
           const clientWorkoutCompletions = workoutCompletionsByUser[clientId] || [];
           const completedWorkouts = clientWorkoutCompletions.filter((completion: any) => {
             // Filter completions that are actually workout completions (non-empty completed_groups)
             return completion.completed_groups && completion.completed_groups.length > 0;
           }).length;
-          // Calculate completed meals by grouping A/B options
+          // Calculate completed meals by grouping A/B options and counting per day
           let completedMeals = 0;
           const clientMealPlan = mealPlanByUser[clientId];
           if (clientMealPlan && mealsByPlan[clientMealPlan.id]) {
             const allMeals = mealsByPlan[clientMealPlan.id] || [];
             const clientMealCompletions = mealCompletionsByUser[clientId] || [];
             
-            // Group meals by name and time
+            // Group meals by name and time to handle A/B options
             const mealGroups = allMeals.reduce((groups: Record<string, any[]>, meal: any) => {
               const key = `${meal.name}-${meal.time}`;
               if (!groups[key]) {
@@ -729,29 +737,56 @@ export const loader: LoaderFunction = async ({ request }) => {
               return groups;
             }, {});
             
-            // Count completed unique meal groups
             const uniqueMealGroups = Object.keys(mealGroups);
-            const completedUniqueMealGroups = uniqueMealGroups.filter(groupKey => {
-              const [mealName, mealTime] = groupKey.split('-');
-              const groupMeals = allMeals.filter((m: any) => 
-                m.name === mealName && m.time.startsWith(mealTime)
-              );
-              
-              // Check if any meal in this group was completed
-              const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
-              const groupCompletions = clientMealCompletions.filter((c: any) => 
-                groupMealIds.has(c.meal_id)
-              );
-              
-              return groupCompletions.length > 0; // If any meal in the group was completed, the group is complete
-            });
             
-            completedMeals = completedUniqueMealGroups.length;
+            // Count completed meals per day for the week
+            for (let i = 0; i < 7; i++) {
+              const day = weekAgo.add(i, "day");
+              const dayStr = day.format("YYYY-MM-DD");
+              
+              // Count how many unique meal groups were completed on this day
+              const completedGroupsForDay = uniqueMealGroups.filter(groupKey => {
+                const [mealName, mealTime] = groupKey.split('-');
+                const groupMeals = allMeals.filter((m: any) => 
+                  m.name === mealName && m.time.startsWith(mealTime)
+                );
+                
+                // Check if any meal in this group was completed on this day
+                const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
+                const dayCompletions = clientMealCompletions.filter((c: any) => {
+                  const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
+                  return completedDateStr === dayStr && groupMealIds.has(c.meal_id);
+                });
+                
+                return dayCompletions.length > 0; // If any meal in the group was completed on this day, the group is complete
+              });
+              
+              completedMeals += completedGroupsForDay.length;
+            }
           } else {
             // Fallback to original calculation if no meal plan
             completedMeals = (mealCompletionsByUser[clientId] || []).length;
           }
-          const completedSupplements = (supplementCompletionsByUser[clientId] || []).length;
+          
+          // Calculate completed supplements per day for the week
+          let completedSupplements = 0;
+          const clientSupplementCompletions = supplementCompletionsByUser[clientId] || [];
+          // Reuse activeSupplements that was already calculated above for expectedSupplements
+          const activeSupplementIds = new Set(activeSupplements.map((s: any) => s.id));
+          
+          // Count completed supplements per day for the week
+          for (let i = 0; i < 7; i++) {
+            const day = weekAgo.add(i, "day");
+            const dayStr = day.format("YYYY-MM-DD");
+            
+            // Count how many active supplements were completed on this day
+            const dayCompletions = clientSupplementCompletions.filter((c: any) => {
+              const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
+              return completedDateStr === dayStr && activeSupplementIds.has(c.supplement_id);
+            });
+            
+            completedSupplements += dayCompletions.length;
+          }
           // Calculate compliance without counting rest days as completed
           const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
           const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
@@ -840,13 +875,34 @@ export default function Dashboard() {
       return { status: "empty", label: "No meals planned for today." };
     }
     const createMealKey = (meal: { id?: string | number; name: string; time: string }) => `${meal.id}-${meal.name}-${meal.time.slice(0, 5)}`;
-    const checkedMealKeys = checkedMeals ?? [];
-    const nextMeal = (clientData.meals ?? []).find((meal) => !checkedMealKeys.includes(createMealKey(meal)));
+    
+    // Combine local storage checked meals with backend completions
+    // Note: local storage keys may include meal option (e.g., "id-name-time-A"), 
+    // but backend keys don't. We check if any key starts with the base meal key.
+    const backendCompletedKeys = new Set(clientData.completedMealIds ?? []);
+    const checkedMealKeysSet = new Set(checkedMeals ?? []);
+    
+    // Check if a meal is completed (either in backend or local storage)
+    const isMealCompleted = (meal: { id?: string | number; name: string; time: string }) => {
+      const baseKey = createMealKey(meal);
+      // Check backend completions
+      if (backendCompletedKeys.has(baseKey)) return true;
+      // Check local storage - keys may have option suffix, so check if any key starts with base key
+      for (const key of checkedMealKeysSet) {
+        if (key.startsWith(baseKey + '-') || key === baseKey) {
+          return true;
+        }
+      }
+      return false;
+    };
+    
+    // Find the next meal that hasn't been completed (meals are already ordered by sequence_order from loader)
+    const nextMeal = (clientData.meals ?? []).find((meal) => !isMealCompleted(meal));
     if (!nextMeal) {
-      return { status: "complete", label: "All meals completed for today!" };
+      return { status: "complete", label: "Completed" };
     }
     return { status: "upcoming", meal: nextMeal };
-  }, [clientData?.meals, checkedMeals, isHydrated]);
+  }, [clientData?.meals, clientData?.completedMealIds, checkedMeals, isHydrated]);
   const matches = useMatches();
   // Get parent loader data from dashboard route (role, user, currentInvoice)
   const parentMatch = useMatches().find((m) => m.id === "routes/dashboard");
@@ -1268,9 +1324,6 @@ export default function Dashboard() {
                           <p className="text-sm text-muted-foreground">
                             {activity.action}
                           </p>
-                          <p className="text-xs text-muted-foreground">
-                            {dayjs(activity.time).format('h:mm A')}
-                          </p>
                         </div>
                       </div>
                     ))}
@@ -1364,6 +1417,10 @@ export default function Dashboard() {
                 {nextMealInfo.status === "upcoming" ? (
                   <p className="text-3xl font-bold bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500 text-transparent bg-clip-text">
                     {nextMealInfo.meal.name}
+                  </p>
+                ) : nextMealInfo.status === "complete" ? (
+                  <p className="text-3xl font-bold text-gradient">
+                    Completed
                   </p>
                 ) : (
                   <p className="text-sm text-gray-600 dark:text-gray-400">

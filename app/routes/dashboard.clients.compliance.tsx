@@ -15,7 +15,6 @@ type ComplianceClient = {
   id: string;
   name: string;
   workoutCompliance: number;
-  restDayCompliance: number;
   mealCompliance: number;
   supplementCompliance: number;
   overallCompliance: number;
@@ -89,9 +88,12 @@ export const loader: LoaderFunction = async ({ request }) => {
         .eq("role", "client");
       if (clients && clients.length > 0) {
         const clientIds = clients.map((c) => c.id);
-        const weekAgo = getCurrentDate().subtract(7, "day");
-        const weekAgoISO = weekAgo.toISOString();
-        const nowISO = getCurrentTimestampISO();
+        const today = getCurrentDate();
+        // Last 7 days including today (today is day 0, so go back 6 days)
+        const weekAgo = today.subtract(6, "day");
+        const weekAgoStr = weekAgo.format("YYYY-MM-DD");
+        const todayStr = today.format("YYYY-MM-DD");
+        const tomorrowStr = today.add(1, "day").format("YYYY-MM-DD");
         // First, fetch workoutPlansRaw and mealPlansRaw
         const [
           workoutPlansRaw,
@@ -119,22 +121,22 @@ export const loader: LoaderFunction = async ({ request }) => {
         ] = await Promise.all([
           supabase
             .from("workout_completions")
-            .select("id, completed_at, user_id")
+            .select("id, completed_at, user_id, completed_groups")
             .in("user_id", clientIds)
-            .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO),
+            .gte("completed_at", weekAgoStr)
+            .lt("completed_at", tomorrowStr),
           supabase
             .from("meal_completions")
-            .select("id, completed_at, user_id")
+            .select("id, completed_at, user_id, meal_id")
             .in("user_id", clientIds)
-            .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO),
+            .gte("completed_at", weekAgoStr)
+            .lt("completed_at", tomorrowStr),
           supabase
             .from("supplement_completions")
-            .select("id, completed_at, user_id")
+            .select("id, completed_at, user_id, supplement_id")
             .in("user_id", clientIds)
-            .gte("completed_at", weekAgoISO)
-            .lt("completed_at", nowISO),
+            .gte("completed_at", weekAgoStr)
+            .lt("completed_at", tomorrowStr),
           supabase
             .from("workout_days")
             .select("workout_plan_id, day_of_week, is_rest")
@@ -145,7 +147,7 @@ export const loader: LoaderFunction = async ({ request }) => {
             .in("meal_plan_id", (mealPlansRaw.data ?? []).map((p: any) => p.id)),
           supabase
             .from("supplements")
-            .select("id, user_id")
+            .select("id, user_id, active_from")
             .in("user_id", clientIds)
         ]);
         // Group data by client
@@ -191,7 +193,6 @@ export const loader: LoaderFunction = async ({ request }) => {
         complianceClients.push(...clients.map((client) => {
           // Calculate expected activities for this client
           let expectedWorkoutDays = 0;
-          let expectedRestDays = 0;
           let expectedMeals = 0;
           let expectedSupplements = 0;
           // Expected workouts (only actual workout days, not rest days)
@@ -199,7 +200,6 @@ export const loader: LoaderFunction = async ({ request }) => {
           if (plan && workoutDaysByPlan[plan.id]) {
             const workoutDays = workoutDaysByPlan[plan.id] || [];
             expectedWorkoutDays = workoutDays.filter((day: any) => !day.is_rest).length;
-            expectedRestDays = workoutDays.filter((day: any) => day.is_rest).length;
           }
           // Expected meals (7 days worth)
           const mealPlan = mealPlanByUser[client.id];
@@ -220,42 +220,34 @@ export const loader: LoaderFunction = async ({ request }) => {
             const uniqueMealGroups = Object.keys(mealGroups);
             expectedMeals = uniqueMealGroups.length * 7;
           }
-          // Expected supplements (7 days worth)
+          // Expected supplements (7 days worth) - only count supplements that are active
           const supplements = supplementsByUser[client.id] || [];
-          expectedSupplements = supplements.length * 7;
-          // Completions - filter out completions on rest days
+          // Filter supplements that are active (have active_from date that's <= today)
+          const today = getCurrentDate();
+          const todayStr = today.format("YYYY-MM-DD");
+          const activeSupplements = supplements.filter((supp: any) => {
+            if (!supp.active_from) return true; // If no active_from, assume active
+            return supp.active_from <= todayStr;
+          });
+          expectedSupplements = activeSupplements.length * 7;
+          // Completions - filter by completed_groups to get actual workouts (not rest days)
+          // Workouts have non-empty completed_groups, rest days have empty/null completed_groups
           const clientWorkoutCompletions = workoutCompletionsByUser[client.id] || [];
           const completedWorkouts = clientWorkoutCompletions.filter((completion: any) => {
-            const completionDate = new Date(completion.completed_at);
-            const dayOfWeek = completionDate.toLocaleDateString('en-US', { weekday: 'long' }); // Get day name like "Wednesday"
-            const plan = workoutPlanByUser[client.id];
-            if (plan && workoutDaysByPlan[plan.id]) {
-              const workoutDay = workoutDaysByPlan[plan.id].find((day: any) => day.day_of_week === dayOfWeek);
-              return workoutDay && !workoutDay.is_rest;
-            }
-            return false;
+            // Check if completed_groups exists and is a non-empty array
+            return completion.completed_groups && 
+                   Array.isArray(completion.completed_groups) && 
+                   completion.completed_groups.length > 0;
           }).length;
           
-          // Calculate rest day completions
-          const completedRestDays = clientWorkoutCompletions.filter((completion: any) => {
-            const completionDate = new Date(completion.completed_at);
-            const dayOfWeek = completionDate.toLocaleDateString('en-US', { weekday: 'long' }); // Get day name like "Wednesday"
-            const plan = workoutPlanByUser[client.id];
-            if (plan && workoutDaysByPlan[plan.id]) {
-              const workoutDay = workoutDaysByPlan[plan.id].find((day: any) => day.day_of_week === dayOfWeek);
-              return workoutDay && workoutDay.is_rest;
-            }
-            return false;
-          }).length;
-          
-          // Calculate completed meals by grouping A/B options
+          // Calculate completed meals by grouping A/B options and counting per day
           let completedMeals = 0;
           const clientMealPlan = mealPlanByUser[client.id];
           if (clientMealPlan && mealsByPlan[clientMealPlan.id]) {
             const allMeals = mealsByPlan[clientMealPlan.id] || [];
             const clientMealCompletions = mealCompletionsByUser[client.id] || [];
             
-            // Group meals by name and time
+            // Group meals by name and time to handle A/B options
             const mealGroups = allMeals.reduce((groups: Record<string, any[]>, meal: any) => {
               const key = `${meal.name}-${meal.time}`;
               if (!groups[key]) {
@@ -265,48 +257,69 @@ export const loader: LoaderFunction = async ({ request }) => {
               return groups;
             }, {});
             
-            // Count completed unique meal groups
             const uniqueMealGroups = Object.keys(mealGroups);
-            const completedUniqueMealGroups = uniqueMealGroups.filter(groupKey => {
-              const [mealName, mealTime] = groupKey.split('-');
-              const groupMeals = allMeals.filter((m: any) => 
-                m.name === mealName && m.time.startsWith(mealTime)
-              );
-              
-              // Check if any meal in this group was completed
-              const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
-              const groupCompletions = clientMealCompletions.filter((c: any) => 
-                groupMealIds.has(c.meal_id)
-              );
-              
-              return groupCompletions.length > 0; // If any meal in the group was completed, the group is complete
-            });
             
-            completedMeals = completedUniqueMealGroups.length;
+            // Count completed meals per day for the week
+            for (let i = 0; i < 7; i++) {
+              const day = weekAgo.add(i, "day");
+              const dayStr = day.format("YYYY-MM-DD");
+              
+              // Count how many unique meal groups were completed on this day
+              const completedGroupsForDay = uniqueMealGroups.filter(groupKey => {
+                const [mealName, mealTime] = groupKey.split('-');
+                const groupMeals = allMeals.filter((m: any) => 
+                  m.name === mealName && m.time.startsWith(mealTime)
+                );
+                
+                // Check if any meal in this group was completed on this day
+                const groupMealIds = new Set(groupMeals.map((m: any) => m.id));
+                const dayCompletions = clientMealCompletions.filter((c: any) => {
+                  const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
+                  return completedDateStr === dayStr && groupMealIds.has(c.meal_id);
+                });
+                
+                return dayCompletions.length > 0; // If any meal in the group was completed on this day, the group is complete
+              });
+              
+              completedMeals += completedGroupsForDay.length;
+            }
           } else {
             // Fallback to original calculation if no meal plan
             completedMeals = (mealCompletionsByUser[client.id] || []).length;
           }
           
-          const completedSupplements = (supplementCompletionsByUser[client.id] || []).length;
+          // Calculate completed supplements per day for the week
+          let completedSupplements = 0;
+          const clientSupplementCompletions = supplementCompletionsByUser[client.id] || [];
+          const activeSupplementIds = new Set(activeSupplements.map((s: any) => s.id));
+          
+          // Count completed supplements per day for the week
+          for (let i = 0; i < 7; i++) {
+            const day = weekAgo.add(i, "day");
+            const dayStr = day.format("YYYY-MM-DD");
+            
+            // Count how many active supplements were completed on this day
+            const dayCompletions = clientSupplementCompletions.filter((c: any) => {
+              const completedDateStr = c.completed_at.slice(0, 10); // Get YYYY-MM-DD from timestamp
+              return completedDateStr === dayStr && activeSupplementIds.has(c.supplement_id);
+            });
+            
+            completedSupplements += dayCompletions.length;
+          }
           // Calculate individual compliance percentages
           const workoutCompliance = expectedWorkoutDays > 0
             ? Math.round((completedWorkouts / expectedWorkoutDays) * 100)
             : 0;
-          const restDayCompliance = expectedRestDays > 0
-            ? Math.round((completedRestDays / expectedRestDays) * 100)
-            : 0;
           const mealCompliance = expectedMeals > 0 ? Math.round((completedMeals / expectedMeals) * 100) : 0;
           const supplementCompliance = expectedSupplements > 0 ? Math.round((completedSupplements / expectedSupplements) * 100) : 0;
-          // Calculate overall compliance
-          const totalCompleted = completedWorkouts + completedRestDays + completedMeals + completedSupplements;
-          const totalExpected = expectedWorkoutDays + expectedRestDays + expectedMeals + expectedSupplements;
+          // Calculate overall compliance (excluding rest days)
+          const totalCompleted = completedWorkouts + completedMeals + completedSupplements;
+          const totalExpected = expectedWorkoutDays + expectedMeals + expectedSupplements;
           const overallCompliance = totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 100) : 0;
           return {
             id: client.id,
             name: client.name,
             workoutCompliance,
-            restDayCompliance,
             mealCompliance,
             supplementCompliance,
             overallCompliance,
@@ -445,16 +458,10 @@ export default function ComplianceClients() {
                   </svg>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <ComplianceBar
                     label="Workouts"
                     percentage={client.workoutCompliance}
-                  />
-                  
-                  <ComplianceBar
-                    label="Rest Days"
-                    percentage={client.restDayCompliance}
-                    tooltip="Rest day compliance tracks when clients complete their scheduled rest days. This is separate from workout compliance but contributes to overall adherence."
                   />
                   
                   <ComplianceBar

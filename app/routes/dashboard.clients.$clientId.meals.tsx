@@ -1699,7 +1699,7 @@ export default function ClientMeals() {
         {/* Meals Completed Container */}
         {sortedMealPlans.find((p) => p.isActive) && (
           <div className="mt-6 space-y-6">
-            <Card title="Meals Completed">
+            <Card title="Completed">
               <div className="space-y-4">
                 {/* Daily Meals Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
