@@ -968,7 +968,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         delete clientMealsCache[params.clientId];
       }
       
-      return json({ success: true, message: "Meal plan updated successfully" });
+      return json({ success: true, isEdit: true, message: "Meal plan updated successfully" });
     }
   } else if (intent === "create" || !planId) {
     // SIMPLE APPROACH: Create template and client copy in one step
@@ -1086,7 +1086,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       delete clientMealsCache[params.clientId];
     }
     
-    return redirect(request.url);
+    return json({ success: true, isEdit: false, message: "Meal plan created successfully" });
   }
 
   // Invalidate server cache for this client
@@ -1161,9 +1161,21 @@ export default function ClientMeals() {
       processedResponseRef.current = responseKey;
       
       if (data.success) {
-        toast.success("Meal Plan Saved", data.message || "Your meal plan has been updated successfully.");
+        // Determine if this was an edit or create from the response
+        const isEdit = data.isEdit === true;
+        const toastTitle = isEdit ? "Meal Plan Saved" : "Meal Plan Created";
+        const toastMessage = data.message || (isEdit 
+          ? "Your meal plan has been updated successfully." 
+          : "Your meal plan has been created successfully.");
+        
+        // Close modal and clear selection
         setIsCreateModalOpen(false);
         setSelectedPlan(null);
+        
+        // Show success toast
+        toast.success(toastTitle, toastMessage);
+        
+        // Refresh data
         revalidator.revalidate(); // Immediate data refresh
         setTimeout(() => {
           fetcher.load(window.location.pathname); // Backup refresh

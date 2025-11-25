@@ -962,7 +962,11 @@ export default function CreateMealPlanForm({
           Cancel
         </Button>
         <Button variant="primary" type="submit" disabled={isLoading}>
-          {isLoading ? "Saving..." : "Save Meal Plan"}
+          {isLoading 
+            ? "Saving..." 
+            : initialData 
+              ? "Save Meal Plan" 
+              : "Create Meal Plan"}
         </Button>
       </div>
     </form>
