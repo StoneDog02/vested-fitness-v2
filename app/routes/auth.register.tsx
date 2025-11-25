@@ -2,7 +2,7 @@ import { Form, Link, useActionData, useSearchParams } from "@remix-run/react";
 import { json, type ActionFunction, type MetaFunction } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
-import { getOrCreateStripeCustomer, createStripeSubscription, attachPaymentMethod } from "~/utils/stripe.server";
+import { getOrCreateStripeCustomer, createStripeSubscription, attachPaymentMethod, stripe } from "~/utils/stripe.server";
 import React, { useRef, useEffect, useState } from "react";
 import { loadStripe } from '@stripe/stripe-js';
 import { CardElement, Elements, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -176,81 +176,41 @@ export const action: ActionFunction = async ({ request }) => {
 
   // Only run Stripe logic for clients
   if (role === 'client') {
+    // Payment method is required for all client registrations
+    if (!paymentMethodId) {
+      console.error('[REGISTRATION] Payment method required for client registration but not provided');
+      return json<ActionData>({
+        error: "Payment method is required. Please add a payment method to continue.",
+        fields: { name, email, password, userType: role, inviteCode },
+      });
+    }
+
     // Create Stripe customer and update user record
     let stripeCustomerId: string | undefined = undefined;
     try {
       stripeCustomerId = await getOrCreateStripeCustomer({ userId, email });
       console.log('[REGISTRATION] stripeCustomerId:', stripeCustomerId);
       await supabase.from("users").update({ stripe_customer_id: stripeCustomerId }).eq("auth_id", auth_id);
-      // If paymentMethodId is present, attach it and set as default
-      if (stripeCustomerId && paymentMethodId) {
-        console.log('[REGISTRATION] Attaching payment method:', paymentMethodId, 'to customer:', stripeCustomerId);
-        await attachPaymentMethod({ customerId: stripeCustomerId, paymentMethodId });
-        console.log('[REGISTRATION] Payment method attached');
-      }
     } catch (e) {
-      // Optionally log or handle error, but don't block registration
-      console.error("Failed to create Stripe customer or attach payment method:", e);
+      console.error("Failed to create Stripe customer:", e);
+      return json<ActionData>({
+        error: "Failed to create payment account. Please try again.",
+        fields: { name, email, password, userType: role, inviteCode },
+      });
     }
 
-    // If planPriceId is present, create a Stripe subscription for the user
-    if (stripeCustomerId && planPriceId) {
+    // Attach payment method to customer and set as default
+    if (stripeCustomerId && paymentMethodId) {
+      console.log('[REGISTRATION] Attaching payment method:', paymentMethodId, 'to customer:', stripeCustomerId);
       try {
-        console.log('[REGISTRATION] Creating subscription with:', { planPriceId, paymentMethodId, stripeCustomerId });
-        // Use an absolute URL for the API endpoint to create the subscription and get clientSecret
-        const url = new URL(request.url);
-        const origin = url.origin;
-        const res = await fetch(`${origin}/api/create-subscription`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'cookie': request.headers.get('cookie') || '',
-          },
-          body: JSON.stringify({ priceId: planPriceId, paymentMethodId, customerId: stripeCustomerId }),
-        });
-        const data = await res.json();
-        console.log('[REGISTRATION] Subscription creation response:', data);
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Failed to create subscription');
-        }
-        
-        // Handle free products - no payment confirmation needed
-        if (data.free) {
-          console.log('[REGISTRATION] Free product detected, skipping payment confirmation');
-          return json<ActionData>({
-            fields: { name: '', email: '', password: '', userType: role },
-            error: undefined,
-            success: true,
-            message: `Account created! ${data.message} We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
-            clientSecret: null,
-            free: true,
-          });
-        }
-        
-        // Handle payment status - if payment already succeeded, no confirmation needed
-        if (data.paymentSucceeded) {
-          console.log('[REGISTRATION] Payment already succeeded - no confirmation needed');
-          return json<ActionData>({
-            fields: { name: '', email: '', password: '', userType: role },
-            error: undefined,
-            success: true,
-            message: `Account created! Payment processed successfully. We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
-            clientSecret: null,
-            paymentSucceeded: true,
-          });
-        }
-        
-        // Pass clientSecret to the frontend for Stripe.js confirmation (paid products that need confirmation)
+        await attachPaymentMethod({ customerId: stripeCustomerId, paymentMethodId });
+        console.log('[REGISTRATION] Payment method attached successfully');
+      } catch (attachError) {
+        console.error('[REGISTRATION] Failed to attach payment method:', attachError);
         return json<ActionData>({
-          fields: { name: '', email: '', password: '', userType: role },
-          error: undefined,
-          success: true,
-          message: `Account created! We've sent a verification email to ${email}. Please check your inbox to verify your account before logging in.`,
-          clientSecret: data.clientSecret || null,
-          paymentSucceeded: false,
+          error: "Failed to attach payment method. Please try again.",
+          fields: { name, email, password, userType: role, inviteCode },
         });
-      } catch (e) {
-        console.error('Failed to create Stripe subscription:', e);
       }
     }
   }
@@ -472,62 +432,19 @@ function ClientOnlyRegisterForm(props: any) {
     }
   }, [isClientInvite, invite, urlPlanPriceId]);
 
+  // Reset payment loading state when action data changes (after form submission)
   React.useEffect(() => {
-    // Handle free products - show success immediately without payment confirmation
-    if (actionData?.free) {
-      setPaymentSuccess(true);
+    if (actionData) {
       setPaymentLoading(false);
-      setPaymentError(null);
-      return;
+      if (actionData.success) {
+        setPaymentSuccess(true);
+        setPaymentError(null);
+      } else if (actionData.error) {
+        setPaymentError(actionData.error);
+        setPaymentSuccess(false);
+      }
     }
-    
-    // Handle case where payment already succeeded on the server
-    if (actionData?.paymentSucceeded) {
-      console.log('[FRONTEND] Payment already succeeded - no confirmation needed');
-      setPaymentSuccess(true);
-      setPaymentLoading(false);
-      setPaymentError(null);
-      return;
-    }
-    
-    // Only confirm payment if we have a clientSecret and payment hasn't already succeeded
-    if (clientSecret && !actionData?.paymentSucceeded) {
-      console.log('[FRONTEND] Confirming payment with clientSecret');
-      // Confirm payment intent with Stripe.js
-      setPaymentLoading(true);
-      setPaymentError(null);
-      setPaymentSuccess(false);
-      stripePromise.then(async (stripe) => {
-        if (!stripe) {
-          setPaymentError('Stripe.js failed to load');
-          setPaymentLoading(false);
-          return;
-        }
-        try {
-          const result = await stripe.confirmCardPayment(clientSecret);
-          if (result.error) {
-            console.error('[FRONTEND] Payment confirmation error:', result.error);
-            setPaymentError(result.error.message || 'Payment confirmation failed');
-          } else if (result.paymentIntent && result.paymentIntent.status === 'succeeded') {
-            console.log('[FRONTEND] Payment confirmed successfully');
-            setPaymentSuccess(true);
-          } else {
-            console.log('[FRONTEND] Payment intent status:', result.paymentIntent?.status);
-            setPaymentSuccess(result.paymentIntent?.status === 'succeeded');
-          }
-        } catch (err: any) {
-          console.error('[FRONTEND] Error confirming payment:', err);
-          setPaymentError(err.message || 'Payment confirmation failed');
-        }
-        setPaymentLoading(false);
-      });
-    } else if (!clientSecret && !actionData?.paymentSucceeded && !actionData?.free) {
-      // If we don't have a clientSecret and payment hasn't succeeded, there might be an issue
-      console.warn('[FRONTEND] No clientSecret and payment not succeeded - this might indicate a problem');
-      // Don't set an error immediately - the subscription might be processing
-      // But we should log this for debugging
-    }
-  }, [clientSecret, actionData?.free, actionData?.paymentSucceeded]);
+  }, [actionData]);
 
   // Unified form submit handler
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -539,40 +456,37 @@ function ClientOnlyRegisterForm(props: any) {
       // Reset submission flag for new payment method creation
       hasSubmittedRef.current = false;
 
-      // Check if this is a free plan by looking at the plan price (only if planPriceId exists)
-      const isFreePlan = planPriceId && planPrice === "Free";
-      
-      if (isFreePlan) {
-        // For free plans, skip payment method creation and submit directly
-        console.log('[REGISTRATION] Free plan detected, skipping payment method creation');
-        setPaymentLoading(false);
-        // Trigger form submission via useEffect for consistency
-        setCardPaymentMethodId('free-plan');
-        return;
-      }
-
-      // For all other client invites, payment method is required
+      // Payment method is required for all client registrations
       // Only proceed if mounted (client)
       if (!elements || !stripe) {
-        setCardError("Stripe is not loaded");
+        setCardError("Stripe is not loaded. Please refresh the page and try again.");
         setPaymentLoading(false);
         return;
       }
       const cardElement = elements.getElement(CardElement);
       if (!cardElement) {
-        setCardError("Card input not found");
+        setCardError("Card input not found. Please refresh the page and try again.");
         setPaymentLoading(false);
         return;
       }
+      
+      // Create payment method - required for all clients
       const { error, paymentMethod } = await stripe.createPaymentMethod({
         type: "card",
         card: cardElement,
       });
       if (error) {
-        setCardError(error.message || "Card error");
+        setCardError(error.message || "Failed to process card. Please check your card details and try again.");
         setPaymentLoading(false);
         return;
       }
+      
+      if (!paymentMethod || !paymentMethod.id) {
+        setCardError("Failed to create payment method. Please try again.");
+        setPaymentLoading(false);
+        return;
+      }
+      
       setCardPaymentMethodId(paymentMethod.id);
       setCardError(null);
       setPaymentLoading(false);
@@ -623,7 +537,7 @@ function ClientOnlyRegisterForm(props: any) {
               <div className="rounded-md bg-yellow-50 p-4 mb-4">
                 <div className="flex">
                   <div className="text-sm text-yellow-700">
-                    {paymentError || (actionData?.free ? "Activating free plan..." : "Processing payment...")}
+                    Processing payment method...
                   </div>
                 </div>
               </div>
@@ -639,7 +553,7 @@ function ClientOnlyRegisterForm(props: any) {
               <div className="rounded-md bg-green-50 p-4 mb-4">
                 <div className="flex">
                   <div className="text-sm text-green-700">
-                    {actionData?.free ? "Free plan activated successfully!" : "Payment confirmed successfully!"}
+                    Payment method added successfully!
                   </div>
                 </div>
               </div>
@@ -717,8 +631,8 @@ function ClientOnlyRegisterForm(props: any) {
                     )}
                   </div>
                 )}
-                {/* Show card section for all client invites (unless free plan) */}
-                {isClientInvite && (!planPriceId || planPrice !== "Free") && (
+                {/* Show card section for all client invites - payment method is always required */}
+                {isClientInvite && (
                   <div>
                     {elements && (
                       <CardSection
@@ -789,9 +703,6 @@ function ClientOnlyRegisterForm(props: any) {
                       </label>
                     </div>
                   </div>
-                )}
-                {isClientInvite && planPriceId && (
-                  <input type="hidden" name="plan_price_id" value={planPriceId} />
                 )}
                 {/* Always show submit button for client invite */}
                 {isClientInvite && (
