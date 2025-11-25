@@ -1,12 +1,13 @@
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
-import { useMatches, useLoaderData } from "@remix-run/react";
+import { useMatches, useLoaderData, useNavigate } from "@remix-run/react";
 import { useState } from "react";
 import React from "react";
 import { useFetcher } from "@remix-run/react";
 import Button from "~/components/ui/Button";
 import CreateSubscriptionModal from "~/components/coach/CreateSubscriptionModal";
+import DeleteConfirmationModal from "~/components/ui/DeleteConfirmationModal";
 import Card from "~/components/ui/Card";
 import dayjs from "dayjs";
 import { CheckCircleIcon, ClockIcon, CreditCardIcon, CalendarIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
@@ -69,10 +70,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 export default function ClientSubscription() {
   const matches = useMatches();
   const loaderData = useLoaderData<typeof loader>();
+  const navigate = useNavigate();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const reactivateFetcher = useFetcher();
   const retryPaymentFetcher = useFetcher();
+  const deactivateFetcher = useFetcher();
   const retryToastShownRef = React.useRef(false);
+  const deactivateToastShownRef = React.useRef(false);
   const toast = useToast();
 
   // Find the parent route with client loader data for avatar/name
@@ -258,6 +263,48 @@ export default function ClientSubscription() {
     }
   }, [retryPaymentFetcher.state, retryPaymentFetcher.data, toast]);
 
+  // Handle deactivation response
+  React.useEffect(() => {
+    if (
+      deactivateFetcher.state === "idle" &&
+      deactivateFetcher.data &&
+      !deactivateToastShownRef.current
+    ) {
+      if (deactivateFetcher.data.success) {
+        toast.success(
+          "Client Deactivated",
+          deactivateFetcher.data.message || "The client has been deactivated and all subscriptions have been cancelled."
+        );
+        deactivateToastShownRef.current = true;
+        setIsDeactivateModalOpen(false);
+        // Redirect to dashboard after a short delay so the toast is visible
+        setTimeout(() => {
+          navigate("/dashboard");
+        }, 1500);
+      } else {
+        toast.error(
+          "Deactivation Failed",
+          deactivateFetcher.data.error || "Unable to deactivate the client. Please try again."
+        );
+        deactivateToastShownRef.current = true;
+      }
+    }
+  }, [deactivateFetcher.state, deactivateFetcher.data, toast, navigate]);
+
+  const handleDeactivateClient = () => {
+    if (!client) return;
+    
+    deactivateFetcher.submit(
+      {
+        clientId: client.id,
+      },
+      {
+        method: "POST",
+        action: "/api/deactivate-client",
+      }
+    );
+  };
+
   // Helper function to get user-friendly decline code messages
   const getDeclineCodeMessage = (declineCode: string): string => {
     const messages: Record<string, string> = {
@@ -311,22 +358,49 @@ export default function ClientSubscription() {
 
         {/* No Active Subscription State */}
         {!subscription && (
-          <div className="bg-white dark:bg-night rounded-lg shadow-sm border border-gray-light dark:border-davyGray p-12 flex flex-col items-center justify-center text-center">
-            <div className="w-24 h-24 rounded-full bg-gray-100 dark:bg-davyGray flex items-center justify-center mb-6">
-              <span className="text-4xl font-bold text-gray-400 dark:text-gray-500">$</span>
+          <div className="space-y-6">
+            <div className="bg-white dark:bg-night rounded-lg shadow-sm border border-gray-light dark:border-davyGray p-12 flex flex-col items-center justify-center text-center">
+              <div className="w-24 h-24 rounded-full bg-gray-100 dark:bg-davyGray flex items-center justify-center mb-6">
+                <span className="text-4xl font-bold text-gray-400 dark:text-gray-500">$</span>
+              </div>
+              <h2 className="text-2xl font-bold text-secondary dark:text-alabaster mb-4">
+                No Active Subscription
+              </h2>
+              <p className="text-gray-dark dark:text-gray-light mb-8 max-w-md">
+                {client.name || "This client"} has completed their profile setup but doesn't have an active subscription yet.
+              </p>
+              <Button
+                variant="primary"
+                onClick={() => setIsCreateModalOpen(true)}
+              >
+                Create Subscription
+              </Button>
             </div>
-            <h2 className="text-2xl font-bold text-secondary dark:text-alabaster mb-4">
-              No Active Subscription
-            </h2>
-            <p className="text-gray-dark dark:text-gray-light mb-8 max-w-md">
-              {client.name || "This client"} has completed their profile setup but doesn't have an active subscription yet.
-            </p>
-            <Button
-              variant="primary"
-              onClick={() => setIsCreateModalOpen(true)}
-            >
-              Create Subscription
-            </Button>
+
+            {/* Deactivate Client Section */}
+            <Card>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                <div className="flex items-start gap-2">
+                  <InformationCircleIcon className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-red-800 dark:text-red-200 mb-1">
+                      Deactivate Client
+                    </div>
+                    <div className="text-sm text-red-700 dark:text-red-300 mb-3">
+                      Deactivating this client will move them to your inactive clients list. 
+                      They can be reactivated later if needed.
+                    </div>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setIsDeactivateModalOpen(true)}
+                      className="bg-red-600 hover:bg-red-700 text-white border-red-600 hover:border-red-700"
+                    >
+                      Inactivate Client
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
           </div>
         )}
 
@@ -798,6 +872,31 @@ export default function ClientSubscription() {
                     )}
                   </div>
                 </div>
+
+                {/* Deactivate Client Section */}
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div className="flex items-start gap-2">
+                      <InformationCircleIcon className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-red-800 dark:text-red-200 mb-1">
+                          Deactivate Client
+                        </div>
+                        <div className="text-sm text-red-700 dark:text-red-300 mb-3">
+                          Deactivating this client will cancel all active subscriptions and move them to your inactive clients list. 
+                          They can be reactivated later if needed.
+                        </div>
+                        <Button
+                          variant="secondary"
+                          onClick={() => setIsDeactivateModalOpen(true)}
+                          className="bg-red-600 hover:bg-red-700 text-white border-red-600 hover:border-red-700"
+                        >
+                          Inactivate Client
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </Card>
           </div>
@@ -811,6 +910,17 @@ export default function ClientSubscription() {
           clientEmail={client.email || ""}
           hasPaymentMethod={hasPaymentMethod}
           paymentMethodLast4={paymentMethodLast4}
+        />
+
+        <DeleteConfirmationModal
+          isOpen={isDeactivateModalOpen}
+          onClose={() => setIsDeactivateModalOpen(false)}
+          onConfirm={handleDeactivateClient}
+          title="Deactivate Client"
+          message={`Are you sure you want to deactivate ${client?.name || "this client"}? This will cancel all active subscriptions and move them to your inactive clients list. They can be reactivated later if needed.`}
+          confirmText="Deactivate Client"
+          cancelText="Cancel"
+          isLoading={deactivateFetcher.state !== "idle"}
         />
       </div>
     </ClientDetailLayout>
