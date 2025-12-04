@@ -863,6 +863,19 @@ function SkeletonCard({ lines = 3, className = "" }: SkeletonCardProps) {
   );
 }
 
+// Skeleton for metric card (like weight change)
+function MetricCardSkeleton() {
+  return (
+    <Card variant="elevated" className="p-6 h-full flex flex-col justify-between">
+      <div>
+        <div className="h-6 w-32 bg-gray-200 dark:bg-gray-700 rounded-lg mb-4 animate-pulse" />
+        <div className="h-10 w-24 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse" />
+      </div>
+      <div className="h-4 w-20 bg-gray-200 dark:bg-gray-700 rounded-lg mt-4 animate-pulse" />
+    </Card>
+  );
+}
+
 export default function Dashboard() {
   const { clientData, coachId, totalClients, activeClients, inactiveClients, compliance, percentChange, recentClients: loaderRecentClients, recentActivity: loaderRecentActivity } = useLoaderData<LoaderData>();
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -950,7 +963,9 @@ export default function Dashboard() {
   const nonCriticalData: NonCriticalData = nonCriticalFetcher.data ?? {};
   const recentClients = nonCriticalData.recentClients ?? loaderRecentClients ?? [];
   const recentActivity = nonCriticalData.recentActivity ?? loaderRecentActivity ?? [];
-  const weightChange = nonCriticalData.weightChange ?? clientData?.weightChange ?? 0;
+  // Use clientData weightChange directly (it's already loaded in the main loader)
+  // Don't use nonCriticalData.weightChange as it's hardcoded to 0
+  const weightChange = clientData?.weightChange ?? 0;
   const nonCriticalLoading = nonCriticalFetcher.state !== "idle" && !nonCriticalFetcher.data;
   
   const [activity, setActivity] = useState<Activity[]>(recentActivity);
@@ -1368,17 +1383,25 @@ export default function Dashboard() {
                 to="/dashboard/coach-access?addWeight=1#weight-progress"
                 className="block h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary rounded-2xl"
               >
-                <Card variant="elevated" className="p-6 animate-scale-in cursor-pointer transition-transform hover:-translate-y-1 h-full flex flex-col justify-between">
-                  <div>
-                    <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Weight Change</h3>
-                    <p className="text-3xl font-bold text-gradient">
-                      {typeof weightChange === "number" && !isNaN(weightChange)
-                        ? `${weightChange > 0 ? "+" : ""}${weightChange} lbs`
-                        : "- lbs"}
-                    </p>
-                  </div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">Since sign up</p>
-                </Card>
+                {revalidator.state === "loading" || (clientData === undefined && revalidator.state !== "idle") ? (
+                  <MetricCardSkeleton />
+                ) : (
+                  <Card variant="elevated" className="p-6 animate-scale-in cursor-pointer transition-transform hover:-translate-y-1 h-full flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-semibold text-lg mb-2 text-secondary dark:text-alabaster">Weight Change</h3>
+                      <p className="text-3xl font-bold text-gradient">
+                        {typeof weightChange === "number" && !isNaN(weightChange)
+                          ? (() => {
+                              const rounded = Number(weightChange.toFixed(1));
+                              const formatted = rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
+                              return `${weightChange > 0 ? "+" : ""}${formatted} lbs`;
+                            })()
+                          : "- lbs"}
+                      </p>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">Since sign up</p>
+                  </Card>
+                )}
               </Link>
             </div>
 
