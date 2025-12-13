@@ -4,6 +4,7 @@ import Button from "~/components/ui/Button";
 import VideoRecorder from "~/components/ui/VideoRecorder";
 import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
 import { useToast } from "~/context/ToastContext";
+import { uploadQueue } from "~/utils/uploadQueue";
 
 interface AddCheckInModalProps {
   isOpen: boolean;
@@ -44,6 +45,16 @@ export default function AddCheckInModal({
     });
   };
 
+  // Helper function to format file size for display
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  };
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!thisWeek.trim() && !recordingData) return;
@@ -72,7 +83,7 @@ export default function AddCheckInModal({
         }
       };
 
-      // If there's recording data, upload it first
+      // If there's recording data, upload it first using direct Supabase Storage upload
       if (recordingData) {
         // Validate blob is not empty
         if (!recordingData.blob || recordingData.blob.size === 0) {
@@ -89,87 +100,184 @@ export default function AddCheckInModal({
           notesLength: thisWeek.trim().length
         });
         
-        setUploadProgress('Uploading...');
+        setUploadProgress('Getting upload URL...');
 
-        const formData = new FormData();
-
-        // Create a proper File object from the blob with unique filename
-        const timestamp = Date.now();
-        const randomId = Math.random().toString(36).substring(2, 9);
-        const mimeType = recordingData.blob.type || (recordingData.type === 'video' ? 'video/webm' : 'audio/webm');
+        // Step 1: Get signed upload URL from server (small request, bypasses 6MB limit)
+        // Normalize MIME type - strip codec parameters for Supabase Storage compatibility
+        let mimeType = recordingData.blob.type || '';
+        if (mimeType) {
+          // Strip codec parameters (e.g., "video/webm;codecs=vp8,opus" -> "video/webm")
+          mimeType = mimeType.split(';')[0].trim();
+        }
+        
+        // Fallback to default if still empty
+        if (!mimeType) {
+          mimeType = recordingData.type === 'video' ? 'video/webm' : 'audio/webm';
+        }
+        
+        console.log('Recording MIME type:', {
+          originalBlobType: recordingData.blob.type,
+          normalizedMimeType: mimeType,
+          recordingType: recordingData.type
+        });
+        
         const extension = getExtensionFromMimeType(mimeType, recordingData.type);
-        const fileName = `recording-${timestamp}-${randomId}.${extension}`;
-        const file = new File([recordingData.blob], fileName, { 
-          type: mimeType 
-        });
+        
+        const urlRequestFormData = new FormData();
+        urlRequestFormData.append('clientId', clientId);
+        urlRequestFormData.append('recordingType', recordingData.type);
+        urlRequestFormData.append('fileExtension', extension);
 
-        formData.append('file', file);
-        formData.append('clientId', clientId);
-        formData.append('recordingType', recordingData.type);
-        formData.append('duration', recordingData.duration.toString());
-        if (recordingData.transcript) {
-          formData.append('transcript', recordingData.transcript);
-        }
-        // Include text notes if provided
-        if (thisWeek.trim()) {
-          formData.append('notes', thisWeek.trim());
-        }
-
-        // Create AbortController for timeout - increased for large videos
-        const controller = new AbortController();
-        // 5 minute timeout for large videos (50MB at slow speeds can take time)
-        const timeout = setTimeout(() => controller.abort(), 300000);
-
-        const response = await fetch('/api/upload-checkin-media', {
+        const urlResponse = await fetch('/api/get-checkin-upload-url', {
           method: 'POST',
-          body: formData,
-          signal: controller.signal,
+          body: urlRequestFormData,
         });
 
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          let errorMessage = `Upload failed (${response.status})`;
-
+        if (!urlResponse.ok) {
+          const errorText = await urlResponse.text();
+          let errorMessage = `Failed to get upload URL (${urlResponse.status})`;
           try {
             const errorData = JSON.parse(errorText);
             errorMessage = errorData.error || errorMessage;
           } catch {
-            // If it's not JSON, try to extract meaningful error
             if (errorText) {
               errorMessage = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
             }
           }
-
-          // Provide more helpful error messages
-          if (response.status === 401) {
-            errorMessage = 'Session expired. Please log in again.';
-          } else if (response.status === 413) {
-            errorMessage = 'File is too large. Please record a shorter video or compress it.';
-          } else if (response.status === 500) {
-            errorMessage = 'Server error. Please try again or contact support if the problem persists.';
-          }
-
           throw new Error(errorMessage);
         }
+
+        const { signedUrl, filePath, token, supabaseUrl, supabaseAnonKey, clientName } = await urlResponse.json();
         
-        const result = await response.json();
-        
-        // Recording uploaded successfully - the check-in was created by the API
-        toast.success(
-          'Check-In Sent Successfully',
-          `Your ${recordingData.type === 'video' ? 'video' : 'audio'} check-in has been uploaded and sent.`
+        if (!signedUrl || !filePath || !token) {
+          throw new Error('Invalid upload URL response from server');
+        }
+
+        if (!supabaseUrl || !supabaseAnonKey) {
+          throw new Error('Supabase configuration missing. Please contact support.');
+        }
+
+        console.log('Starting background upload:', {
+          filePath,
+          fileSize: recordingData.blob.size,
+          mimeType,
+          clientName
+        });
+
+        // Step 2: Add upload to background queue
+        const fileToUpload = new File([recordingData.blob], `recording.${extension}`, { type: mimeType });
+        const uploadTaskId = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        // Prepare check-in data for after upload completes
+        const notesText = thisWeek.trim();
+
+        // Add upload task to queue for background processing
+        await uploadQueue.add({
+          id: uploadTaskId,
+          clientId,
+          clientName: clientName || 'Client',
+          filePath,
+          signedUrl,
+          token,
+          supabaseUrl,
+          supabaseAnonKey,
+          file: fileToUpload,
+          fileSize: recordingData.blob.size,
+          recordingType: recordingData.type,
+          duration: recordingData.duration,
+          transcript: recordingData.transcript,
+          notes: notesText || undefined,
+          mimeType,
+          onProgress: (percent, loaded, total) => {
+            // Progress is tracked but we don't show it since modal closes
+            console.log(`Upload progress: ${percent}%`);
+          },
+          onComplete: async (result) => {
+            // Step 3: Create check-in record after upload completes
+            // Use JSON instead of FormData since we're only sending metadata (no file)
+            // This avoids Netlify's 6MB FormData limit and is more efficient
+            const checkInData: any = {
+              clientId,
+              recordingType: recordingData.type,
+              duration: recordingData.duration.toString(),
+              filePath: result.path,
+            };
+            
+            // Add transcript if available (truncate if extremely large)
+            if (recordingData.transcript) {
+              const MAX_TRANSCRIPT_SIZE = 5 * 1024 * 1024; // 5MB for JSON (more generous than FormData)
+              const transcriptSize = new Blob([recordingData.transcript]).size;
+              if (transcriptSize > MAX_TRANSCRIPT_SIZE) {
+                console.warn(`Transcript is ${transcriptSize} bytes, truncating to ${MAX_TRANSCRIPT_SIZE} bytes`);
+                checkInData.transcript = recordingData.transcript.substring(0, MAX_TRANSCRIPT_SIZE - 1000);
+                checkInData.transcriptTruncated = true;
+              } else {
+                checkInData.transcript = recordingData.transcript;
+              }
+            }
+            
+            // Add notes if available
+            if (notesText) {
+              checkInData.notes = notesText;
+            }
+            
+            console.log('Creating check-in record:', {
+              filePath: result.path,
+              transcriptSize: recordingData.transcript ? new Blob([recordingData.transcript]).size : 0,
+              notesSize: notesText ? new Blob([notesText]).size : 0,
+              payloadSize: new Blob([JSON.stringify(checkInData)]).size
+            });
+
+            try {
+              const checkInResponse = await fetch('/api/upload-checkin-media', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(checkInData),
+              });
+
+              if (!checkInResponse.ok) {
+                const errorText = await checkInResponse.text();
+                let errorMessage = `Failed to create check-in (${checkInResponse.status})`;
+                try {
+                  const errorData = JSON.parse(errorText);
+                  errorMessage = errorData.error || errorMessage;
+                } catch {
+                  if (errorText) {
+                    errorMessage = errorText.length > 200 ? errorText.substring(0, 200) + '...' : errorText;
+                  }
+                }
+                throw new Error(errorMessage);
+              }
+
+              // Success - toast notification will be shown by UploadMonitor
+              console.log('Check-in created successfully');
+            } catch (error) {
+              console.error('Error creating check-in:', error);
+              // Error toast will be shown by UploadMonitor
+              throw error;
+            }
+          },
+          onError: (error) => {
+            console.error('Upload failed:', error);
+            // Error toast will be shown by UploadMonitor
+          },
+        });
+
+        // Show immediate feedback and close modal
+        toast.info(
+          'Upload Started',
+          `Your ${recordingData.type === 'video' ? 'video' : 'audio'} check-in is uploading in the background. You'll receive a notification when it's complete.`
         );
         
+        // Reset form and close modal
         setThisWeek("");
         setRecordingData(null);
-        setShowRecorder(false);
+        setIsUploading(false);
         setUploadProgress("");
+        setShowRecorder(false);
         onClose();
-        
-        // Reload the page to show the new check-in
-        window.location.reload();
       } else {
         // No recording, just text notes - submit via the normal flow
         onSubmit(thisWeek, undefined);
@@ -383,61 +491,100 @@ export default function AddCheckInModal({
             </Button>
           </div>
           {recordingData && (
-            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2 text-green-700 dark:text-green-300">
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span>
-                    {recordingData.type === 'video' ? 'Camera & Audio' : 'Audio'} recording ready 
-                    ({Math.floor(recordingData.duration / 60)}:{(recordingData.duration % 60).toString().padStart(2, '0')})
-                    {recordingData.transcript && ' • Transcript available'}
-                  </span>
-                </div>
-                <div className="flex items-center space-x-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowPreview(true)}
-                    className="flex items-center space-x-1 px-2 py-1 text-xs text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 transition-colors rounded"
-                    title="Preview recording"
-                  >
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+            <>
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-green-700 dark:text-green-300">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                     </svg>
-                    <span>Preview</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRecordingData(null);
-                      setShowRecorder(true); // Start recording again immediately
-                    }}
-                    className="flex items-center space-x-1 px-2 py-1 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors rounded"
-                    title="Redo recording"
-                  >
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-                    </svg>
-                    <span>Redo</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRecordingData(null);
-                      setThisWeek(''); // Clear notes if they were auto-filled from transcript
-                    }}
-                    className="flex items-center space-x-1 px-2 py-1 text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 transition-colors rounded"
-                    title="Delete recording"
-                  >
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                    <span>Delete</span>
-                  </button>
+                    <span>
+                      {recordingData.type === 'video' ? 'Camera & Audio' : 'Audio'} recording ready 
+                      ({Math.floor(recordingData.duration / 60)}:{(recordingData.duration % 60).toString().padStart(2, '0')})
+                      {recordingData.transcript && ' • Transcript available'}
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowPreview(true)}
+                      className="flex items-center space-x-1 px-2 py-1 text-xs text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 transition-colors rounded"
+                      title="Preview recording"
+                    >
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                      </svg>
+                      <span>Preview</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecordingData(null);
+                        setShowRecorder(true); // Start recording again immediately
+                      }}
+                      className="flex items-center space-x-1 px-2 py-1 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors rounded"
+                      title="Redo recording"
+                    >
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                      </svg>
+                      <span>Redo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecordingData(null);
+                        setThisWeek(''); // Clear notes if they were auto-filled from transcript
+                      }}
+                      className="flex items-center space-x-1 px-2 py-1 text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 transition-colors rounded"
+                      title="Delete recording"
+                    >
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                      <span>Delete</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
+              
+              {/* Debug Info Box */}
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mt-2">
+                <div className="text-xs font-mono">
+                  <div className="font-semibold text-yellow-800 dark:text-yellow-200 mb-1">📊 Debug Info:</div>
+                  <div className="space-y-1 text-yellow-700 dark:text-yellow-300">
+                    <div>
+                      <span className="font-medium">File Size:</span>{' '}
+                      {recordingData.blob.size > 1024 * 1024
+                        ? `${(recordingData.blob.size / (1024 * 1024)).toFixed(2)} MB`
+                        : `${(recordingData.blob.size / 1024).toFixed(2)} KB`}
+                      {' '}({recordingData.blob.size.toLocaleString()} bytes)
+                    </div>
+                    <div>
+                      <span className="font-medium">MIME Type:</span> {recordingData.blob.type || 'unknown'}
+                    </div>
+                    <div>
+                      <span className="font-medium">Duration:</span> {recordingData.duration}s
+                    </div>
+                    {recordingData.blob.size > 6 * 1024 * 1024 && (
+                      <div className="mt-2 p-2 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded text-red-800 dark:text-red-200 font-semibold">
+                        ⚠️ WARNING: File exceeds Netlify 6MB limit! Upload will likely fail.
+                      </div>
+                    )}
+                    {recordingData.blob.size <= 6 * 1024 * 1024 && recordingData.blob.size > 5 * 1024 * 1024 && (
+                      <div className="mt-2 p-2 bg-orange-100 dark:bg-orange-900/30 border border-orange-300 dark:border-orange-700 rounded text-orange-800 dark:text-orange-200 font-semibold">
+                        ⚠️ CAUTION: File is close to Netlify 6MB limit.
+                      </div>
+                    )}
+                    {recordingData.blob.size <= 5 * 1024 * 1024 && (
+                      <div className="mt-2 p-2 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded text-green-800 dark:text-green-200 font-semibold">
+                        ✅ File size is within Netlify 6MB limit.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
         </div>
 

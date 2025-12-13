@@ -276,6 +276,7 @@ export default function VideoRecorder({
       
       if (recordingType === 'video') {
         // Request camera and microphone
+        // High quality settings for clear videos
         mediaStream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: 1280 },

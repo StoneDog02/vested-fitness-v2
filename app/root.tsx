@@ -12,6 +12,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { MealCompletionProvider } from "./context/MealCompletionContext";
 import { ToastProvider } from "./context/ToastContext";
 import { UserContext } from "./context/UserContext";
+import UploadMonitor from "./components/UploadMonitor";
 import { createClient } from "@supabase/supabase-js";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
@@ -129,6 +130,7 @@ export default function App() {
           <MealCompletionProvider>
             <ToastProvider>
               <UserContext.Provider value={user as UserContextType | undefined}>
+                <UploadMonitor />
                 <Outlet />
               </UserContext.Provider>
             </ToastProvider>
