@@ -73,7 +73,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   
   const { data: userData, error: userError } = await supabase
     .from("users")
-    .select("id, name, email, role, avatar_url, font_size, access_status, stripe_customer_id, chat_bubble_color, starting_weight, current_weight, created_at, coach_id")
+    .select("id, name, email, role, avatar_url, font_size, access_status, stripe_customer_id, chat_bubble_color, starting_weight, current_weight, created_at, coach_id, status")
     .eq("auth_id", authId)
     .single();
     
@@ -88,6 +88,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
   
   if (userData) {
+    // Check if user is inactive - block access if so
+    if (userData.status === "inactive") {
+      // Clear auth cookies and redirect to login
+      const cookieName = getSupabaseCookieName();
+      const supabaseSession = createCookie(cookieName, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 0, // Expire immediately
+      });
+      const clearCookie = await supabaseSession.serialize("");
+      return redirect("/auth/login", {
+        headers: { "Set-Cookie": clearCookie }
+      });
+    }
+    
     role = userData.role;
     user = userData;
     if (userData.stripe_customer_id) {

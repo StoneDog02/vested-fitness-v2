@@ -193,7 +193,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   
   const { data: user, error: userError } = await supabase
     .from("users")
-    .select("id, role, coach_id, starting_weight, current_weight")
+    .select("id, role, coach_id, starting_weight, current_weight, status")
     .eq("auth_id", authId)
     .single();
   
@@ -209,6 +209,11 @@ export const loader: LoaderFunction = async ({ request }) => {
     
   if (!user) {
     console.error("Dashboard: User not found for auth_id:", authId);
+    return redirect("/auth/login");
+  }
+
+  // Check if user is inactive - block access if so
+  if (user.status === "inactive") {
     return redirect("/auth/login");
   }
   

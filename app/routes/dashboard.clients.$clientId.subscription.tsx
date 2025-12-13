@@ -73,11 +73,14 @@ export default function ClientSubscription() {
   const navigate = useNavigate();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
+  const [isCancelSubscriptionModalOpen, setIsCancelSubscriptionModalOpen] = useState(false);
   const reactivateFetcher = useFetcher();
   const retryPaymentFetcher = useFetcher();
   const deactivateFetcher = useFetcher();
+  const cancelSubscriptionFetcher = useFetcher();
   const retryToastShownRef = React.useRef(false);
   const deactivateToastShownRef = React.useRef(false);
+  const cancelSubscriptionToastShownRef = React.useRef(false);
   const toast = useToast();
 
   // Find the parent route with client loader data for avatar/name
@@ -291,6 +294,34 @@ export default function ClientSubscription() {
     }
   }, [deactivateFetcher.state, deactivateFetcher.data, toast, navigate]);
 
+  // Handle cancel subscription response
+  React.useEffect(() => {
+    if (
+      cancelSubscriptionFetcher.state === "idle" &&
+      cancelSubscriptionFetcher.data &&
+      !cancelSubscriptionToastShownRef.current
+    ) {
+      if (cancelSubscriptionFetcher.data.success) {
+        toast.success(
+          "Subscription Cancelled",
+          cancelSubscriptionFetcher.data.message || "The subscription has been cancelled. The client remains active and can still access the app."
+        );
+        cancelSubscriptionToastShownRef.current = true;
+        setIsCancelSubscriptionModalOpen(false);
+        // Reload the page to show updated subscription status
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        toast.error(
+          "Cancellation Failed",
+          cancelSubscriptionFetcher.data.error || "Unable to cancel the subscription. Please try again."
+        );
+        cancelSubscriptionToastShownRef.current = true;
+      }
+    }
+  }, [cancelSubscriptionFetcher.state, cancelSubscriptionFetcher.data, toast]);
+
   const handleDeactivateClient = () => {
     if (!client) return;
     
@@ -301,6 +332,20 @@ export default function ClientSubscription() {
       {
         method: "POST",
         action: "/api/deactivate-client",
+      }
+    );
+  };
+
+  const handleCancelSubscription = () => {
+    if (!client) return;
+    
+    cancelSubscriptionFetcher.submit(
+      {
+        clientId: client.id,
+      },
+      {
+        method: "POST",
+        action: "/api/cancel-subscription",
       }
     );
   };
@@ -873,6 +918,32 @@ export default function ClientSubscription() {
                   </div>
                 </div>
 
+                {/* Cancel Subscription Section */}
+                {subscriptionDetails && subscriptionDetails.status !== "canceled" && subscriptionDetails.status !== "incomplete_expired" && (
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                      <div className="flex items-start gap-2">
+                        <InformationCircleIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-1">
+                            Cancel Subscription
+                          </div>
+                          <div className="text-sm text-yellow-700 dark:text-yellow-300 mb-3">
+                            Cancel the client's subscription. The client will remain active and can still access the app, but their subscription will be cancelled.
+                          </div>
+                          <Button
+                            variant="secondary"
+                            onClick={() => setIsCancelSubscriptionModalOpen(true)}
+                            className="bg-yellow-600 hover:bg-yellow-700 text-white border-yellow-600 hover:border-yellow-700"
+                          >
+                            Cancel Subscription
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Deactivate Client Section */}
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
                   <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
@@ -883,8 +954,8 @@ export default function ClientSubscription() {
                           Deactivate Client
                         </div>
                         <div className="text-sm text-red-700 dark:text-red-300 mb-3">
-                          Deactivating this client will cancel all active subscriptions and move them to your inactive clients list. 
-                          They can be reactivated later if needed.
+                          Deactivating this client will cancel all active subscriptions and prevent them from logging in. 
+                          They will be moved to your inactive clients list and can be reactivated later if needed.
                         </div>
                         <Button
                           variant="secondary"
@@ -913,11 +984,22 @@ export default function ClientSubscription() {
         />
 
         <DeleteConfirmationModal
+          isOpen={isCancelSubscriptionModalOpen}
+          onClose={() => setIsCancelSubscriptionModalOpen(false)}
+          onConfirm={handleCancelSubscription}
+          title="Cancel Subscription"
+          message={`Are you sure you want to cancel the subscription for ${client?.name || "this client"}? The subscription will be cancelled, but the client will remain active and can still access the app.`}
+          confirmText="Cancel Subscription"
+          cancelText="Keep Subscription"
+          isLoading={cancelSubscriptionFetcher.state !== "idle"}
+        />
+
+        <DeleteConfirmationModal
           isOpen={isDeactivateModalOpen}
           onClose={() => setIsDeactivateModalOpen(false)}
           onConfirm={handleDeactivateClient}
           title="Deactivate Client"
-          message={`Are you sure you want to deactivate ${client?.name || "this client"}? This will cancel all active subscriptions and move them to your inactive clients list. They can be reactivated later if needed.`}
+          message={`Are you sure you want to deactivate ${client?.name || "this client"}? This will cancel all active subscriptions and prevent them from logging in. They will be moved to your inactive clients list and can be reactivated later if needed.`}
           confirmText="Deactivate Client"
           cancelText="Cancel"
           isLoading={deactivateFetcher.state !== "idle"}

@@ -72,7 +72,7 @@ export const action: ActionFunction = async ({ request }) => {
   
   const { data: userRow, error: userError } = await supabase
     .from("users")
-    .select("role")
+    .select("role, status")
     .eq("auth_id", authId);
 
   console.log("Login query result:", { 
@@ -122,6 +122,14 @@ export const action: ActionFunction = async ({ request }) => {
   }
 
   const user = userRow[0];
+
+  // Check if user is inactive - block login if so
+  if (user.status === "inactive") {
+    return json<ActionData>({
+      error: "Your account has been deactivated. Please contact your coach for assistance.",
+      fields: { email, password },
+    });
+  }
 
   // Set the Supabase session cookie
   if (signInData.session) {
