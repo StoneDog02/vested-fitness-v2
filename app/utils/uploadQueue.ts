@@ -392,9 +392,69 @@ class UploadQueue {
           }
         }
         
+        // Skip tasks that are in 'processing' state - they're already being processed
+        // This prevents duplicate uploads when recovery runs while check-in is being created
+        if (metadata.status === 'processing') {
+          console.log('Skipping recovery of processing task (likely already completed):', metadata.id);
+          // Check if file exists in storage - if it does, mark as completed
+          try {
+            const { createClient } = await import('@supabase/supabase-js');
+            const supabase = createClient(metadata.supabaseUrl, metadata.supabaseAnonKey);
+            const pathParts = metadata.filePath.split('/');
+            const folder = pathParts.slice(0, -1).join('/');
+            const fileName = pathParts[pathParts.length - 1];
+            
+            const { data: fileData } = await supabase.storage
+              .from('checkin-media')
+              .list(folder, { search: fileName });
+            
+            if (fileData && fileData.length > 0) {
+              // File exists, mark as completed
+              console.log('File exists in storage, marking task as completed:', metadata.id);
+              metadata.status = 'completed';
+              const updatedMetadata = metadataList.map(m => 
+                m.id === metadata.id ? { ...m, status: 'completed' as const } : m
+              );
+              storeUploadMetadata(updatedMetadata);
+            }
+          } catch (error) {
+            console.error('Error checking file existence during recovery:', error);
+          }
+          continue;
+        }
+        
         // Skip if already in queue
         if (this.uploads.has(metadata.id)) {
           continue;
+        }
+        
+        // Before recovering, check if the file already exists in storage
+        // If it does, the upload already completed and we should skip recovery
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(metadata.supabaseUrl, metadata.supabaseAnonKey);
+          const pathParts = metadata.filePath.split('/');
+          const folder = pathParts.slice(0, -1).join('/');
+          const fileName = pathParts[pathParts.length - 1];
+          
+          const { data: fileData } = await supabase.storage
+            .from('checkin-media')
+            .list(folder, { search: fileName });
+          
+          if (fileData && fileData.length > 0) {
+            // File already exists in storage - upload completed, mark as completed and skip recovery
+            console.log('File already exists in storage, marking task as completed and skipping recovery:', metadata.id);
+            const updatedMetadata = metadataList.map(m => 
+              m.id === metadata.id ? { ...m, status: 'completed' as const } : m
+            );
+            storeUploadMetadata(updatedMetadata);
+            // Clean up the local file since it's already uploaded
+            await removeFile(metadata.id);
+            continue;
+          }
+        } catch (error) {
+          console.error('Error checking file existence before recovery:', error);
+          // Continue with recovery if check fails
         }
         
         // Try to recover the file
