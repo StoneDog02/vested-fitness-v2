@@ -45,14 +45,6 @@ export default function AddCheckInModal({
     });
   };
 
-  // Helper function to format file size for display
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-  };
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -544,43 +536,6 @@ export default function AddCheckInModal({
                       </svg>
                       <span>Delete</span>
                     </button>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Debug Info Box */}
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mt-2">
-                <div className="text-xs font-mono">
-                  <div className="font-semibold text-yellow-800 dark:text-yellow-200 mb-1">📊 Debug Info:</div>
-                  <div className="space-y-1 text-yellow-700 dark:text-yellow-300">
-                    <div>
-                      <span className="font-medium">File Size:</span>{' '}
-                      {recordingData.blob.size > 1024 * 1024
-                        ? `${(recordingData.blob.size / (1024 * 1024)).toFixed(2)} MB`
-                        : `${(recordingData.blob.size / 1024).toFixed(2)} KB`}
-                      {' '}({recordingData.blob.size.toLocaleString()} bytes)
-                    </div>
-                    <div>
-                      <span className="font-medium">MIME Type:</span> {recordingData.blob.type || 'unknown'}
-                    </div>
-                    <div>
-                      <span className="font-medium">Duration:</span> {recordingData.duration}s
-                    </div>
-                    {recordingData.blob.size > 6 * 1024 * 1024 && (
-                      <div className="mt-2 p-2 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded text-red-800 dark:text-red-200 font-semibold">
-                        ⚠️ WARNING: File exceeds Netlify 6MB limit! Upload will likely fail.
-                      </div>
-                    )}
-                    {recordingData.blob.size <= 6 * 1024 * 1024 && recordingData.blob.size > 5 * 1024 * 1024 && (
-                      <div className="mt-2 p-2 bg-orange-100 dark:bg-orange-900/30 border border-orange-300 dark:border-orange-700 rounded text-orange-800 dark:text-orange-200 font-semibold">
-                        ⚠️ CAUTION: File is close to Netlify 6MB limit.
-                      </div>
-                    )}
-                    {recordingData.blob.size <= 5 * 1024 * 1024 && (
-                      <div className="mt-2 p-2 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded text-green-800 dark:text-green-200 font-semibold">
-                        ✅ File size is within Netlify 6MB limit.
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
