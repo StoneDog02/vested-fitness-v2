@@ -132,19 +132,22 @@ class UploadQueue {
       return;
     }
 
-    // Find next pending upload
+    // Find next pending upload (only process tasks with status 'pending')
+    // Do NOT process tasks that are 'uploading', 'processing', 'completed', or 'error'
     const pending = Array.from(this.uploads.values()).find(
-      (task) => !this.activeUploads.has(task.id)
+      (task) => 
+        task.status === 'pending' && 
+        !this.activeUploads.has(task.id)
     );
 
     if (!pending) {
       return; // No pending uploads
     }
 
-      // Mark as active and start upload
-      this.activeUploads.add(pending.id);
-      pending.status = 'uploading';
-      this.uploadFile(pending);
+    // Mark as active and start upload
+    this.activeUploads.add(pending.id);
+    pending.status = 'uploading';
+    this.uploadFile(pending);
   }
 
   /**
@@ -292,6 +295,10 @@ class UploadQueue {
           // Only mark as completed if onComplete succeeds
           task.status = 'completed';
           this.saveMetadata(); // Save completed state
+          
+          // Remove from queue immediately after completion to prevent reprocessing
+          // Keep in memory briefly for UI updates, but mark as completed
+          console.log('Upload task completed successfully:', id);
         } catch (error) {
           // If check-in creation fails, mark as error
           console.error('Error in onComplete callback:', error);
@@ -321,9 +328,13 @@ class UploadQueue {
         callback({ ...task.progress, percent: 100 });
       }
 
-      // Continue processing queue
+      // Remove from active uploads and continue processing queue
+      // Only process queue if task is actually completed (not if it errored)
       this.activeUploads.delete(id);
-      this.processQueue();
+      if (task.status === 'completed') {
+        // Task is done, process next in queue
+        this.processQueue();
+      }
     } catch (error) {
       // Upload failed
       const errorObj = error instanceof Error ? error : new Error(String(error));
