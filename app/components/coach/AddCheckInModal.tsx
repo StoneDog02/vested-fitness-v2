@@ -188,6 +188,15 @@ export default function AddCheckInModal({
             // Step 3: Create check-in record after upload completes
             // Use JSON instead of FormData since we're only sending metadata (no file)
             // This avoids Netlify's 6MB FormData limit and is more efficient
+            
+            // Guard: Check if check-in already exists to prevent duplicate creation
+            // This can happen if the callback is called multiple times
+            console.log('onComplete callback triggered for upload:', {
+              taskId: uploadTaskId,
+              filePath: result.path,
+              clientId
+            });
+            
             const checkInData: any = {
               clientId,
               recordingType: recordingData.type,

@@ -40,8 +40,9 @@ export interface UploadTask {
   status?: 'pending' | 'uploading' | 'processing' | 'completed' | 'error';
   error?: Error;
   onProgress?: (percent: number, loaded: number, total: number) => void;
-  onComplete?: (result: { path: string }) => void;
+  onComplete?: (result: { path: string }) => void | Promise<void>;
   onError?: (error: Error) => void;
+  _onCompleteCalled?: boolean; // Guard to prevent duplicate callback execution
 }
 
 class UploadQueue {
@@ -276,22 +277,49 @@ class UploadQueue {
         xhr.send(file);
       });
 
-      // Upload successful - update status to processing
+      // Upload successful - mark as processing first
       task.status = 'processing';
+      this.saveMetadata(); // Save processing state immediately
       
-      if (onComplete) {
-        onComplete({ path: filePath });
+      // Call onComplete callback (this creates the check-in record)
+      // Guard: Only call once to prevent duplicate check-in creation
+      if (onComplete && !task._onCompleteCalled) {
+        task._onCompleteCalled = true; // Mark as called immediately
+        this.saveMetadata(); // Save the guard flag
+        
+        try {
+          await onComplete({ path: filePath });
+          // Only mark as completed if onComplete succeeds
+          task.status = 'completed';
+          this.saveMetadata(); // Save completed state
+        } catch (error) {
+          // If check-in creation fails, mark as error
+          console.error('Error in onComplete callback:', error);
+          task.status = 'error';
+          task.error = error instanceof Error ? error : new Error(String(error));
+          this.saveMetadata();
+          
+          // Call onError if provided
+          if (task.onError) {
+            task.onError(task.error);
+          }
+        }
+      } else if (!onComplete) {
+        // No callback, just mark as completed
+        task.status = 'completed';
+        this.saveMetadata();
+      } else if (task._onCompleteCalled) {
+        // Callback already called, just mark as completed
+        console.log('onComplete already called for task, skipping:', id);
+        task.status = 'completed';
+        this.saveMetadata();
       }
       
-      // Mark as completed after a brief delay to show processing state
-      setTimeout(() => {
-        task.status = 'completed';
-        this.saveMetadata(); // Save completed state
-        const callback = this.progressCallbacks.get(id);
-        if (callback && task.progress) {
-          callback({ ...task.progress, percent: 100 });
-        }
-      }, 500);
+      // Update progress to 100%
+      const callback = this.progressCallbacks.get(id);
+      if (callback && task.progress) {
+        callback({ ...task.progress, percent: 100 });
+      }
 
       // Continue processing queue
       this.activeUploads.delete(id);

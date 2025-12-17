@@ -351,8 +351,47 @@ export async function action({ request }: ActionFunctionArgs) {
       recordingType,
       hasVideoUrl: !!checkInData.video_url,
       hasAudioUrl: !!checkInData.audio_url,
-      hasTranscript: !!checkInData.transcript
+      hasTranscript: !!checkInData.transcript,
+      filePath: finalFilePath
     });
+
+    // Check if a check-in with this file path already exists (prevent duplicates)
+    const videoUrl = checkInData.video_url;
+    const audioUrl = checkInData.audio_url;
+    
+    if (videoUrl || audioUrl) {
+      // Build the OR query properly
+      let orQuery = '';
+      if (videoUrl && audioUrl) {
+        orQuery = `video_url.eq.${videoUrl},audio_url.eq.${audioUrl}`;
+      } else if (videoUrl) {
+        orQuery = `video_url.eq.${videoUrl}`;
+      } else if (audioUrl) {
+        orQuery = `audio_url.eq.${audioUrl}`;
+      }
+      
+      const { data: existingCheckIn } = await supabase
+        .from("check_ins")
+        .select("id")
+        .eq("client_id", clientId)
+        .eq("coach_id", user.id)
+        .or(orQuery)
+        .maybeSingle();
+      
+      if (existingCheckIn) {
+        console.log('Check-in with this file already exists, skipping duplicate creation:', {
+          existingCheckInId: existingCheckIn.id,
+          filePath: finalFilePath,
+          videoUrl,
+          audioUrl
+        });
+        return json({ 
+          success: true, 
+          checkIn: existingCheckIn,
+          message: "Check-in already exists" 
+        }, { status: 200 });
+      }
+    }
 
     const { data: checkIn, error: checkInError } = await supabase
       .from("check_ins")
