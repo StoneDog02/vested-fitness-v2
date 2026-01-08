@@ -690,6 +690,21 @@ export default function Workouts() {
     setIsSubmitting(true);
     setSubmitError(null);
     
+    // CRITICAL FIX: Capture the selectedTemplate and completedGroups at submission time
+    // to prevent race conditions where state changes before async submission completes
+    const templateToSubmit = selectedTemplate;
+    const dateToSubmit = currentDateApi;
+    
+    // Get valid group IDs from the selected template
+    const validTemplateGroupIds = new Set(
+      (templateToSubmit.groups || []).map((group: any) => group.id)
+    );
+    
+    // Filter completedGroups to ONLY include groups that belong to this template
+    // This prevents submitting groups from a different template if user switched templates
+    const validCompletedGroups = Object.keys(completedGroups)
+      .filter(id => completedGroups[id] && validTemplateGroupIds.has(id));
+    
     // Update personal bests before submitting
     if (updatePersonalBests) {
       // Get current weights from all WorkoutCard components
@@ -704,10 +719,11 @@ export default function Workouts() {
     setIsWorkoutSubmitted(true);
     
     // Submit using fetcher (same pattern as meals and supplements)
+    // Use the captured values to ensure consistency
     submitFetcher.submit(
       { 
-        completedAt: currentDateApi,
-        completedGroups: JSON.stringify(Object.keys(completedGroups).filter(id => completedGroups[id]))
+        completedAt: dateToSubmit,
+        completedGroups: JSON.stringify(validCompletedGroups)
       },
       { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
     );
@@ -729,15 +745,31 @@ export default function Workouts() {
     setIsSubmitting(true);
     setSubmitError(null);
     
+    // CRITICAL FIX: Capture values at submission time to prevent race conditions
+    // where state changes before async submission completes
+    const workoutToSubmit = currentDayWorkout;
+    const dateToSubmit = currentDateApi;
+    
+    // Get valid group IDs from the current workout
+    const validWorkoutGroupIds = new Set(
+      (workoutToSubmit.groups || []).map((group: any) => group.id)
+    );
+    
+    // Filter completedGroups to ONLY include groups that belong to this workout
+    // This prevents submitting groups from a different day if user navigates during submission
+    const validCompletedGroups = Object.keys(completedGroups)
+      .filter(id => completedGroups[id] && validWorkoutGroupIds.has(id));
+    
     // Optimistically update UI
     setShowSuccess(true);
     setIsWorkoutSubmitted(true);
     
     // Submit using fetcher (same pattern as meals and supplements)
+    // Use the captured values to ensure consistency
     submitFetcher.submit(
       { 
-        completedAt: currentDateApi,
-        completedGroups: JSON.stringify(Object.keys(completedGroups).filter(id => completedGroups[id]))
+        completedAt: dateToSubmit,
+        completedGroups: JSON.stringify(validCompletedGroups)
       },
       { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
     );
