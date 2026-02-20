@@ -97,6 +97,7 @@ export default function DashboardLayout({
         { name: "Meals", path: `/dashboard/clients/${currentClientId}/meals` },
         { name: "Workouts", path: `/dashboard/clients/${currentClientId}/workouts` },
         { name: "Supplements", path: `/dashboard/clients/${currentClientId}/supplements` },
+        { name: "Habits", path: `/dashboard/clients/${currentClientId}/habits` },
         { name: "Subscription", path: `/dashboard/clients/${currentClientId}/subscription` },
         { name: "Chat", path: `/dashboard/clients/${currentClientId}/chat` },
       ] : undefined
@@ -109,6 +110,7 @@ export default function DashboardLayout({
     { name: "Meals", path: "/dashboard/meals" },
     { name: "Workouts", path: "/dashboard/workouts" },
     { name: "Supplements", path: "/dashboard/supplements" },
+    { name: "Habits", path: "/dashboard/habits" },
     { name: "Chat", path: "/dashboard/chat" },
   ];
 

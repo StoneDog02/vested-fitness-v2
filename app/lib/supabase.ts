@@ -420,6 +420,137 @@ export interface Database {
           created_at?: string;
         };
       };
+      habit_presets: {
+        Row: {
+          id: string;
+          coach_id: string | null;
+          name: string;
+          description: string | null;
+          preset_type: string;
+          target_default: number | null;
+          target_unit: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id?: string | null;
+          name: string;
+          description?: string | null;
+          preset_type: string;
+          target_default?: number | null;
+          target_unit?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string | null;
+          name?: string;
+          description?: string | null;
+          preset_type?: string;
+          target_default?: number | null;
+          target_unit?: string | null;
+          created_at?: string;
+        };
+      };
+      client_habits: {
+        Row: {
+          id: string;
+          client_id: string;
+          habit_preset_id: string;
+          coach_id: string;
+          custom_name: string | null;
+          custom_description: string | null;
+          target_value: number | null;
+          target_unit: string | null;
+          frequency: string;
+          times_per_week: number | null;
+          schedule_days: number[] | null;
+          assigned_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          habit_preset_id: string;
+          coach_id: string;
+          custom_name?: string | null;
+          custom_description?: string | null;
+          target_value?: number | null;
+          target_unit?: string | null;
+          frequency?: string;
+          times_per_week?: number | null;
+          schedule_days?: number[] | null;
+          assigned_at?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          client_id?: string;
+          habit_preset_id?: string;
+          coach_id?: string;
+          custom_name?: string | null;
+          custom_description?: string | null;
+          target_value?: number | null;
+          target_unit?: string | null;
+          frequency?: string;
+          times_per_week?: number | null;
+          schedule_days?: number[] | null;
+          assigned_at?: string;
+          created_at?: string;
+        };
+      };
+      habit_completions: {
+        Row: {
+          id: string;
+          client_habit_id: string;
+          completed_at: string;
+          value: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          client_habit_id: string;
+          completed_at: string;
+          value?: number | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          client_habit_id?: string;
+          completed_at?: string;
+          value?: number | null;
+          created_at?: string;
+        };
+      };
+      habit_notes: {
+        Row: {
+          id: string;
+          client_id: string;
+          coach_id: string;
+          client_habit_id: string | null;
+          author_role: string;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          client_id: string;
+          coach_id: string;
+          client_habit_id?: string | null;
+          author_role: string;
+          content: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          client_id?: string;
+          coach_id?: string;
+          client_habit_id?: string | null;
+          author_role?: string;
+          content?: string;
+          created_at?: string;
+        };
+      };
     };
   };
 }
