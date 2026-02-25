@@ -4,7 +4,7 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
-import { stripe } from "~/utils/stripe.server";
+import { resetPaymentFailedAttempts, stripe } from "~/utils/stripe.server";
 
 export const action: ActionFunction = async ({ request }) => {
   if (request.method !== "POST") {
@@ -147,6 +147,15 @@ export const action: ActionFunction = async ({ request }) => {
               dbError
             );
           }
+        }
+
+        // Clear payment_required so the client can still access the app (no active subscription to pay)
+        try {
+          await resetPaymentFailedAttempts(client.stripe_customer_id);
+          console.log(`[CANCEL_SUBSCRIPTION] Cleared access_status and payment_failed_attempts for client ${client.id}`);
+        } catch (resetError) {
+          console.error("[CANCEL_SUBSCRIPTION] Error clearing client access status:", resetError);
+          // Don't fail the request; subscription was already cancelled
         }
       } catch (stripeError) {
         console.error("[CANCEL_SUBSCRIPTION] Error handling Stripe subscriptions:", stripeError);
