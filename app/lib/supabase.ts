@@ -561,9 +561,14 @@ import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
 
-export const resetPassword = async (email: string): Promise<{ error: Error | null }> => {
+export const resetPassword = async (
+  email: string,
+  redirectTo?: string
+): Promise<{ error: Error | null }> => {
   const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
-  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    ...(redirectTo ? { redirectTo } : {}),
+  });
   return { error };
 };
 

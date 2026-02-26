@@ -10,6 +10,13 @@ export default function AuthCallback() {
     const params = new URLSearchParams(hash.replace(/^#/, ""));
     const access_token = params.get("access_token");
     const refresh_token = params.get("refresh_token");
+    const type = params.get("type");
+
+    // Password reset links should land on the set-new-password page, not here
+    if (type === "recovery" && hash) {
+      navigate(`/auth/update-password${hash}`, { replace: true });
+      return;
+    }
 
     if (access_token && refresh_token) {
       // POST tokens to backend to set HTTP-only cookie

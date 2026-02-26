@@ -10,8 +10,9 @@ interface ActionData {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const email = formData.get("email") as string;
+  const redirectTo = new URL("/auth/update-password", request.url).href;
 
-  const { error } = await resetPassword(email);
+  const { error } = await resetPassword(email, redirectTo);
 
   if (error instanceof Error) {
     return json<ActionData>({ error: error.message }, { status: 400 });
@@ -39,7 +40,7 @@ export default function ResetPassword() {
           </p>
           <div>
             <Link
-              to="/auth/sign-in"
+              to="/auth/login"
               className="inline-block text-primary hover:text-primary-dark"
             >
               Return to sign in
@@ -99,7 +100,7 @@ export default function ResetPassword() {
 
           <div className="text-center">
             <Link
-              to="/auth/sign-in"
+              to="/auth/login"
               className="text-sm text-primary hover:text-primary-dark"
             >
               Back to sign in

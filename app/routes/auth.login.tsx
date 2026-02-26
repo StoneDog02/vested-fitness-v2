@@ -287,7 +287,7 @@ export default function Login() {
 
                 <div className="text-sm">
                   <Link
-                    to="#"
+                    to="/auth/reset-password"
                     className="font-medium text-primary hover:text-primary-dark"
                   >
                     Forgot your password?
