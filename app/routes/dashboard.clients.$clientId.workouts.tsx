@@ -111,8 +111,10 @@ export const loader = async ({
   request: Request;
 }) => {
   const clientIdParam = params.clientId;
-  // Check cache (per client)
-  if (clientIdParam && clientWorkoutsCache[clientIdParam] && clientWorkoutsCache[clientIdParam].expires > Date.now()) {
+  const url = new URL(request.url);
+  const skipCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("invalidateCache") === "1";
+  // Check cache (per client), unless refresh requested
+  if (!skipCache && clientIdParam && clientWorkoutsCache[clientIdParam] && clientWorkoutsCache[clientIdParam].expires > Date.now()) {
     return json(clientWorkoutsCache[clientIdParam].data);
   }
 
@@ -188,7 +190,6 @@ export const loader = async ({
   }
 
   // Get week start from query param, default to current week
-  const url = new URL(request.url);
   const weekStartParam = url.searchParams.get("weekStart");
   let weekStart: Date;
   if (weekStartParam) {
