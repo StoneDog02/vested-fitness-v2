@@ -1,6 +1,22 @@
-import { useState, useEffect, useRef, useMemo, memo, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useMemo,
+  memo,
+  useCallback,
+} from "react";
 import Modal from "~/components/ui/Modal";
 import Button from "~/components/ui/Button";
+import type { CoachDraftEnvelope, WorkoutDraftPayload } from "~/utils/coachDraftStorage";
+import {
+  clearWorkoutDraft,
+  flushWorkoutDraft,
+  loadWorkoutDraftEnvelope,
+  saveWorkoutDraftDebounced,
+  saveWorkoutDraftSync,
+} from "~/utils/coachDraftStorage";
 
 export type WorkoutType = "Single" | "Super Set" | "Giant Set";
 
@@ -39,6 +55,42 @@ interface CreateWorkoutModalProps {
   title?: string;
   submitLabel?: string;
   isLoading?: boolean;
+  draftClientId?: string | null;
+  draftPlanId?: string | null;
+}
+
+function stripVideoFilesFromWeekPlans(week: {
+  [day: string]: DayPlan;
+}): { [day: string]: DayPlan } {
+  const out: { [day: string]: DayPlan } = {};
+  for (const day of Object.keys(week)) {
+    const p = week[day];
+    if (!p || p.mode === "rest") {
+      out[day] = { mode: "rest" };
+      continue;
+    }
+    out[day] = {
+      ...p,
+      groups: p.groups?.map((g) => ({
+        ...g,
+        exercises: g.exercises.map(({ videoFile: _f, ...ex }) => ({ ...ex })),
+      })),
+    };
+  }
+  return out;
+}
+
+function stripVideoFilesFromTemplates(templates: DayPlan[]): DayPlan[] {
+  return templates.map((p) => {
+    if (!p || p.mode === "rest") return { mode: "rest" as const };
+    return {
+      ...p,
+      groups: p.groups?.map((g) => ({
+        ...g,
+        exercises: g.exercises.map(({ videoFile: _f, ...ex }) => ({ ...ex })),
+      })),
+    };
+  });
 }
 
 const daysOfWeek = [
@@ -293,6 +345,8 @@ export default function CreateWorkoutModal({
   title = "Create New Workout",
   submitLabel = "Create Workout",
   isLoading = false,
+  draftClientId = null,
+  draftPlanId = null,
 }: CreateWorkoutModalProps) {
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [currentWorkoutIndex, setCurrentWorkoutIndex] = useState(0);
@@ -318,70 +372,263 @@ export default function CreateWorkoutModal({
   // Ref to track last edited day
   const lastDayIndex = useRef(currentDayIndex);
 
+  const initialValuesRef = useRef(initialValues);
+  initialValuesRef.current = initialValues;
+  const prevIsOpenRef = useRef(false);
+  const [draftReady, setDraftReady] = useState(!draftClientId);
+  const [showDraftPrompt, setShowDraftPrompt] = useState(false);
+  const [pendingDraftEnvelope, setPendingDraftEnvelope] =
+    useState<CoachDraftEnvelope<WorkoutDraftPayload> | null>(null);
+  const draftReadyRef = useRef(!draftClientId);
+  const showDraftPromptRef = useRef(false);
+  const workoutDraftBaselineRef = useRef("");
+  const workoutNeedsBaselineCommitRef = useRef(false);
 
-  // Populate form with initial values when editing
   useEffect(() => {
-    if (isOpen) {
-      if (initialValues) {
-        setPlanName(initialValues.planName || "");
-        setInstructions(initialValues.instructions || "");
-        setBuilderMode(initialValues.builderMode || 'week');
-        setWorkoutDaysPerWeek(initialValues.workoutDaysPerWeek || 4);
-        
-        if (initialValues.week) {
-          setWeekPlans(initialValues.week);
-          setSavedDays(
-            daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: true }), {})
-          );
-        }
-        
-        // Initialize workout templates for Flexible Schedule
-        if (initialValues.builderMode === 'day' && initialValues.workoutDaysPerWeek) {
-          // Extract existing workout templates from the week data
-          const existingTemplates: DayPlan[] = [];
-          const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-          
-          for (let i = 0; i < initialValues.workoutDaysPerWeek; i++) {
-            const dayKey = daysOfWeek[i];
-            const dayPlan = initialValues.week[dayKey];
-            
-            if (dayPlan && dayPlan.mode === "workout") {
-              // Use existing template data
-              existingTemplates.push(dayPlan);
-            } else {
-              // Create new empty template
-              existingTemplates.push({
-                mode: "workout",
-                type: "Single",
-                groups: [{ type: "Single", exercises: [{ name: "", sets: "", reps: "" }] }],
-                dayLabel: `Workout ${i + 1}`
-              });
-            }
-          }
-          
-          setWorkoutTemplates(existingTemplates);
-        }
-      } else {
-        setPlanName("");
-        setInstructions("");
-        setBuilderMode('week');
-        setWorkoutDaysPerWeek(4);
-        setWeekPlans(
-          daysOfWeek.reduce(
-            (acc, day) => ({ ...acc, [day]: { mode: "rest" } }),
-            {}
-          )
-        );
+    draftReadyRef.current = draftReady;
+  }, [draftReady]);
+
+  useEffect(() => {
+    showDraftPromptRef.current = showDraftPrompt;
+  }, [showDraftPrompt]);
+
+  const applyInitialValuesFromProps = useCallback(() => {
+    const iv = initialValuesRef.current;
+    if (iv) {
+      setPlanName(iv.planName || "");
+      setInstructions(iv.instructions || "");
+      setBuilderMode(iv.builderMode || "week");
+      setWorkoutDaysPerWeek(iv.workoutDaysPerWeek || 4);
+
+      if (iv.week) {
+        setWeekPlans(iv.week);
         setSavedDays(
-          daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: false }), {})
+          daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: true }), {})
         );
+      }
+
+      if (iv.builderMode === "day" && iv.workoutDaysPerWeek) {
+        const existingTemplates: DayPlan[] = [];
+        const dow = [
+          "Sunday",
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+        ];
+
+        for (let i = 0; i < iv.workoutDaysPerWeek; i++) {
+          const dayKey = dow[i];
+          const dayPlan = iv.week[dayKey];
+
+          if (dayPlan && dayPlan.mode === "workout") {
+            existingTemplates.push(dayPlan);
+          } else {
+            existingTemplates.push({
+              mode: "workout",
+              type: "Single",
+              groups: [
+                { type: "Single", exercises: [{ name: "", sets: "", reps: "" }] },
+              ],
+              dayLabel: `Workout ${i + 1}`,
+            });
+          }
+        }
+
+        setWorkoutTemplates(existingTemplates);
+      } else {
         setWorkoutTemplates([]);
       }
-      setCurrentDayIndex(0);
-      setCurrentWorkoutIndex(0);
-      lastDayIndex.current = 0;
+    } else {
+      setPlanName("");
+      setInstructions("");
+      setBuilderMode("week");
+      setWorkoutDaysPerWeek(4);
+      setWeekPlans(
+        daysOfWeek.reduce(
+          (acc, day) => ({ ...acc, [day]: { mode: "rest" } }),
+          {}
+        )
+      );
+      setSavedDays(
+        daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: false }), {})
+      );
+      setWorkoutTemplates([]);
     }
-  }, [initialValues, isOpen]);
+    setCurrentDayIndex(0);
+    setCurrentWorkoutIndex(0);
+    lastDayIndex.current = 0;
+  }, []);
+
+  const buildWorkoutDraftPayload = useCallback((): WorkoutDraftPayload => {
+    return {
+      planName,
+      instructions,
+      builderMode,
+      workoutDaysPerWeek,
+      weekPlans: stripVideoFilesFromWeekPlans(weekPlans),
+      workoutTemplates: stripVideoFilesFromTemplates(workoutTemplates),
+      savedDays,
+      currentDayIndex,
+      currentWorkoutIndex,
+    };
+  }, [
+    planName,
+    instructions,
+    builderMode,
+    workoutDaysPerWeek,
+    weekPlans,
+    workoutTemplates,
+    savedDays,
+    currentDayIndex,
+    currentWorkoutIndex,
+  ]);
+
+  const commitWorkoutBaseline = useCallback(() => {
+    workoutDraftBaselineRef.current = JSON.stringify(buildWorkoutDraftPayload());
+  }, [buildWorkoutDraftPayload]);
+
+  /** Latest payload for close-save; avoids putting buildWorkoutDraftPayload in the open/close effect deps (that callback changes every keystroke and would cancel the IDB load). */
+  const buildWorkoutDraftPayloadRef = useRef(buildWorkoutDraftPayload);
+  buildWorkoutDraftPayloadRef.current = buildWorkoutDraftPayload;
+
+  useLayoutEffect(() => {
+    if (!workoutNeedsBaselineCommitRef.current || !isOpen) return;
+    commitWorkoutBaseline();
+    workoutNeedsBaselineCommitRef.current = false;
+  });
+
+  // Populate form when modal opens; optional local draft prompt
+  useEffect(() => {
+    if (!isOpen) {
+      const cid = draftClientId;
+      const pid = draftPlanId;
+      if (cid) {
+        flushWorkoutDraft(cid, pid);
+        if (draftReadyRef.current && !showDraftPromptRef.current) {
+          void saveWorkoutDraftSync(cid, pid, buildWorkoutDraftPayloadRef.current());
+        }
+      }
+      setShowDraftPrompt(false);
+      setPendingDraftEnvelope(null);
+      setDraftReady(!draftClientId);
+      prevIsOpenRef.current = false;
+      return;
+    }
+
+    if (!prevIsOpenRef.current) {
+      applyInitialValuesFromProps();
+      if (draftClientId) {
+        setDraftReady(false);
+        let cancelled = false;
+        void loadWorkoutDraftEnvelope(draftClientId, draftPlanId).then((env) => {
+          if (cancelled) return;
+          if (env) {
+            setPendingDraftEnvelope(env);
+            setShowDraftPrompt(true);
+          } else {
+            setShowDraftPrompt(false);
+            setPendingDraftEnvelope(null);
+            setDraftReady(true);
+            workoutNeedsBaselineCommitRef.current = true;
+          }
+        });
+        prevIsOpenRef.current = true;
+        return () => {
+          cancelled = true;
+        };
+      }
+      setDraftReady(true);
+      setShowDraftPrompt(false);
+      setPendingDraftEnvelope(null);
+      workoutNeedsBaselineCommitRef.current = true;
+      prevIsOpenRef.current = true;
+    }
+  }, [isOpen, draftClientId, draftPlanId, applyInitialValuesFromProps]);
+
+  const handleRestoreWorkoutDraft = () => {
+    if (!pendingDraftEnvelope) return;
+    const p = pendingDraftEnvelope.payload;
+    setPlanName(p.planName);
+    setInstructions(p.instructions);
+    setBuilderMode(p.builderMode);
+    setWorkoutDaysPerWeek(p.workoutDaysPerWeek);
+    setWeekPlans(p.weekPlans as { [day: string]: DayPlan });
+    setWorkoutTemplates((p.workoutTemplates || []) as DayPlan[]);
+    setSavedDays(
+      p.savedDays && typeof p.savedDays === "object"
+        ? p.savedDays
+        : daysOfWeek.reduce((acc, day) => ({ ...acc, [day]: false }), {})
+    );
+    setCurrentDayIndex(
+      typeof p.currentDayIndex === "number" ? p.currentDayIndex : 0
+    );
+    setCurrentWorkoutIndex(
+      typeof p.currentWorkoutIndex === "number" ? p.currentWorkoutIndex : 0
+    );
+    lastDayIndex.current =
+      typeof p.currentDayIndex === "number" ? p.currentDayIndex : 0;
+    setShowDraftPrompt(false);
+    setPendingDraftEnvelope(null);
+    setDraftReady(true);
+    workoutNeedsBaselineCommitRef.current = true;
+  };
+
+  const handleStartFreshWorkoutDraft = () => {
+    if (!draftClientId) return;
+    void clearWorkoutDraft(draftClientId, draftPlanId);
+    applyInitialValuesFromProps();
+    setShowDraftPrompt(false);
+    setPendingDraftEnvelope(null);
+    setDraftReady(true);
+    workoutNeedsBaselineCommitRef.current = true;
+  };
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !draftClientId ||
+      !draftReady ||
+      showDraftPrompt ||
+      isLoading
+    ) {
+      return;
+    }
+    saveWorkoutDraftDebounced(
+      draftClientId,
+      draftPlanId,
+      buildWorkoutDraftPayload()
+    );
+  }, [
+    isOpen,
+    draftClientId,
+    draftPlanId,
+    draftReady,
+    showDraftPrompt,
+    isLoading,
+    buildWorkoutDraftPayload,
+  ]);
+
+  const workoutIsDirty =
+    !!draftClientId &&
+    draftReady &&
+    JSON.stringify(buildWorkoutDraftPayload()) !==
+      workoutDraftBaselineRef.current;
+
+  useEffect(() => {
+    if (!draftClientId) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isLoading) return;
+      if (showDraftPrompt || workoutIsDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [draftClientId, isLoading, showDraftPrompt, workoutIsDirty]);
 
   // Auto-save when navigating away from a day
   useEffect(() => {
@@ -817,6 +1064,33 @@ export default function CreateWorkoutModal({
     <Modal isOpen={isOpen} onClose={isLoading ? () => {} : onClose} title={title} size="lg">
       <div className="relative">
         <form onSubmit={handleSubmit} className="space-y-6">
+          {showDraftPrompt && pendingDraftEnvelope && (
+            <div
+              className="rounded-lg border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+              role="status"
+            >
+              <p className="text-sm text-gray-800 dark:text-gray-100">
+                You have an unsaved local workout draft
+                {pendingDraftEnvelope.updatedAt
+                  ? ` from ${new Date(pendingDraftEnvelope.updatedAt).toLocaleString()}`
+                  : ""}
+                . Restore it or start fresh from the saved plan.
+              </p>
+              <div className="flex flex-wrap gap-2 shrink-0">
+                <Button type="button" size="sm" onClick={handleRestoreWorkoutDraft}>
+                  Restore draft
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleStartFreshWorkoutDraft}
+                >
+                  Start fresh
+                </Button>
+              </div>
+            </div>
+          )}
           {/* Workout Plan Name */}
           <div>
             <label

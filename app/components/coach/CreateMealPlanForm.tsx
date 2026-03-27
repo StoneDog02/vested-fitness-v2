@@ -1,5 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Button from "~/components/ui/Button";
+import type { CoachDraftEnvelope, MealPlanDraftPayload } from "~/utils/coachDraftStorage";
+import {
+  clearMealDraft,
+  flushMealDraft,
+  loadMealDraftEnvelope,
+  saveMealDraftDebounced,
+  saveMealDraftSync,
+} from "~/utils/coachDraftStorage";
 
 interface Food {
   name: string;
@@ -8,6 +16,7 @@ interface Food {
   protein: number | string;
   carbs: number | string;
   fat: number | string;
+  foodOption?: "A" | "B";
 }
 
 interface Meal {
@@ -29,6 +38,87 @@ interface CreateMealPlanFormProps {
   onCancel: () => void;
   initialData?: MealPlanFormData;
   isLoading?: boolean;
+  /** When set, drafts are keyed by client + plan (null plan id = new plan). */
+  draftClientId?: string | null;
+  draftPlanId?: string | null;
+}
+
+function defaultEmptyMealPlan(): MealPlanFormData {
+  return {
+    title: "",
+    description: "",
+    meals: [
+      {
+        id: 1,
+        name: "",
+        time: "",
+        foods: [
+          {
+            name: "",
+            portion: "",
+            calories: 0,
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+          },
+        ],
+        mealOption: "A",
+      },
+    ],
+  };
+}
+
+function buildInitialMealForm(initialData?: MealPlanFormData): MealPlanFormData {
+  if (!initialData) return defaultEmptyMealPlan();
+  return {
+    title: initialData.title ?? "",
+    description: initialData.description ?? "",
+    meals: initialData.meals.map((meal, idx) => ({
+      id: typeof meal.id === "number" ? meal.id : idx + 1,
+      name: meal.name ?? "",
+      time: meal.time ?? "",
+      mealOption: meal.mealOption || "A",
+      foods: (meal.foods ?? []).map((food) => ({
+        name: food.name ?? "",
+        portion: food.portion ?? "",
+        calories: typeof food.calories === "number" ? food.calories : 0,
+        protein: typeof food.protein === "number" ? food.protein : food.protein ?? 0,
+        carbs: typeof food.carbs === "number" ? food.carbs : food.carbs ?? 0,
+        fat: typeof food.fat === "number" ? food.fat : food.fat ?? 0,
+        foodOption: food.foodOption || "A",
+      })),
+    })),
+  };
+}
+
+function normalizeMealsFromDraft(raw: unknown): Meal[] {
+  if (!Array.isArray(raw)) return defaultEmptyMealPlan().meals;
+  return raw.map((meal: any, idx: number) => ({
+    id: typeof meal?.id === "number" ? meal.id : idx + 1,
+    name: String(meal?.name ?? ""),
+    time: String(meal?.time ?? ""),
+    mealOption: meal?.mealOption === "B" ? "B" : "A",
+    foods: Array.isArray(meal?.foods)
+      ? meal.foods.map((food: any) => ({
+          name: String(food?.name ?? ""),
+          portion: String(food?.portion ?? ""),
+          calories: Number(food?.calories) || 0,
+          protein: food?.protein ?? 0,
+          carbs: food?.carbs ?? 0,
+          fat: food?.fat ?? 0,
+          foodOption: food?.foodOption === "B" ? "B" : "A",
+        }))
+      : defaultEmptyMealPlan().meals[0].foods,
+  }));
+}
+
+function mealFormBaseline(data: MealPlanFormData, activeMealIndex: number): string {
+  return JSON.stringify({
+    title: data.title,
+    description: data.description,
+    meals: data.meals,
+    activeMealIndex,
+  });
 }
 
 // Simple food item component without drag-and-drop
@@ -249,42 +339,148 @@ export default function CreateMealPlanForm({
   onCancel,
   initialData,
   isLoading = false,
+  draftClientId = null,
+  draftPlanId = null,
 }: CreateMealPlanFormProps) {
-  // Initialize form data when editing
-  React.useEffect(() => {
-    if (initialData) {
-      // Form data will be initialized from initialData
-    }
-  }, [initialData]);
-
-  const [formData, setFormData] = useState<MealPlanFormData>(
-    initialData || {
-      title: "",
-      description: "",
-      meals: [
-        {
-          id: 1,
-          name: "",
-          time: "",
-          foods: [
-            {
-              name: "",
-              portion: "",
-              calories: 0,
-              protein: 0,
-              carbs: 0,
-              fat: 0,
-            },
-          ],
-          mealOption: 'A',
-        },
-      ],
-    }
+  const [formData, setFormData] = useState<MealPlanFormData>(() =>
+    buildInitialMealForm(initialData)
   );
 
   const [activeMealIndex, setActiveMealIndex] = useState(0);
-  
+  const [draftReady, setDraftReady] = useState(!draftClientId);
+  const [showDraftPrompt, setShowDraftPrompt] = useState(false);
+  const [pendingDraftEnvelope, setPendingDraftEnvelope] =
+    useState<CoachDraftEnvelope<MealPlanDraftPayload> | null>(null);
+  const baselineRef = useRef("");
+  const draftReadyRef = useRef(!draftClientId);
+  const showDraftPromptRef = useRef(false);
+  const snapshotRef = useRef({ formData: buildInitialMealForm(initialData), activeMealIndex: 0 });
+  const initialDataRef = useRef(initialData);
+  initialDataRef.current = initialData;
 
+  useEffect(() => {
+    draftReadyRef.current = draftReady;
+  }, [draftReady]);
+
+  useEffect(() => {
+    showDraftPromptRef.current = showDraftPrompt;
+  }, [showDraftPrompt]);
+
+  useEffect(() => {
+    snapshotRef.current = { formData, activeMealIndex };
+  }, [formData, activeMealIndex]);
+
+  useEffect(() => {
+    if (!draftClientId) {
+      setDraftReady(true);
+      setShowDraftPrompt(false);
+      setPendingDraftEnvelope(null);
+      baselineRef.current = mealFormBaseline(
+        buildInitialMealForm(initialDataRef.current),
+        0
+      );
+      return;
+    }
+    const env = loadMealDraftEnvelope(draftClientId, draftPlanId);
+    const initial = buildInitialMealForm(initialDataRef.current);
+    if (env) {
+      setPendingDraftEnvelope(env);
+      setShowDraftPrompt(true);
+      setDraftReady(false);
+    } else {
+      setShowDraftPrompt(false);
+      setPendingDraftEnvelope(null);
+      setDraftReady(true);
+      baselineRef.current = mealFormBaseline(initial, 0);
+    }
+  }, [draftClientId, draftPlanId]);
+
+  useEffect(() => {
+    if (!draftClientId || !draftReady || showDraftPrompt || isLoading) return;
+    saveMealDraftDebounced(draftClientId, draftPlanId, {
+      title: formData.title,
+      description: formData.description,
+      meals: formData.meals,
+      activeMealIndex,
+    });
+  }, [
+    draftClientId,
+    draftPlanId,
+    draftReady,
+    showDraftPrompt,
+    isLoading,
+    formData.title,
+    formData.description,
+    formData.meals,
+    activeMealIndex,
+  ]);
+
+  useEffect(() => {
+    const cid = draftClientId;
+    const pid = draftPlanId;
+    return () => {
+      if (!cid) return;
+      flushMealDraft(cid, pid);
+      if (draftReadyRef.current && !showDraftPromptRef.current) {
+        const { formData: fd, activeMealIndex: am } = snapshotRef.current;
+        saveMealDraftSync(cid, pid, {
+          title: fd.title,
+          description: fd.description,
+          meals: fd.meals,
+          activeMealIndex: am,
+        });
+      }
+    };
+  }, [draftClientId, draftPlanId]);
+
+  const isDirty = Boolean(
+    draftClientId &&
+      draftReady &&
+      mealFormBaseline(formData, activeMealIndex) !== baselineRef.current
+  );
+
+  useEffect(() => {
+    if (!draftClientId) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isLoading) return;
+      if (showDraftPrompt || isDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [draftClientId, isLoading, showDraftPrompt, isDirty]);
+
+  const handleRestoreDraft = () => {
+    if (!draftClientId || !pendingDraftEnvelope) return;
+    const p = pendingDraftEnvelope.payload;
+    const restored: MealPlanFormData = {
+      title: p.title,
+      description: p.description,
+      meals: normalizeMealsFromDraft(p.meals),
+    };
+    setFormData(restored);
+    setActiveMealIndex(
+      typeof p.activeMealIndex === "number" ? p.activeMealIndex : 0
+    );
+    setShowDraftPrompt(false);
+    setPendingDraftEnvelope(null);
+    setDraftReady(true);
+    baselineRef.current = mealFormBaseline(restored, p.activeMealIndex ?? 0);
+  };
+
+  const handleStartFreshDraft = () => {
+    if (!draftClientId) return;
+    clearMealDraft(draftClientId, draftPlanId);
+    const fresh = buildInitialMealForm(initialDataRef.current);
+    setFormData(fresh);
+    setActiveMealIndex(0);
+    setShowDraftPrompt(false);
+    setPendingDraftEnvelope(null);
+    setDraftReady(true);
+    baselineRef.current = mealFormBaseline(fresh, 0);
+  };
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -414,6 +610,8 @@ export default function CreateMealPlanForm({
         const carbs = Number(field === "carbs" ? value : updatedFoods[foodIndex].carbs) || 0;
         const fat = Number(field === "fat" ? value : updatedFoods[foodIndex].fat) || 0;
         updatedFoods[foodIndex].calories = protein * 4 + carbs * 4 + fat * 9;
+      } else if (field === "foodOption") {
+        updatedFoods[foodIndex].foodOption = value === "B" ? "B" : "A";
       } else {
         updatedFoods[foodIndex][field] = value as string;
       }
@@ -590,6 +788,33 @@ export default function CreateMealPlanForm({
     <>
 
       <form onSubmit={handleSubmit} className="space-y-8">
+      {showDraftPrompt && pendingDraftEnvelope && (
+        <div
+          className="rounded-xl border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+          role="status"
+        >
+          <p className="text-sm text-secondary dark:text-alabaster">
+            You have an unsaved local draft
+            {pendingDraftEnvelope.updatedAt
+              ? ` from ${new Date(pendingDraftEnvelope.updatedAt).toLocaleString()}`
+              : ""}
+            . Restore it or start fresh from the saved plan.
+          </p>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <Button type="button" size="sm" onClick={handleRestoreDraft}>
+              Restore draft
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleStartFreshDraft}
+            >
+              Start fresh
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="space-y-6">
         <div className="bg-gradient-to-r from-gray-lightest to-white dark:from-night dark:to-secondary-light/30 p-6 rounded-xl border border-gray-light/50 dark:border-davyGray/30">
           <div className="space-y-4">

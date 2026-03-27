@@ -21,6 +21,7 @@ import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
 import NABadge from "../components/ui/NABadge";
+import { clearWorkoutDraft, flushWorkoutDraft } from "~/utils/coachDraftStorage";
 import { getCurrentDate, USER_TIMEZONE, getStartOfWeek } from "~/lib/timezone";
 import dayjs from "dayjs";
 import { useToast } from "~/context/ToastContext";
@@ -1119,6 +1120,7 @@ export default function ClientWorkouts() {
 
   // Ref to track if we've already processed a response to prevent infinite loops
   const processedResponseRef = React.useRef<string | null>(null);
+  const lastSubmittedWorkoutDraftPlanIdRef = React.useRef<string | null>(null);
 
   // Handle fetcher responses for toast notifications and modal management
   React.useEffect(() => {
@@ -1135,6 +1137,10 @@ export default function ClientWorkouts() {
       processedResponseRef.current = responseKey;
 
       if (data.success) {
+        if (client?.id) {
+          flushWorkoutDraft(client.id, lastSubmittedWorkoutDraftPlanIdRef.current);
+          void clearWorkoutDraft(client.id, lastSubmittedWorkoutDraftPlanIdRef.current);
+        }
         toast.success("Workout Plan Saved", data.message || "Your workout plan has been updated successfully.");
         setIsCreateModalOpen(false);
         setIsEditModalOpen(false);
@@ -1150,7 +1156,7 @@ export default function ClientWorkouts() {
         toast.error("Failed to Save Workout Plan", data.error);
       }
     }
-  }, [fetcher.state, fetcher.data, toast, revalidator, params.clientId]);
+  }, [fetcher.state, fetcher.data, toast, revalidator, params.clientId, client?.id]);
 
   // Reset processed response ref when a new submission starts
   React.useEffect(() => {
@@ -1319,6 +1325,7 @@ export default function ClientWorkouts() {
     week: { [day: string]: DayPlan };
   }) => {
     if (!selectedWorkout) return;
+    lastSubmittedWorkoutDraftPlanIdRef.current = selectedWorkout.id;
     const form = new FormData();
     form.append("intent", "edit");
     form.append("workoutPlanId", selectedWorkout.id);
@@ -1340,6 +1347,7 @@ export default function ClientWorkouts() {
     workoutDaysPerWeek?: number;
     week: { [day: string]: DayPlan };
   }) => {
+    lastSubmittedWorkoutDraftPlanIdRef.current = null;
     const form = new FormData();
     form.append("intent", "create");
     form.append("planName", workoutData.planName);
@@ -2419,6 +2427,8 @@ export default function ClientWorkouts() {
           onClose={() => setIsCreateModalOpen(false)}
           onSubmit={handleCreateWorkout}
           isLoading={fetcher.state !== "idle"}
+          draftClientId={client?.id ?? null}
+          draftPlanId={null}
           initialValues={{
             planName: "",
             instructions: "",
@@ -2451,6 +2461,8 @@ export default function ClientWorkouts() {
             }}
             onSubmit={handleUpdateWorkout}
             isLoading={fetcher.state !== "idle"}
+            draftClientId={client?.id ?? null}
+            draftPlanId={selectedWorkout.id}
             initialValues={{
               planName: selectedWorkout.title,
               instructions: selectedWorkout.instructions || "",

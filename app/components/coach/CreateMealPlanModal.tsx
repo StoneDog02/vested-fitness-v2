@@ -9,6 +9,8 @@ interface CreateMealPlanModalProps {
   onSave: (mealPlan: MealPlanFormData) => void;
   existingPlan?: MealPlanFormData;
   isLoading?: boolean;
+  draftClientId?: string | null;
+  draftPlanId?: string | null;
 }
 
 export default function CreateMealPlanModal({
@@ -17,6 +19,8 @@ export default function CreateMealPlanModal({
   onSave,
   existingPlan,
   isLoading = false,
+  draftClientId = null,
+  draftPlanId = null,
 }: CreateMealPlanModalProps) {
   const handleSubmit = (data: MealPlanFormData) => {
     if (!isLoading) {
@@ -37,6 +41,8 @@ export default function CreateMealPlanModal({
           onCancel={onClose}
           initialData={existingPlan}
           isLoading={isLoading}
+          draftClientId={draftClientId}
+          draftPlanId={draftPlanId}
         />
         {isLoading && (
           <div className="absolute inset-0 bg-white/80 dark:bg-night/80 flex items-center justify-center rounded-b-xl">

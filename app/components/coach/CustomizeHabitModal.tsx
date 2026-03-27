@@ -1,7 +1,18 @@
 import { Dialog } from "@headlessui/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import Button from "~/components/ui/Button";
 import { XMarkIcon } from "@heroicons/react/24/outline";
+import type {
+  CoachDraftEnvelope,
+  HabitCustomizeDraftPayload,
+} from "~/utils/coachDraftStorage";
+import {
+  clearHabitCustomizeDraft,
+  flushHabitCustomizeDraft,
+  loadHabitCustomizeDraftEnvelope,
+  saveHabitCustomizeDraftDebounced,
+  saveHabitCustomizeDraftSync,
+} from "~/utils/coachDraftStorage";
 
 export interface HabitPresetForModal {
   id: string;
@@ -18,6 +29,18 @@ const TIMES_PER_WEEK_OPTIONS = [2, 3, 4, 5, 6, 7];
 // 0=Mon, 1=Tue, ..., 6=Sun
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+function defaultsFromPreset(preset: HabitPresetForModal) {
+  return {
+    habitName: preset.name,
+    goalTarget: "",
+    cadence: "daily" as CadenceOption,
+    timesPerWeek: 3,
+    scheduleDays: [] as number[],
+    scheduleAnyDay: false,
+    notesForClient: preset.description || "",
+  };
+}
+
 interface CustomizeHabitModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -33,6 +56,8 @@ interface CustomizeHabitModalProps {
     scheduleDays: number[] | null;
   }) => void;
   isLoading?: boolean;
+  /** When set, unsaved customize state is persisted locally per client + preset. */
+  draftClientId?: string | null;
 }
 
 export default function CustomizeHabitModal({
@@ -41,6 +66,7 @@ export default function CustomizeHabitModal({
   preset,
   onAssign,
   isLoading = false,
+  draftClientId = null,
 }: CustomizeHabitModalProps) {
   const [habitName, setHabitName] = useState("");
   const [goalTarget, setGoalTarget] = useState("");
@@ -50,15 +76,40 @@ export default function CustomizeHabitModal({
   const [scheduleAnyDay, setScheduleAnyDay] = useState(false);
   const [notesForClient, setNotesForClient] = useState("");
 
+  const prevOpenRef = useRef(false);
+  const [draftReady, setDraftReady] = useState(!draftClientId);
+  const [showDraftPrompt, setShowDraftPrompt] = useState(false);
+  const [pendingDraftEnvelope, setPendingDraftEnvelope] =
+    useState<CoachDraftEnvelope<HabitCustomizeDraftPayload> | null>(null);
+  const draftReadyRef = useRef(!draftClientId);
+  const showDraftPromptRef = useRef(false);
+  const habitBaselineRef = useRef("");
+  const habitNeedsBaselineCommitRef = useRef(false);
+  const presetRef = useRef(preset);
+  presetRef.current = preset;
+  const lastHabitPresetIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (preset?.id) lastHabitPresetIdRef.current = preset.id;
+  }, [preset?.id]);
+
+  useEffect(() => {
+    draftReadyRef.current = draftReady;
+  }, [draftReady]);
+
+  useEffect(() => {
+    showDraftPromptRef.current = showDraftPrompt;
+  }, [showDraftPrompt]);
+
   useEffect(() => {
     if (preset) {
-      setHabitName(preset.name);
-      setGoalTarget("");
-      setNotesForClient(preset.description || "");
-      setCadence("daily");
-      setTimesPerWeek(3);
-      setScheduleDays([]);
-      setScheduleAnyDay(false);
+      const d = defaultsFromPreset(preset);
+      setHabitName(d.habitName);
+      setGoalTarget(d.goalTarget);
+      setCadence(d.cadence);
+      setTimesPerWeek(d.timesPerWeek);
+      setScheduleDays(d.scheduleDays);
+      setScheduleAnyDay(d.scheduleAnyDay);
+      setNotesForClient(d.notesForClient);
     }
   }, [preset]);
 
@@ -70,6 +121,154 @@ export default function CustomizeHabitModal({
       setScheduleDays(scheduleDays.slice(0, timesPerWeek));
     }
   }, [cadence, timesPerWeek]);
+
+  const payloadFromForm = (): HabitCustomizeDraftPayload => ({
+    habitName,
+    goalTarget,
+    cadence,
+    timesPerWeek,
+    scheduleDays,
+    scheduleAnyDay,
+    notesForClient,
+  });
+
+  const commitHabitBaseline = () => {
+    habitBaselineRef.current = JSON.stringify(payloadFromForm());
+  };
+
+  useLayoutEffect(() => {
+    if (!habitNeedsBaselineCommitRef.current || !isOpen) return;
+    commitHabitBaseline();
+    habitNeedsBaselineCommitRef.current = false;
+  });
+
+  const habitPresetId = preset?.id;
+
+  useEffect(() => {
+    if (!isOpen) {
+      const cid = draftClientId;
+      const pid = lastHabitPresetIdRef.current;
+      if (cid && pid) {
+        flushHabitCustomizeDraft(cid, pid);
+        if (draftReadyRef.current && !showDraftPromptRef.current) {
+          saveHabitCustomizeDraftSync(cid, pid, payloadFromForm());
+        }
+      }
+      setShowDraftPrompt(false);
+      setPendingDraftEnvelope(null);
+      setDraftReady(!draftClientId);
+      prevOpenRef.current = false;
+      return;
+    }
+
+    if (!prevOpenRef.current && preset) {
+      if (draftClientId && habitPresetId) {
+        setDraftReady(false);
+        const env = loadHabitCustomizeDraftEnvelope(draftClientId, habitPresetId);
+        if (env) {
+          setPendingDraftEnvelope(env);
+          setShowDraftPrompt(true);
+        } else {
+          setShowDraftPrompt(false);
+          setPendingDraftEnvelope(null);
+          setDraftReady(true);
+          habitNeedsBaselineCommitRef.current = true;
+        }
+        prevOpenRef.current = true;
+      } else {
+        setDraftReady(true);
+        setShowDraftPrompt(false);
+        setPendingDraftEnvelope(null);
+        habitNeedsBaselineCommitRef.current = true;
+        prevOpenRef.current = true;
+      }
+    }
+  }, [isOpen, draftClientId, habitPresetId, preset]);
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !draftClientId ||
+      !habitPresetId ||
+      !draftReady ||
+      showDraftPrompt ||
+      isLoading
+    ) {
+      return;
+    }
+    saveHabitCustomizeDraftDebounced(
+      draftClientId,
+      habitPresetId,
+      payloadFromForm()
+    );
+  }, [
+    isOpen,
+    draftClientId,
+    habitPresetId,
+    draftReady,
+    showDraftPrompt,
+    isLoading,
+    habitName,
+    goalTarget,
+    cadence,
+    timesPerWeek,
+    scheduleDays,
+    scheduleAnyDay,
+    notesForClient,
+  ]);
+
+  const isDirty =
+    !!draftClientId &&
+    !!habitPresetId &&
+    draftReady &&
+    JSON.stringify(payloadFromForm()) !== habitBaselineRef.current;
+
+  useEffect(() => {
+    if (!draftClientId) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isLoading) return;
+      if (showDraftPrompt || isDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [draftClientId, isLoading, showDraftPrompt, isDirty]);
+
+  const handleRestoreDraft = () => {
+    if (!pendingDraftEnvelope) return;
+    const p = pendingDraftEnvelope.payload;
+    setHabitName(p.habitName);
+    setGoalTarget(p.goalTarget);
+    setCadence(p.cadence as CadenceOption);
+    setTimesPerWeek(p.timesPerWeek);
+    setScheduleDays(p.scheduleDays ?? []);
+    setScheduleAnyDay(p.scheduleAnyDay);
+    setNotesForClient(p.notesForClient ?? "");
+    setShowDraftPrompt(false);
+    setPendingDraftEnvelope(null);
+    setDraftReady(true);
+    habitNeedsBaselineCommitRef.current = true;
+  };
+
+  const handleStartFreshDraft = () => {
+    const p = presetRef.current;
+    if (!draftClientId || !habitPresetId || !p) return;
+    clearHabitCustomizeDraft(draftClientId, habitPresetId);
+    const d = defaultsFromPreset(p);
+    setHabitName(d.habitName);
+    setGoalTarget(d.goalTarget);
+    setCadence(d.cadence);
+    setTimesPerWeek(d.timesPerWeek);
+    setScheduleDays(d.scheduleDays);
+    setScheduleAnyDay(d.scheduleAnyDay);
+    setNotesForClient(d.notesForClient);
+    setShowDraftPrompt(false);
+    setPendingDraftEnvelope(null);
+    setDraftReady(true);
+    habitNeedsBaselineCommitRef.current = true;
+  };
 
   const toggleDay = (dayIndex: number) => {
     if (cadence === "weekly") {
@@ -153,6 +352,33 @@ export default function CustomizeHabitModal({
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {showDraftPrompt && pendingDraftEnvelope && (
+              <div
+                className="rounded-lg border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-3 flex flex-col gap-2"
+                role="status"
+              >
+                <p className="text-sm text-secondary dark:text-alabaster">
+                  You have an unsaved local draft
+                  {pendingDraftEnvelope.updatedAt
+                    ? ` from ${new Date(pendingDraftEnvelope.updatedAt).toLocaleString()}`
+                    : ""}
+                  .
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" onClick={handleRestoreDraft}>
+                    Restore draft
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleStartFreshDraft}
+                  >
+                    Start fresh
+                  </Button>
+                </div>
+              </div>
+            )}
             <section>
               <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
                 Details

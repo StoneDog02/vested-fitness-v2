@@ -21,6 +21,7 @@ import NABadge from "../components/ui/NABadge";
 import ActivationDateModal from "~/components/coach/ActivationDateModal";
 import { extractAuthFromCookie, validateAndRefreshToken } from "~/lib/supabase";
 import { useToast } from "~/context/ToastContext";
+import { clearMealDraft, flushMealDraft } from "~/utils/coachDraftStorage";
 
 // Helper function to truncate meal plan descriptions
 const truncateDescription = (description: string, maxLength: number = 50) => {
@@ -1145,6 +1146,7 @@ export default function ClientMeals() {
 
   // Ref to track if we've already processed a response to prevent infinite loops
   const processedResponseRef = React.useRef<string | null>(null);
+  const mealDraftPlanIdRef = React.useRef<string | null>(null);
 
   // Handle fetcher responses for toast notifications and modal management
   React.useEffect(() => {
@@ -1168,6 +1170,11 @@ export default function ClientMeals() {
           ? "Your meal plan has been updated successfully." 
           : "Your meal plan has been created successfully.");
         
+        if (client?.id) {
+          flushMealDraft(client.id, mealDraftPlanIdRef.current);
+          clearMealDraft(client.id, mealDraftPlanIdRef.current);
+        }
+
         // Close modal and clear selection
         setIsCreateModalOpen(false);
         setSelectedPlan(null);
@@ -1187,7 +1194,7 @@ export default function ClientMeals() {
         toast.error("Failed to Save Meal Plan", data.error);
       }
     }
-  }, [fetcher.state, fetcher.data, toast, revalidator, params.clientId]);
+  }, [fetcher.state, fetcher.data, toast, revalidator, params.clientId, client?.id]);
 
   // Reset processed response ref when a new submission starts
   React.useEffect(() => {
@@ -1216,6 +1223,12 @@ export default function ClientMeals() {
   const [selectedPlan, setSelectedPlan] = React.useState<MealPlanType | null>(
     null
   );
+
+  React.useEffect(() => {
+    if (isCreateModalOpen && client?.id) {
+      mealDraftPlanIdRef.current = selectedPlan?.id ?? null;
+    }
+  }, [isCreateModalOpen, selectedPlan?.id, client?.id]);
 
   const handleSetActive = (plan: MealPlanType) => {
     setPlanToActivate(plan);
@@ -2039,6 +2052,8 @@ export default function ClientMeals() {
         {/* Placeholder modals */}
         <CreateMealPlanModal
           isOpen={isCreateModalOpen}
+          draftClientId={client?.id ?? null}
+          draftPlanId={selectedPlan?.id ?? null}
           existingPlan={
             selectedPlan
               ? {

@@ -15,6 +15,7 @@ import {
 import NABadge from "../components/ui/NABadge";
 import { getCurrentDate, USER_TIMEZONE, getStartOfWeek } from "~/lib/timezone";
 import dayjs from "dayjs";
+import { clearSupplementDraft, flushSupplementDraft } from "~/utils/coachDraftStorage";
 
 interface Supplement {
   id: string;
@@ -367,6 +368,7 @@ export default function ClientSupplements() {
 
   // Track if we've already processed the current fetcher data
   const processedFetcherData = useRef<any>(null);
+  const lastSubmittedSupplementDraftIdRef = useRef<string | null>(null);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingSupplement, setEditingSupplement] = useState<Supplement | null>(
@@ -515,13 +517,17 @@ export default function ClientSupplements() {
         }, 200);
       } else {
         // For add/edit operations, proceed normally
+        if (client?.id) {
+          flushSupplementDraft(client.id, lastSubmittedSupplementDraftIdRef.current);
+          clearSupplementDraft(client.id, lastSubmittedSupplementDraftIdRef.current);
+        }
         revalidator.revalidate();
         
         setIsAddModalOpen(false);
         setEditingSupplement(null);
       }
     }
-  }, [fetcher.state, fetcher.data, revalidator, clientId]);
+  }, [fetcher.state, fetcher.data, revalidator, clientId, client?.id]);
 
   return (
     <ClientDetailLayout>
@@ -782,7 +788,10 @@ export default function ClientSupplements() {
         <AddSupplementModal
           isOpen={isAddModalOpen}
           onClose={handleModalClose}
+          draftClientId={client?.id ?? null}
+          draftSupplementId={editingSupplement?.id ?? null}
           onAdd={(fields) => {
+            lastSubmittedSupplementDraftIdRef.current = editingSupplement?.id ?? null;
             // Use fetcher.Form for add/edit
             const form = new FormData();
             if (editingSupplement) {

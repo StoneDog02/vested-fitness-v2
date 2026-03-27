@@ -13,7 +13,19 @@ import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import CustomizeHabitModal from "~/components/coach/CustomizeHabitModal";
 import Card from "~/components/ui/Card";
 import Button from "~/components/ui/Button";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
+import type {
+  CoachDraftEnvelope,
+  HabitPresetCreateDraftPayload,
+} from "~/utils/coachDraftStorage";
+import {
+  clearHabitCustomizeDraft,
+  clearHabitPresetCreateDraft,
+  flushHabitPresetCreateDraft,
+  loadHabitPresetCreateDraftEnvelope,
+  saveHabitPresetCreateDraftDebounced,
+  saveHabitPresetCreateDraftSync,
+} from "~/utils/coachDraftStorage";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -214,6 +226,17 @@ export default function ClientHabits() {
   const [noteContent, setNoteContent] = useState("");
   const [noteHabitId, setNoteHabitId] = useState<string>("");
 
+  const [createDraftReady, setCreateDraftReady] = useState(false);
+  const [showCreateDraftPrompt, setShowCreateDraftPrompt] = useState(false);
+  const [pendingCreateDraftEnvelope, setPendingCreateDraftEnvelope] =
+    useState<CoachDraftEnvelope<HabitPresetCreateDraftPayload> | null>(null);
+  const createDraftReadyRef = useRef(false);
+  const showCreateDraftPromptRef = useRef(false);
+  const createFormRef = useRef({ name: "", description: "" });
+  const createPresetBaselineRef = useRef("");
+  const createPresetNeedsBaselineCommitRef = useRef(false);
+  const lastSubmittedAssignPresetIdRef = useRef<string | null>(null);
+
   const fetcherCreatePreset = useFetcher();
   const fetcherAssign = useFetcher();
   const fetcherUnassign = useFetcher();
@@ -238,6 +261,122 @@ export default function ClientHabits() {
     setPresetPage(1);
   }, [searchLibrary]);
 
+  createFormRef.current = { name: createName, description: createDescription };
+
+  useEffect(() => {
+    createDraftReadyRef.current = createDraftReady;
+  }, [createDraftReady]);
+
+  useEffect(() => {
+    showCreateDraftPromptRef.current = showCreateDraftPrompt;
+  }, [showCreateDraftPrompt]);
+
+  useEffect(() => {
+    if (!client?.id) return;
+    setCreateName("");
+    setCreateDescription("");
+    setCreateDraftReady(false);
+    const env = loadHabitPresetCreateDraftEnvelope(client.id);
+    if (env) {
+      setPendingCreateDraftEnvelope(env);
+      setShowCreateDraftPrompt(true);
+    } else {
+      setPendingCreateDraftEnvelope(null);
+      setShowCreateDraftPrompt(false);
+      setCreateDraftReady(true);
+      createPresetNeedsBaselineCommitRef.current = true;
+    }
+  }, [client?.id]);
+
+  useLayoutEffect(() => {
+    if (!createPresetNeedsBaselineCommitRef.current || !client?.id) return;
+    createPresetBaselineRef.current = JSON.stringify({
+      name: createName,
+      description: createDescription,
+    });
+    createPresetNeedsBaselineCommitRef.current = false;
+  });
+
+  useEffect(() => {
+    if (!client?.id) return;
+    const cid = client.id;
+    return () => {
+      flushHabitPresetCreateDraft(cid);
+      if (createDraftReadyRef.current && !showCreateDraftPromptRef.current) {
+        const { name, description } = createFormRef.current;
+        saveHabitPresetCreateDraftSync(cid, { name, description });
+      }
+    };
+  }, [client?.id]);
+
+  useEffect(() => {
+    if (
+      !client?.id ||
+      !createDraftReady ||
+      showCreateDraftPrompt ||
+      fetcherCreatePreset.state !== "idle"
+    ) {
+      return;
+    }
+    saveHabitPresetCreateDraftDebounced(client.id, {
+      name: createName,
+      description: createDescription,
+    });
+  }, [
+    client?.id,
+    createDraftReady,
+    showCreateDraftPrompt,
+    fetcherCreatePreset.state,
+    createName,
+    createDescription,
+  ]);
+
+  const createFormDirty =
+    !!client?.id &&
+    createDraftReady &&
+    JSON.stringify({ name: createName, description: createDescription }) !==
+      createPresetBaselineRef.current;
+
+  useEffect(() => {
+    if (!client?.id) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (fetcherCreatePreset.state !== "idle") return;
+      if (showCreateDraftPrompt || createFormDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [
+    client?.id,
+    fetcherCreatePreset.state,
+    showCreateDraftPrompt,
+    createFormDirty,
+  ]);
+
+  const handleRestoreCreateDraft = () => {
+    if (!pendingCreateDraftEnvelope || !client?.id) return;
+    const p = pendingCreateDraftEnvelope.payload;
+    setCreateName(p.name || "");
+    setCreateDescription(p.description || "");
+    setShowCreateDraftPrompt(false);
+    setPendingCreateDraftEnvelope(null);
+    setCreateDraftReady(true);
+    createPresetNeedsBaselineCommitRef.current = true;
+  };
+
+  const handleStartFreshCreateDraft = () => {
+    if (!client?.id) return;
+    clearHabitPresetCreateDraft(client.id);
+    setCreateName("");
+    setCreateDescription("");
+    setShowCreateDraftPrompt(false);
+    setPendingCreateDraftEnvelope(null);
+    setCreateDraftReady(true);
+    createPresetNeedsBaselineCommitRef.current = true;
+  };
+
   const handleCreateHabit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!createName.trim() || fetcherCreatePreset.state !== "idle") return;
@@ -245,8 +384,6 @@ export default function ClientHabits() {
       { name: createName.trim(), description: createDescription.trim() },
       { method: "post", action: "/api/create-habit-preset", encType: "application/json" }
     );
-    setCreateName("");
-    setCreateDescription("");
   };
 
   const handleAssignFromModal = (payload: {
@@ -260,6 +397,7 @@ export default function ClientHabits() {
     scheduleDays: number[] | null;
   }) => {
     if (!client?.id || fetcherAssign.state !== "idle") return;
+    lastSubmittedAssignPresetIdRef.current = payload.habitPresetId;
     fetcherAssign.submit(
       {
         clientId: client.id,
@@ -306,6 +444,11 @@ export default function ClientHabits() {
     let didRevalidate = false;
     if (assignDone?.assigned && revalidatedRef.current.assign !== assignDone) {
       revalidatedRef.current.assign = assignDone;
+      const pid = lastSubmittedAssignPresetIdRef.current;
+      if (client?.id && pid) {
+        clearHabitCustomizeDraft(client.id, pid);
+        lastSubmittedAssignPresetIdRef.current = null;
+      }
       didRevalidate = true;
     }
     if (unassignDone?.success && revalidatedRef.current.unassign !== unassignDone) {
@@ -314,6 +457,12 @@ export default function ClientHabits() {
     }
     if (createDone?.preset && revalidatedRef.current.create !== createDone) {
       revalidatedRef.current.create = createDone;
+      if (client?.id) {
+        clearHabitPresetCreateDraft(client.id);
+        setCreateName("");
+        setCreateDescription("");
+        createPresetNeedsBaselineCommitRef.current = true;
+      }
       didRevalidate = true;
     }
     if (noteDone?.note && revalidatedRef.current.note !== noteDone) {
@@ -321,7 +470,7 @@ export default function ClientHabits() {
       didRevalidate = true;
     }
     if (didRevalidate) revalidator.revalidate();
-  }, [assignDone, unassignDone, createDone, noteDone, revalidator]);
+  }, [assignDone, unassignDone, createDone, noteDone, revalidator, client?.id]);
 
   const apiError = assignDone?.error || unassignDone?.error || createDone?.error || noteDone?.error;
 
@@ -353,6 +502,7 @@ export default function ClientHabits() {
         preset={customizePreset}
         onAssign={handleAssignFromModal}
         isLoading={fetcherAssign.state !== "idle"}
+        draftClientId={client.id}
       />
       <div className="p-6 space-y-6">
         {apiError && (
@@ -451,6 +601,33 @@ export default function ClientHabits() {
                 Add a new preset to your library. Presets can be customized and assigned to the client.
               </p>
               <form onSubmit={handleCreateHabit} className="space-y-4">
+                {showCreateDraftPrompt && pendingCreateDraftEnvelope && (
+                  <div
+                    className="rounded-lg border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-3 flex flex-col gap-2"
+                    role="status"
+                  >
+                    <p className="text-sm text-secondary dark:text-alabaster">
+                      You have an unsaved local draft for this new habit
+                      {pendingCreateDraftEnvelope.updatedAt
+                        ? ` from ${new Date(pendingCreateDraftEnvelope.updatedAt).toLocaleString()}`
+                        : ""}
+                      .
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" size="sm" onClick={handleRestoreCreateDraft}>
+                        Restore draft
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleStartFreshCreateDraft}
+                      >
+                        Start fresh
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label htmlFor="coach-create-habit-name" className="block text-sm font-medium text-secondary dark:text-alabaster mb-1">Habit name</label>
                   <input

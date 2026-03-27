@@ -1,6 +1,14 @@
 import { Dialog } from "@headlessui/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import Button from "~/components/ui/Button";
+import type { CoachDraftEnvelope, SupplementDraftPayload } from "~/utils/coachDraftStorage";
+import {
+  clearSupplementDraft,
+  flushSupplementDraft,
+  loadSupplementDraftEnvelope,
+  saveSupplementDraftDebounced,
+  saveSupplementDraftSync,
+} from "~/utils/coachDraftStorage";
 
 interface AddSupplementModalProps {
   isOpen: boolean;
@@ -20,6 +28,30 @@ interface AddSupplementModalProps {
     active_from?: string;
   } | null;
   isLoading?: boolean;
+  draftClientId?: string | null;
+  /** `null` when adding a new supplement (draft key uses "new"). */
+  draftSupplementId?: string | null;
+}
+
+function formFromEditing(
+  editing: AddSupplementModalProps["editingSupplement"]
+) {
+  if (editing) {
+    return {
+      name: editing.name,
+      dosage: editing.dosage,
+      frequency: editing.frequency,
+      instructions: editing.instructions || "",
+      active_from: editing.active_from || "",
+    };
+  }
+  return {
+    name: "",
+    dosage: "",
+    frequency: "",
+    instructions: "",
+    active_from: "",
+  };
 }
 
 export default function AddSupplementModal({
@@ -28,35 +60,163 @@ export default function AddSupplementModal({
   onAdd,
   editingSupplement,
   isLoading = false,
+  draftClientId = null,
+  draftSupplementId = null,
 }: AddSupplementModalProps) {
-  const [formData, setFormData] = useState({
-    name: "",
-    dosage: "",
-    frequency: "",
-    instructions: "",
-    active_from: "",
+  const [formData, setFormData] = useState(() => formFromEditing(editingSupplement));
+  const prevOpenRef = useRef(false);
+  const [draftReady, setDraftReady] = useState(!draftClientId);
+  const [showDraftPrompt, setShowDraftPrompt] = useState(false);
+  const [pendingDraftEnvelope, setPendingDraftEnvelope] =
+    useState<CoachDraftEnvelope<SupplementDraftPayload> | null>(null);
+  const draftReadyRef = useRef(!draftClientId);
+  const showDraftPromptRef = useRef(false);
+  const supplementBaselineRef = useRef("");
+  const supplementNeedsBaselineCommitRef = useRef(false);
+  const editingRef = useRef(editingSupplement);
+  editingRef.current = editingSupplement;
+
+  useEffect(() => {
+    draftReadyRef.current = draftReady;
+  }, [draftReady]);
+
+  useEffect(() => {
+    showDraftPromptRef.current = showDraftPrompt;
+  }, [showDraftPrompt]);
+
+  useEffect(() => {
+    setFormData(formFromEditing(editingSupplement));
+  }, [editingSupplement]);
+
+  const payloadFromForm = (): SupplementDraftPayload => ({
+    name: formData.name,
+    dosage: formData.dosage,
+    frequency: formData.frequency,
+    instructions: formData.instructions,
+    active_from: formData.active_from,
   });
 
-  // Update form data when editing a supplement
+  const commitSupplementBaseline = () => {
+    supplementBaselineRef.current = JSON.stringify(payloadFromForm());
+  };
+
+  useLayoutEffect(() => {
+    if (!supplementNeedsBaselineCommitRef.current || !isOpen) return;
+    commitSupplementBaseline();
+    supplementNeedsBaselineCommitRef.current = false;
+  });
+
   useEffect(() => {
-    if (editingSupplement) {
-      setFormData({
-        name: editingSupplement.name,
-        dosage: editingSupplement.dosage,
-        frequency: editingSupplement.frequency,
-        instructions: editingSupplement.instructions || "",
-        active_from: editingSupplement.active_from || "",
-      });
-    } else {
-      setFormData({
-        name: "",
-        dosage: "",
-        frequency: "",
-        instructions: "",
-        active_from: "",
-      });
+    if (!isOpen) {
+      const cid = draftClientId;
+      const sid = draftSupplementId;
+      if (cid) {
+        flushSupplementDraft(cid, sid);
+        if (draftReadyRef.current && !showDraftPromptRef.current) {
+          saveSupplementDraftSync(cid, sid, payloadFromForm());
+        }
+      }
+      setShowDraftPrompt(false);
+      setPendingDraftEnvelope(null);
+      setDraftReady(!draftClientId);
+      prevOpenRef.current = false;
+      return;
     }
-  }, [editingSupplement]);
+
+    if (!prevOpenRef.current) {
+      if (draftClientId) {
+        setDraftReady(false);
+        const env = loadSupplementDraftEnvelope(draftClientId, draftSupplementId);
+        if (env) {
+          setPendingDraftEnvelope(env);
+          setShowDraftPrompt(true);
+        } else {
+          setShowDraftPrompt(false);
+          setPendingDraftEnvelope(null);
+          setDraftReady(true);
+          supplementNeedsBaselineCommitRef.current = true;
+        }
+        prevOpenRef.current = true;
+      } else {
+        setDraftReady(true);
+        setShowDraftPrompt(false);
+        setPendingDraftEnvelope(null);
+        supplementNeedsBaselineCommitRef.current = true;
+        prevOpenRef.current = true;
+      }
+    }
+  }, [isOpen, draftClientId, draftSupplementId]);
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !draftClientId ||
+      !draftReady ||
+      showDraftPrompt ||
+      isLoading
+    ) {
+      return;
+    }
+    saveSupplementDraftDebounced(
+      draftClientId,
+      draftSupplementId,
+      payloadFromForm()
+    );
+  }, [
+    isOpen,
+    draftClientId,
+    draftSupplementId,
+    draftReady,
+    showDraftPrompt,
+    isLoading,
+    formData,
+  ]);
+
+  const isDirty =
+    !!draftClientId &&
+    draftReady &&
+    JSON.stringify(payloadFromForm()) !== supplementBaselineRef.current;
+
+  useEffect(() => {
+    if (!draftClientId) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isLoading) return;
+      if (showDraftPrompt || isDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [draftClientId, isLoading, showDraftPrompt, isDirty]);
+
+  const handleRestoreDraft = () => {
+    if (!pendingDraftEnvelope) return;
+    const p = pendingDraftEnvelope.payload;
+    const next = {
+      name: p.name,
+      dosage: p.dosage,
+      frequency: p.frequency,
+      instructions: p.instructions || "",
+      active_from: p.active_from || "",
+    };
+    setFormData(next);
+    setShowDraftPrompt(false);
+    setPendingDraftEnvelope(null);
+    setDraftReady(true);
+    supplementNeedsBaselineCommitRef.current = true;
+  };
+
+  const handleStartFreshDraft = () => {
+    if (!draftClientId) return;
+    clearSupplementDraft(draftClientId, draftSupplementId);
+    const fresh = formFromEditing(editingRef.current);
+    setFormData(fresh);
+    setShowDraftPrompt(false);
+    setPendingDraftEnvelope(null);
+    setDraftReady(true);
+    supplementNeedsBaselineCommitRef.current = true;
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,6 +255,33 @@ export default function AddSupplementModal({
           </Dialog.Title>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {showDraftPrompt && pendingDraftEnvelope && (
+              <div
+                className="rounded-lg border border-amber-200 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-3 flex flex-col gap-2"
+                role="status"
+              >
+                <p className="text-sm text-secondary dark:text-alabaster">
+                  You have an unsaved local draft
+                  {pendingDraftEnvelope.updatedAt
+                    ? ` from ${new Date(pendingDraftEnvelope.updatedAt).toLocaleString()}`
+                    : ""}
+                  .
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" onClick={handleRestoreDraft}>
+                    Restore draft
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleStartFreshDraft}
+                  >
+                    Start fresh
+                  </Button>
+                </div>
+              </div>
+            )}
             <div>
               <label
                 htmlFor="name"
