@@ -9,16 +9,29 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+export type WeightChartPoint = {
+  date: string;
+  weight: number;
+  id?: string;
+};
+
 interface LineChartProps {
-  data: { date: string; weight: number }[];
+  data: WeightChartPoint[];
   height?: number;
   children?: React.ReactNode;
+  /** When set, data points with `id` become clickable (e.g. client editing a log). */
+  onDataPointClick?: (entry: {
+    id: string;
+    date: string;
+    weight: number;
+  }) => void;
 }
 
 const LineChart: React.FC<LineChartProps> = ({
   data,
   height = 200,
   children,
+  onDataPointClick,
 }) => {
   if (!data || data.length === 0) {
     return <div className="text-gray-400">No data to display.</div>;
@@ -60,12 +73,66 @@ const LineChart: React.FC<LineChartProps> = ({
           dataKey="weight"
           stroke="#00CC03"
           strokeWidth={2}
-          dot={{
-            fill: "#00CC03",
-            stroke: "#00CC03",
-            strokeWidth: 2,
-            r: 4
-          }}
+          dot={
+            onDataPointClick
+              ? (props: {
+                  cx?: number;
+                  cy?: number;
+                  payload?: WeightChartPoint;
+                }) => {
+                  const { cx, cy, payload } = props;
+                  if (cx == null || cy == null || !payload?.id) {
+                    return (
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={4}
+                        fill="#00CC03"
+                        stroke="#00CC03"
+                        strokeWidth={2}
+                      />
+                    );
+                  }
+                  const handleActivate = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    onDataPointClick({
+                      id: payload.id!,
+                      date: payload.date,
+                      weight: payload.weight,
+                    });
+                  };
+                  // Large invisible target (~48px) for tap/click; visible dot stays small.
+                  const hitR = 24;
+                  const dotR = 5;
+                  return (
+                    <g className="cursor-pointer touch-manipulation">
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={hitR}
+                        fill="transparent"
+                        pointerEvents="all"
+                        onClick={handleActivate}
+                      />
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={dotR}
+                        fill="#00CC03"
+                        stroke="#00CC03"
+                        strokeWidth={2}
+                        pointerEvents="none"
+                      />
+                    </g>
+                  );
+                }
+              : {
+                  fill: "#00CC03",
+                  stroke: "#00CC03",
+                  strokeWidth: 2,
+                  r: 4,
+                }
+          }
         />
         {children}
       </RechartsLineChart>

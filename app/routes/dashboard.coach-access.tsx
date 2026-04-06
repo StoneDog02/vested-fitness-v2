@@ -16,6 +16,7 @@ import TakeProgressPhotoModal from "~/components/coach/TakeProgressPhotoModal";
 import ProgressPhotosModal from "~/components/coach/ProgressPhotosModal";
 import CheckInFormResponse from "~/components/client/CheckInFormResponse";
 import LineChart from "~/components/ui/LineChart";
+import Modal from "~/components/ui/Modal";
 import { ResponsiveContainer } from "recharts";
 import dayjs from "dayjs";
 import { getCurrentDate } from "~/lib/timezone";
@@ -313,6 +314,14 @@ export default function CoachAccess() {
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [newWeight, setNewWeight] = useState("");
   const [weightLogs, setWeightLogs] = useState(initialWeightLogs);
+  const [weightEditPrompt, setWeightEditPrompt] = useState<{
+    id: string;
+    weight: number;
+    logged_at: string;
+  } | null>(null);
+  const [editingWeightLogId, setEditingWeightLogId] = useState<string | null>(
+    null
+  );
   const [showMediaPlayer, setShowMediaPlayer] = useState(false);
   const [currentMedia, setCurrentMedia] = useState<{
     videoUrl?: string;
@@ -587,10 +596,13 @@ useEffect(() => {
   // Prepare chart data from live weight logs
   const hasWeightLogs = weightLogs && weightLogs.length > 0;
   const chartData = hasWeightLogs
-    ? weightLogs.map((w: { logged_at: string; weight: string | number }) => ({
-        date: w.logged_at,
-        weight: Number(w.weight),
-      }))
+    ? weightLogs.map(
+        (w: { id: string; logged_at: string; weight: string | number }) => ({
+          id: w.id,
+          date: w.logged_at,
+          weight: Number(w.weight),
+        })
+      )
     : [];
   const startWeight = hasWeightLogs ? chartData[0].weight : 0;
   const currentWeight = hasWeightLogs ? chartData[chartData.length - 1].weight : 0;
@@ -872,7 +884,11 @@ useEffect(() => {
               {showAddWeight ? (
                 <div className="flex flex-col items-center gap-4 bg-gray-50 dark:bg-night rounded-xl p-6 shadow-md w-full max-w-xs mx-auto mt-12">
                   <label htmlFor="add-weight" className="block text-sm font-medium text-secondary dark:text-alabaster mb-1">
-                    {hasWeightLogs ? "Add Weight" : "Set Your Starting Weight"}
+                    {editingWeightLogId
+                      ? "Edit Weight"
+                      : hasWeightLogs
+                        ? "Add Weight"
+                        : "Set Your Starting Weight"}
                   </label>
                   <input
                     id="add-weight"
@@ -883,8 +899,12 @@ useEffect(() => {
                     className="w-full px-3 py-2 border border-gray-light dark:border-davyGray rounded-md bg-white dark:bg-night text-secondary dark:text-alabaster text-center text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
                     ref={weightInputRef}
                   />
-                  <span className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    {hasWeightLogs ? "Log your new weight for today." : "This will be your baseline for progress tracking."}
+                  <span className="text-xs text-gray-500 dark:text-gray-400 mb-2 text-center px-1">
+                    {editingWeightLogId
+                      ? "Update the weight for this day. The date of the entry stays the same."
+                      : hasWeightLogs
+                        ? "Log your new weight for today."
+                        : "This will be your baseline for progress tracking."}
                   </span>
                   <div className="flex gap-2 w-full">
                     <Button
@@ -892,11 +912,39 @@ useEffect(() => {
                       className="flex-1"
                       onClick={async () => {
                         if (!newWeight) return;
-                        await fetch("/api/set-starting-weight", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ weight: newWeight }),
-                        });
+                        const parsed = parseFloat(newWeight);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                          toast.error("Invalid weight", "Enter a positive number.");
+                          return;
+                        }
+                        if (editingWeightLogId) {
+                          const res = await fetch("/api/update-weight-log", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              id: editingWeightLogId,
+                              weight: parsed,
+                            }),
+                          });
+                          if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            toast.error(
+                              "Could not update",
+                              typeof err.error === "string"
+                                ? err.error
+                                : "Something went wrong."
+                            );
+                            return;
+                          }
+                          toast.success("Weight updated", "Your log has been corrected.");
+                          setEditingWeightLogId(null);
+                        } else {
+                          await fetch("/api/set-starting-weight", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ weight: newWeight }),
+                          });
+                        }
                         setShowAddWeight(false);
                         setNewWeight("");
                         await fetchWeightLogs();
@@ -907,7 +955,11 @@ useEffect(() => {
                     <Button
                       variant="outline"
                       className="flex-1"
-                      onClick={() => setShowAddWeight(false)}
+                      onClick={() => {
+                        setShowAddWeight(false);
+                        setNewWeight("");
+                        setEditingWeightLogId(null);
+                      }}
                     >
                       Cancel
                     </Button>
@@ -915,7 +967,21 @@ useEffect(() => {
                 </div>
               ) : hasWeightLogs ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} />
+                  <LineChart
+                    data={chartData}
+                    onDataPointClick={(entry) => {
+                      const log = weightLogs.find(
+                        (w: { id: string }) => w.id === entry.id
+                      );
+                      if (log) {
+                        setWeightEditPrompt({
+                          id: log.id,
+                          weight: Number(log.weight),
+                          logged_at: log.logged_at,
+                        });
+                      }
+                    }}
+                  />
                 </ResponsiveContainer>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full">
@@ -950,8 +1016,18 @@ useEffect(() => {
             </div>
             {/* Add Weight button below the graph, centered */}
             {hasWeightLogs && !showAddWeight && (
-              <div className="flex justify-center mt-4">
-                <Button variant="primary" onClick={() => setShowAddWeight(true)}>
+              <div className="flex flex-col items-center gap-2 mt-4">
+                <p className="text-xs text-gray-500 dark:text-gray-400 text-center px-2">
+                  Tap a point on the chart to correct a mistaken entry.
+                </p>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setEditingWeightLogId(null);
+                    setNewWeight("");
+                    setShowAddWeight(true);
+                  }}
+                >
                   Add Weight
                 </Button>
               </div>
@@ -980,6 +1056,46 @@ useEffect(() => {
           // Photo deletion is handled within the modal
         }}
       />
+
+      <Modal
+        isOpen={!!weightEditPrompt}
+        onClose={() => setWeightEditPrompt(null)}
+        title="Edit weight?"
+        size="sm"
+      >
+        {weightEditPrompt && (
+          <div className="space-y-4">
+            <p className="text-sm text-secondary dark:text-alabaster">
+              {new Date(weightEditPrompt.logged_at).toLocaleDateString()} —{" "}
+              <span className="font-semibold">
+                {weightEditPrompt.weight} lbs
+              </span>
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              You can change the weight for this day without adding a new entry.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setWeightEditPrompt(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setEditingWeightLogId(weightEditPrompt.id);
+                  setNewWeight(String(weightEditPrompt.weight));
+                  setWeightEditPrompt(null);
+                  setShowAddWeight(true);
+                }}
+              >
+                Edit
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Check-In Form Response Modal */}
       {currentFormInstance && (
