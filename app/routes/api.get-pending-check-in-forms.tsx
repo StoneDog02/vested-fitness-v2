@@ -73,6 +73,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         sent_at,
         expires_at,
         status,
+        title,
+        description,
         check_in_forms!inner (
           id,
           title,
@@ -97,7 +99,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // Transform the data to match the expected format
     const forms = validInstances.map(instance => {
-      
+      const masterForm = instance.check_in_forms as { title?: string; description?: string };
       return {
         id: instance.id,
         form_id: instance.form_id,
@@ -105,16 +107,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
         expires_at: instance.expires_at,
         status: instance.status,
         form: {
-          title: (instance.check_in_forms as { title?: string; description?: string })?.title || 'Untitled Form',
-          description: (instance.check_in_forms as { title?: string; description?: string })?.description,
+          title: instance.title || masterForm?.title || 'Untitled Form',
+          description: instance.description ?? masterForm?.description,
         },
       };
     });
 
-    // Fetch questions for each form
+    // Fetch questions for each form (instance snapshot first, fallback to master)
     const formsWithQuestions = await Promise.all(
       forms.map(async (form) => {
-        const { data: questions, error: questionsError } = await supabase
+        const { data: instanceQuestions, error: instanceQuestionsError } = await supabase
+          .from("check_in_form_instance_questions")
+          .select(`
+            id,
+            question_text,
+            question_type,
+            is_required,
+            options,
+            order_index
+          `)
+          .eq("instance_id", form.id)
+          .order("order_index");
+
+        if (instanceQuestionsError) {
+          console.error("Error fetching instance questions:", form.id, instanceQuestionsError);
+        }
+
+        if (instanceQuestions && instanceQuestions.length > 0) {
+          return { ...form, questions: instanceQuestions };
+        }
+
+        const { data: masterQuestions, error: masterQuestionsError } = await supabase
           .from("check_in_form_questions")
           .select(`
             id,
@@ -127,14 +150,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
           .eq("form_id", form.form_id)
           .order("order_index");
 
-        if (questionsError) {
-          console.error("Error fetching questions for form:", form.form_id, questionsError);
+        if (masterQuestionsError) {
+          console.error("Error fetching master questions for form:", form.form_id, masterQuestionsError);
           return { ...form, questions: [] };
         }
 
         return {
           ...form,
-          questions: questions || [],
+          questions: masterQuestions || [],
         };
       })
     );

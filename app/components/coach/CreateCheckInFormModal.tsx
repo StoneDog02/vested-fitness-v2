@@ -24,7 +24,8 @@ interface CreateCheckInFormModalProps {
   onClose: () => void;
   onSubmit: (formData: FormTemplate) => Promise<void> | void;
   initialForm?: FormTemplate | null;
-  mode?: "create" | "edit";
+  mode?: "create" | "edit" | "send";
+  clientName?: string;
 }
 
 export default function CreateCheckInFormModal({
@@ -33,6 +34,7 @@ export default function CreateCheckInFormModal({
   onSubmit,
   initialForm = null,
   mode = "create",
+  clientName,
 }: CreateCheckInFormModalProps) {
   const [title, setTitle] = useState(initialForm?.title ?? "");
   const [description, setDescription] = useState(initialForm?.description ?? "");
@@ -155,10 +157,24 @@ export default function CreateCheckInFormModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={mode === "edit" ? "Edit Check-In Form" : "Create Check-In Form"}
+      title={
+        mode === "send"
+          ? `Review Form for ${clientName || "Client"}`
+          : mode === "edit"
+          ? "Edit Check-In Form"
+          : "Create Check-In Form"
+      }
       size="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-6">
+        {mode === "send" && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <p className="text-sm text-blue-700 dark:text-blue-300">
+              Changes here apply only to this send. Your saved template will not be modified.
+            </p>
+          </div>
+        )}
+
         {/* Form Details */}
         <div className="space-y-4">
           <div>
@@ -337,9 +353,13 @@ export default function CreateCheckInFormModal({
             disabled={!title.trim() || isSubmitting}
           >
             {isSubmitting
-              ? mode === "edit"
+              ? mode === "send"
+                ? "Sending..."
+                : mode === "edit"
                 ? "Saving..."
                 : "Creating..."
+              : mode === "send"
+              ? `Send to ${clientName || "Client"}`
               : mode === "edit"
               ? "Save Changes"
               : "Create Form"}

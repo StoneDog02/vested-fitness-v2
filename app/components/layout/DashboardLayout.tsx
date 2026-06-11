@@ -52,12 +52,20 @@ export default function DashboardLayout({
   useEffect(() => {
     let ignore = false;
     async function fetchUnread() {
-      if (userRole !== "client" || !user?.id) return;
+      if (!user?.id) return;
       try {
-        const response = await fetch("/api/chat-unread-count");
+        const url =
+          userRole === "client"
+            ? `/api/chat-unread-count?clientId=${user.id}`
+            : "/api/chat-conversations";
+        const response = await fetch(url);
         if (!ignore && response.ok) {
           const data = await response.json();
-          setChatUnread(data.unreadCount > 0);
+          const count =
+            userRole === "client"
+              ? data.unreadCount
+              : data.totalUnread;
+          setChatUnread((count ?? 0) > 0);
         }
       } catch (error) {
         console.error("Failed to fetch unread count:", error);
@@ -89,8 +97,8 @@ export default function DashboardLayout({
 
   const coachNavItems: NavItem[] = [
     { name: "Dashboard", path: "/dashboard" },
-    { 
-      name: "Clients", 
+    {
+      name: "Clients",
       path: "/dashboard/clients",
       subItems: isOnClientDetailPage && currentClientId ? [
         { name: "Overview", path: `/dashboard/clients/${currentClientId}` },
@@ -99,9 +107,10 @@ export default function DashboardLayout({
         { name: "Supplements", path: `/dashboard/clients/${currentClientId}/supplements` },
         { name: "Habits", path: `/dashboard/clients/${currentClientId}/habits` },
         { name: "Subscription", path: `/dashboard/clients/${currentClientId}/subscription` },
-        { name: "Chat", path: `/dashboard/clients/${currentClientId}/chat` },
+        { name: "Messages", path: `/dashboard/messages?clientId=${currentClientId}` },
       ] : undefined
     },
+    { name: "Chat", path: "/dashboard/messages" },
   ];
 
   const clientNavItems: NavItem[] = [
@@ -111,10 +120,11 @@ export default function DashboardLayout({
     { name: "Workouts", path: "/dashboard/workouts" },
     { name: "Supplements", path: "/dashboard/supplements" },
     { name: "Habits", path: "/dashboard/habits" },
-    { name: "Chat", path: "/dashboard/chat" },
+    { name: "Messages", path: "/dashboard/messages" },
   ];
 
   const navItems = userRole === "coach" ? coachNavItems : clientNavItems;
+  const isMessagesPage = location.pathname === "/dashboard/messages";
 
   const getInitials = (fullName: string): string => {
     const nameParts = fullName.trim().split(" ");
@@ -127,11 +137,15 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen flex flex-col transition-colors duration-300">
+    <div
+      className={`flex flex-col transition-colors duration-300 ${
+        isMessagesPage ? "h-dvh overflow-hidden" : "min-h-screen"
+      }`}
+    >
       {/* Animated Background with Waves */}
       <AnimatedBackground />
       
-      <header className="z-10 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 shadow-soft backdrop-blur-md relative">
+      <header className="flex-shrink-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 shadow-soft backdrop-blur-md relative">
         <div className="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 py-4">
             <button
@@ -181,7 +195,7 @@ export default function DashboardLayout({
                     >
                       <span className="relative flex items-center gap-2">
                         {item.name}
-                        {userRole === "client" && item.name === "Chat" && chatUnread && (
+                        {item.path.startsWith("/dashboard/messages") && chatUnread && (
                           <span className="absolute -top-1 -right-2 inline-block w-3 h-3 bg-gradient-to-r from-error-500 to-error-600 rounded-full animate-pulse-soft shadow-glow" />
                         )}
                       </span>
@@ -215,8 +229,18 @@ export default function DashboardLayout({
         </div>
       </header>
 
-      <main className="flex-1 w-full relative">
-        <div className="px-4 py-8 mx-auto max-w-7xl sm:px-6 lg:px-8 transition-colors duration-300 relative z-10">
+      <main
+        className={`w-full relative ${
+          isMessagesPage ? "flex flex-1 min-h-0 flex-col overflow-hidden" : "flex-1"
+        }`}
+      >
+        <div
+          className={`mx-auto max-w-7xl w-full sm:px-6 lg:px-8 transition-colors duration-300 relative z-10 ${
+            isMessagesPage
+              ? "flex flex-1 min-h-0 flex-col px-4 py-3"
+              : "px-4 py-8"
+          }`}
+        >
           {children}
         </div>
       </main>

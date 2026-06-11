@@ -39,8 +39,8 @@ export default function ClientDetailLayout({
       href: `/dashboard/clients/${clientId}/subscription`,
     },
     {
-      name: "Chat",
-      href: `/dashboard/clients/${clientId}/chat`,
+      name: "Messages",
+      href: `/dashboard/messages?clientId=${clientId}`,
     },
   ];
 

@@ -312,7 +312,9 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
         sent_at,
         completed_at,
         status,
-        expires_at
+        expires_at,
+        title,
+        description
       `)
       .eq("client_id", client.id)
       .in("status", ["completed", "expired"])
@@ -378,6 +380,7 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
           .select(`
             id,
             question_id,
+            instance_question_id,
             response_text,
             response_number,
             response_options
@@ -389,6 +392,29 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
         if (responses && responses.length > 0) {
           responsesWithQuestions = await Promise.all(
             responses.map(async (response: any) => {
+              if (response.instance_question_id) {
+                const { data: questionData } = await supabase
+                  .from("check_in_form_instance_questions")
+                  .select("id, question_text, question_type")
+                  .eq("id", response.instance_question_id)
+                  .single();
+
+                return {
+                  id: response.id,
+                  question_id: response.instance_question_id,
+                  response_text: response.response_text,
+                  response_number: response.response_number,
+                  response_options: response.response_options,
+                  question: questionData ? {
+                    question_text: questionData.question_text,
+                    question_type: questionData.question_type,
+                  } : {
+                    question_text: 'Unknown Question',
+                    question_type: 'text',
+                  },
+                };
+              }
+
               const { data: questionData } = await supabase
                 .from("check_in_form_questions")
                 .select("id, question_text, question_type")
@@ -422,8 +448,8 @@ export const loader: import("@remix-run/node").LoaderFunction = async ({
           status: instance.status,
           expires_at: instance.expires_at,
           form: {
-            title: formData?.title || 'Untitled Form',
-            description: formData?.description,
+            title: instance.title || formData?.title || 'Untitled Form',
+            description: instance.description ?? formData?.description,
           },
           client: {
             name: client.name || 'Unknown Client',
@@ -717,6 +743,9 @@ export default function ClientDetails() {
   const [showFormHistory, setShowFormHistory] = useState(false);
   const [completedForms, setCompletedForms] = useState<any[]>(loaderCompletedForms);
   const [editingForm, setEditingForm] = useState<FormTemplate | null>(null);
+  const [showSendFormEditor, setShowSendFormEditor] = useState(false);
+  const [sendFormDraft, setSendFormDraft] = useState<FormTemplate | null>(null);
+  const [sendFormMeta, setSendFormMeta] = useState<{ formId: string; expiresInDays: number } | null>(null);
   const [formsRefreshToken, setFormsRefreshToken] = useState(0);
   const fetcher = useFetcher();
 
@@ -1023,12 +1052,56 @@ export default function ClientDetails() {
     }
   };
 
-  const handleSendCheckInForm = async (formId: string, expiresInDays: number) => {
+  const handleContinueSendCheckInForm = async (formId: string, expiresInDays: number) => {
+    try {
+      const response = await fetch(`/api/get-check-in-form/${formId}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to load form");
+      }
+
+      const data = await response.json();
+      const form = data.form;
+
+      setSendFormDraft({
+        id: form.id,
+        title: form.title,
+        description: form.description || "",
+        questions: (form.questions || []).map((q: FormTemplate["questions"][number]) => ({
+          id: q.id,
+          question_text: q.question_text,
+          question_type: q.question_type,
+          is_required: q.is_required,
+          options: q.options || [],
+          order_index: q.order_index,
+        })),
+      });
+      setSendFormMeta({ formId, expiresInDays });
+      setShowSendCheckInForm(false);
+      setShowSendFormEditor(true);
+    } catch (error) {
+      console.error("Error loading form for send:", error);
+      toast.error(
+        "Failed to Load Form",
+        error instanceof Error ? error.message : "An unexpected error occurred"
+      );
+      throw error;
+    }
+  };
+
+  const handleSendCheckInForm = async (formData: FormTemplate) => {
+    if (!sendFormMeta) return;
+
+    const { formId, expiresInDays } = sendFormMeta;
+
     try {
       const formDataToSend = new FormData();
       formDataToSend.append("formId", formId);
       formDataToSend.append("clientId", client.id);
       formDataToSend.append("expiresInDays", expiresInDays.toString());
+      formDataToSend.append("title", formData.title);
+      formDataToSend.append("description", formData.description);
+      formDataToSend.append("questions", JSON.stringify(formData.questions));
 
       // Add mobile-specific logging
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -1093,7 +1166,7 @@ export default function ClientDetails() {
           id: `temp-${Date.now()}`,
           coach_id: client.coach_id || '',
           client_id: client.id,
-          message: `${result.instance.form?.title || 'Form'} sent!`,
+          message: `${result.instance.title || formData.title || 'Form'} sent!`,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -1102,8 +1175,9 @@ export default function ClientDetails() {
         setAllUpdates((prev) => [newUpdate, ...prev]);
       }
       
-      // Close the modal
-      setShowSendCheckInForm(false);
+      setShowSendFormEditor(false);
+      setSendFormDraft(null);
+      setSendFormMeta(null);
       
     } catch (error) {
       console.error('Error sending form:', error);
@@ -1111,6 +1185,7 @@ export default function ClientDetails() {
         "Failed to Send Form", 
         error instanceof Error ? error.message : 'An unexpected error occurred'
       );
+      throw error;
     }
   };
 
@@ -1586,7 +1661,20 @@ export default function ClientDetails() {
           onClose={() => setShowSendCheckInForm(false)}
           clientId={client.id}
           clientName={client.name}
+          onContinue={handleContinueSendCheckInForm}
+        />
+
+        <CreateCheckInFormModal
+          isOpen={showSendFormEditor}
+          onClose={() => {
+            setShowSendFormEditor(false);
+            setSendFormDraft(null);
+            setSendFormMeta(null);
+          }}
           onSubmit={handleSendCheckInForm}
+          initialForm={sendFormDraft}
+          mode="send"
+          clientName={client.name}
         />
 
         <ViewCheckInFormsModal

@@ -1,119 +1,75 @@
 import { json } from "@remix-run/node";
-import { createClient } from "@supabase/supabase-js";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import type { Database } from "~/lib/supabase";
-import { parse } from "cookie";
-import jwt from "jsonwebtoken";
-import { Buffer } from "buffer";
+import { createServiceClient, getChatUserFromRequest } from "~/lib/chat-auth.server";
 
-function getUserIdFromRequest(request: Request): string | undefined {
-  const cookies = parse(request.headers.get("cookie") || "");
-  const supabaseAuthCookieKey = Object.keys(cookies).find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-  let accessToken;
-  if (supabaseAuthCookieKey) {
-    try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
-    } catch (e) {
-      accessToken = undefined;
-    }
-  }
-  let userId: string | undefined;
-  if (accessToken) {
-    try {
-      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      userId =
-        decoded && typeof decoded === "object" && "sub" in decoded
-          ? (decoded.sub as string)
-          : undefined;
-    } catch (e) {
-      userId = undefined;
-    }
-  }
-  
-  // Fallback: Try Bearer token authentication for mobile
-  if (!userId) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      try {
-        const token = authHeader.substring(7);
-        const decoded = jwt.decode(token) as Record<string, unknown> | null;
-        userId =
-          decoded && typeof decoded === "object" && "sub" in decoded
-            ? (decoded.sub as string)
-            : undefined;
-      } catch (e) {
-        userId = undefined;
-      }
-    }
-  }
-  
-  return userId;
-}
-
-// GET: Fetch unread chat counts for all clients for the current coach
 export async function loader({ request }: LoaderFunctionArgs) {
-  const userId = getUserIdFromRequest(request);
-  if (!userId) {
-    return json({ error: "Not authenticated" }, { status: 401 });
-  }
-
-  const supabase = createClient<Database>(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
-  );
-
-  // Find the user's record (must be coach)
-  const { data: userRecord } = await supabase
-    .from("users")
-    .select("id, role")
-    .eq("auth_id", userId)
-    .single();
-  if (!userRecord || userRecord.role !== "coach") {
+  const user = await getChatUserFromRequest(request);
+  if (!user || user.role !== "coach") {
     return json({ error: "User is not a coach" }, { status: 403 });
   }
-  const coachId = userRecord.id;
 
-  // Get all active clients for this coach
+  const supabase = createServiceClient();
+  const result: Record<string, number> = {};
+
   const { data: clients } = await supabase
     .from("users")
     .select("id")
-    .eq("coach_id", coachId)
+    .eq("coach_id", user.id)
     .eq("role", "client");
-  if (!clients) {
-    return json({ error: "No clients found" }, { status: 404 });
-  }
 
-  // For each client, get last_seen_at for coach and count unread messages
-  const result: Record<string, number> = {};
-  for (const client of clients) {
-    // Get last_seen_at for coach in this chat
+  for (const client of clients ?? []) {
     const { data: lastSeenRow } = await supabase
       .from("chat_last_seen")
       .select("last_seen_at")
-      .eq("user_id", coachId)
-      .eq("coach_id", coachId)
+      .eq("user_id", user.id)
+      .eq("coach_id", user.id)
       .eq("client_id", client.id)
-      .single();
-    const lastSeenAt = lastSeenRow?.last_seen_at;
-    // Count unread messages (sent by client after last_seen_at)
+      .is("group_id", null)
+      .maybeSingle();
+
     let query = supabase
       .from("chats")
       .select("id", { count: "exact", head: true })
-      .eq("coach_id", coachId)
+      .eq("coach_id", user.id)
       .eq("client_id", client.id)
+      .is("group_id", null)
       .eq("sender", "client");
-    if (lastSeenAt) {
-      query = query.gt("timestamp", lastSeenAt);
+
+    if (lastSeenRow?.last_seen_at) {
+      query = query.gt("timestamp", lastSeenRow.last_seen_at);
     }
-    const { count: unreadCount } = await query;
-    result[client.id] = unreadCount ?? 0;
+
+    const { count } = await query;
+    result[client.id] = count ?? 0;
   }
-  return json({ unreadCounts: result });
+
+  const { data: groups } = await supabase
+    .from("chat_groups")
+    .select("id")
+    .eq("coach_id", user.id);
+
+  const groupUnread: Record<string, number> = {};
+  for (const group of groups ?? []) {
+    const { data: lastSeenRow } = await supabase
+      .from("chat_last_seen")
+      .select("last_seen_at")
+      .eq("user_id", user.id)
+      .eq("group_id", group.id)
+      .maybeSingle();
+
+    let query = supabase
+      .from("chats")
+      .select("id", { count: "exact", head: true })
+      .eq("group_id", group.id)
+      .eq("sender", "client");
+
+    if (lastSeenRow?.last_seen_at) {
+      query = query.gt("timestamp", lastSeenRow.last_seen_at);
+    }
+
+    const { count } = await query;
+    groupUnread[group.id] = count ?? 0;
+  }
+
+  return json({ unreadCounts: result, groupUnreadCounts: groupUnread });
 }

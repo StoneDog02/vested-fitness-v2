@@ -1,113 +1,187 @@
 import { json } from "@remix-run/node";
-import { createClient } from "@supabase/supabase-js";
-import type { ActionFunctionArgs } from "@remix-run/node";
-import type { Database } from "~/lib/supabase";
-import { parse } from "cookie";
-import jwt from "jsonwebtoken";
-import { Buffer } from "buffer";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { getCurrentTimestampISO } from "~/lib/timezone";
+import {
+  createServiceClient,
+  getChatUserFromRequest,
+  verifyCoachOwnsClient,
+  verifyGroupAccess,
+} from "~/lib/chat-auth.server";
 
-function getUserIdFromRequest(request: Request): string | undefined {
-  const cookies = parse(request.headers.get("cookie") || "");
-  const supabaseAuthCookieKey = Object.keys(cookies).find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-  let accessToken;
-  if (supabaseAuthCookieKey) {
-    try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
-    } catch (e) {
-      accessToken = undefined;
-    }
-  }
-  let userId: string | undefined;
-  if (accessToken) {
-    try {
-      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      userId =
-        decoded && typeof decoded === "object" && "sub" in decoded
-          ? (decoded.sub as string)
-          : undefined;
-    } catch (e) {
-      userId = undefined;
-    }
-  }
-  
-  // Fallback: Try Bearer token authentication for mobile
-  if (!userId) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      try {
-        const token = authHeader.substring(7);
-        const decoded = jwt.decode(token) as Record<string, unknown> | null;
-        userId =
-          decoded && typeof decoded === "object" && "sub" in decoded
-            ? (decoded.sub as string)
-            : undefined;
-      } catch (e) {
-        userId = undefined;
-      }
-    }
-  }
-  
-  return userId;
-}
-
-// POST: Update last_seen_at for the current user in a chat
-export async function action({ request }: ActionFunctionArgs) {
-  const userId = getUserIdFromRequest(request);
-  if (!userId) {
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await getChatUserFromRequest(request);
+  if (!user) {
     return json({ error: "Not authenticated" }, { status: 401 });
   }
-  const formData = await request.formData();
-  const clientId = formData.get("clientId")?.toString();
-  if (!clientId) {
-    return json({ error: "clientId is required" }, { status: 400 });
+
+  const url = new URL(request.url);
+  const clientId = url.searchParams.get("clientId") ?? undefined;
+  const groupId = url.searchParams.get("groupId") ?? undefined;
+
+  if (!clientId && !groupId) {
+    return json({ error: "clientId or groupId is required" }, { status: 400 });
   }
 
-  const supabase = createClient<Database>(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
-  );
+  const supabase = createServiceClient();
 
-  // Find the user's record (coach or client)
-  const { data: userRecord } = await supabase
-    .from("users")
-    .select("id, role, coach_id")
-    .eq("auth_id", userId)
-    .single();
-  if (!userRecord) {
-    return json({ error: "User not found" }, { status: 404 });
+  if (groupId) {
+    const hasAccess = await verifyGroupAccess(user, groupId);
+    if (!hasAccess) {
+      return json({ error: "Access denied" }, { status: 403 });
+    }
+
+    const { data } = await supabase
+      .from("chat_last_seen")
+      .select("last_seen_at")
+      .eq("user_id", user.id)
+      .eq("group_id", groupId)
+      .maybeSingle();
+
+    return json({ last_seen_at: data?.last_seen_at ?? null });
   }
 
-  let coachId, clientIdForQuery;
-  if (userRecord.role === "coach") {
-    coachId = userRecord.id;
-    clientIdForQuery = clientId;
-  } else if (userRecord.role === "client") {
-    coachId = userRecord.coach_id;
-    clientIdForQuery = userRecord.id;
+  let coachId: string;
+  let clientIdForQuery: string;
+
+  if (user.role === "coach") {
+    coachId = user.id;
+    clientIdForQuery = clientId!;
+    const owns = await verifyCoachOwnsClient(user.id, clientIdForQuery);
+    if (!owns) {
+      return json({ error: "Access denied" }, { status: 403 });
+    }
   } else {
-    return json({ error: "Invalid user role" }, { status: 403 });
+    coachId = user.coach_id!;
+    clientIdForQuery = user.id;
   }
 
-  // Upsert last_seen_at for this user in this chat
-  const now = getCurrentTimestampISO();
-  const { error } = await supabase
+  const { data } = await supabase
     .from("chat_last_seen")
-    .upsert({
-      user_id: userRecord.id,
+    .select("last_seen_at")
+    .eq("user_id", user.id)
+    .eq("coach_id", coachId)
+    .eq("client_id", clientIdForQuery)
+    .is("group_id", null)
+    .maybeSingle();
+
+  return json({ last_seen_at: data?.last_seen_at ?? null });
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const user = await getChatUserFromRequest(request);
+  if (!user) {
+    return json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+  let clientId: string | undefined;
+  let groupId: string | undefined;
+
+  if (contentType.includes("application/json")) {
+    const body = await request.json();
+    clientId = body.clientId;
+    groupId = body.groupId;
+  } else {
+    const formData = await request.formData();
+    clientId = formData.get("clientId")?.toString();
+    groupId = formData.get("groupId")?.toString();
+  }
+
+  if (!clientId && !groupId) {
+    return json({ error: "clientId or groupId is required" }, { status: 400 });
+  }
+
+  const supabase = createServiceClient();
+  const now = getCurrentTimestampISO();
+
+  if (groupId) {
+    const hasAccess = await verifyGroupAccess(user, groupId);
+    if (!hasAccess) {
+      return json({ error: "Access denied" }, { status: 403 });
+    }
+
+    const { data: group } = await supabase
+      .from("chat_groups")
+      .select("coach_id")
+      .eq("id", groupId)
+      .single();
+
+    if (!group) {
+      return json({ error: "Group not found" }, { status: 404 });
+    }
+
+    const { data: existing } = await supabase
+      .from("chat_last_seen")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("group_id", groupId)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from("chat_last_seen")
+        .update({ last_seen_at: now })
+        .eq("id", existing.id);
+    } else {
+      const { error: insertError } = await supabase.from("chat_last_seen").insert({
+        user_id: user.id,
+        coach_id: group.coach_id,
+        client_id: null,
+        group_id: groupId,
+        last_seen_at: now,
+      });
+      if (insertError) {
+        return json({ error: insertError.message }, { status: 500 });
+      }
+    }
+
+    return json({ success: true, last_seen_at: now });
+  }
+
+  let coachId: string;
+  let clientIdForQuery: string;
+
+  if (user.role === "coach") {
+    coachId = user.id;
+    clientIdForQuery = clientId!;
+    const owns = await verifyCoachOwnsClient(user.id, clientIdForQuery);
+    if (!owns) {
+      return json({ error: "Access denied" }, { status: 403 });
+    }
+  } else {
+    coachId = user.coach_id!;
+    clientIdForQuery = user.id;
+  }
+
+  const { data: existing } = await supabase
+    .from("chat_last_seen")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("coach_id", coachId)
+    .eq("client_id", clientIdForQuery)
+    .is("group_id", null)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await supabase
+      .from("chat_last_seen")
+      .update({ last_seen_at: now })
+      .eq("id", existing.id);
+    if (error) {
+      return json({ error: error.message }, { status: 500 });
+    }
+  } else {
+    const { error } = await supabase.from("chat_last_seen").insert({
+      user_id: user.id,
       coach_id: coachId,
       client_id: clientIdForQuery,
+      group_id: null,
       last_seen_at: now,
-    }, { onConflict: "user_id,coach_id,client_id" });
-  if (error) {
-    return json({ error: error.message }, { status: 500 });
+    });
+    if (error) {
+      return json({ error: error.message }, { status: 500 });
+    }
   }
+
   return json({ success: true, last_seen_at: now });
 }

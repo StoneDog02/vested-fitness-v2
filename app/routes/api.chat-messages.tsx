@@ -1,169 +1,242 @@
 import { json } from "@remix-run/node";
-import { createClient } from "@supabase/supabase-js";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import type { Database } from "~/lib/supabase";
-import { parse } from "cookie";
-import jwt from "jsonwebtoken";
-import { Buffer } from "buffer";
+import {
+  createServiceClient,
+  getChatUserFromRequest,
+  verifyCoachOwnsClient,
+  verifyGroupAccess,
+} from "~/lib/chat-auth.server";
 
-// Helper to get userId from request cookies or Bearer token (for mobile)
-function getUserIdFromRequest(request: Request): string | undefined {
-  const cookies = parse(request.headers.get("cookie") || "");
-  const supabaseAuthCookieKey = Object.keys(cookies).find(
-    (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
-  );
-  let accessToken;
-  if (supabaseAuthCookieKey) {
-    try {
-      const decoded = Buffer.from(
-        cookies[supabaseAuthCookieKey],
-        "base64"
-      ).toString("utf-8");
-      const [access] = JSON.parse(JSON.parse(decoded));
-      accessToken = access;
-    } catch (e) {
-      accessToken = undefined;
-    }
-  }
-  let userId: string | undefined;
-  if (accessToken) {
-    try {
-      const decoded = jwt.decode(accessToken) as Record<string, unknown> | null;
-      userId =
-        decoded && typeof decoded === "object" && "sub" in decoded
-          ? (decoded.sub as string)
-          : undefined;
-    } catch (e) {
-      userId = undefined;
-    }
-  }
-  
-  // Fallback: Try Bearer token authentication for mobile
-  if (!userId) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      try {
-        const token = authHeader.substring(7);
-        const decoded = jwt.decode(token) as Record<string, unknown> | null;
-        userId =
-          decoded && typeof decoded === "object" && "sub" in decoded
-            ? (decoded.sub as string)
-            : undefined;
-      } catch (e) {
-        userId = undefined;
-      }
-    }
-  }
-  
-  return userId;
-}
+const DEFAULT_LIMIT = 30;
 
-// GET: Fetch chat messages between coach and client
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const clientId = url.searchParams.get("clientId");
-  if (!clientId) {
-    return json({ error: "clientId is required" }, { status: 400 });
-  }
-
-  const userId = getUserIdFromRequest(request);
-  if (!userId) {
+  const user = await getChatUserFromRequest(request);
+  if (!user) {
     return json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const supabase = createClient<Database>(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+  const url = new URL(request.url);
+  const clientId = url.searchParams.get("clientId");
+  const groupId = url.searchParams.get("groupId");
+  const before = url.searchParams.get("before");
+  const limit = Math.min(
+    parseInt(url.searchParams.get("limit") ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT,
+    100
   );
 
-  // Find the user's record (coach or client)
-  const { data: userRecord } = await supabase
-    .from("users")
-    .select("id, role, coach_id")
-    .eq("auth_id", userId)
-    .single();
-  if (!userRecord) {
-    return json({ error: "User not found" }, { status: 404 });
+  if (!clientId && !groupId) {
+    return json({ error: "clientId or groupId is required" }, { status: 400 });
+  }
+  if (clientId && groupId) {
+    return json({ error: "Provide only one of clientId or groupId" }, { status: 400 });
   }
 
-  // Determine coach_id and client_id for the chat
-  let coachId, clientIdForQuery;
-  if (userRecord.role === "coach") {
-    coachId = userRecord.id;
-    clientIdForQuery = clientId;
-  } else if (userRecord.role === "client") {
-    coachId = userRecord.coach_id;
-    clientIdForQuery = userRecord.id;
+  const supabase = createServiceClient();
+  let coachId: string;
+
+  if (groupId) {
+    const hasAccess = await verifyGroupAccess(user, groupId);
+    if (!hasAccess) {
+      return json({ error: "Access denied" }, { status: 403 });
+    }
+    const { data: group } = await supabase
+      .from("chat_groups")
+      .select("coach_id")
+      .eq("id", groupId)
+      .single();
+    if (!group) {
+      return json({ error: "Group not found" }, { status: 404 });
+    }
+    coachId = group.coach_id;
   } else {
-    return json({ error: "Invalid user role" }, { status: 403 });
+    if (user.role === "coach") {
+      coachId = user.id;
+      const owns = await verifyCoachOwnsClient(user.id, clientId!);
+      if (!owns) {
+        return json({ error: "Access denied" }, { status: 403 });
+      }
+    } else {
+      coachId = user.coach_id!;
+      if (clientId !== user.id) {
+        return json({ error: "Access denied" }, { status: 403 });
+      }
+    }
   }
 
-  // Fetch messages
-  const { data: messages, error } = await supabase
+  let query = supabase
     .from("chats")
-    .select("id, coach_id, client_id, sender, content, timestamp")
+    .select(
+      "id, coach_id, client_id, group_id, sender, content, timestamp, reply_to_id, message_type, attachment_url, attachment_metadata"
+    )
     .eq("coach_id", coachId)
-    .eq("client_id", clientIdForQuery)
-    .order("timestamp", { ascending: true });
+    .order("timestamp", { ascending: false })
+    .limit(limit + 1);
 
+  if (groupId) {
+    query = query.eq("group_id", groupId);
+  } else {
+    query = query.eq("client_id", clientId!).is("group_id", null);
+  }
+
+  if (before) {
+    query = query.lt("timestamp", before);
+  }
+
+  const { data: rows, error } = await query;
   if (error) {
     return json({ error: error.message }, { status: 500 });
   }
 
-  return json({ messages });
+  const hasMore = (rows?.length ?? 0) > limit;
+  const messages = (rows ?? []).slice(0, limit).reverse();
+
+  const userIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg.sender === "coach") userIds.add(msg.coach_id);
+    else if (msg.client_id) userIds.add(msg.client_id);
+  }
+
+  const { data: users } = await supabase
+    .from("users")
+    .select("id, name, avatar_url")
+    .in("id", Array.from(userIds));
+
+  const userMap = new Map(
+    (users ?? []).map((u) => [u.id, { name: u.name, avatar_url: u.avatar_url }])
+  );
+
+  const enriched = messages.map((msg) => {
+    const senderId = msg.sender === "coach" ? msg.coach_id : msg.client_id;
+    const senderInfo = senderId ? userMap.get(senderId) : undefined;
+    return {
+      ...msg,
+      sender_name: senderInfo?.name,
+      sender_avatar_url: senderInfo?.avatar_url,
+    };
+  });
+
+  return json({
+    messages: enriched,
+    hasMore,
+    nextBefore: hasMore && messages.length > 0 ? messages[0].timestamp : null,
+  });
 }
 
-// POST: Send a new chat message
 export async function action({ request }: ActionFunctionArgs) {
-  const userId = getUserIdFromRequest(request);
-  if (!userId) {
+  const user = await getChatUserFromRequest(request);
+  if (!user) {
     return json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const formData = await request.formData();
-  const clientId = formData.get("clientId")?.toString();
-  const content = formData.get("content")?.toString();
-  if (!clientId || !content) {
-    return json({ error: "clientId and content are required" }, { status: 400 });
-  }
+  const contentType = request.headers.get("content-type") ?? "";
+  let clientId: string | undefined;
+  let groupId: string | undefined;
+  let content: string | undefined;
+  let replyToId: string | undefined;
+  let messageType: string | undefined;
+  let attachmentUrl: string | undefined;
+  let attachmentMetadata: Record<string, unknown> | undefined;
 
-  const supabase = createClient<Database>(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
-  );
-
-  // Find the user's record (coach or client)
-  const { data: userRecord } = await supabase
-    .from("users")
-    .select("id, role, coach_id")
-    .eq("auth_id", userId)
-    .single();
-  if (!userRecord) {
-    return json({ error: "User not found" }, { status: 404 });
-  }
-
-  let coachId, clientIdForInsert, sender;
-  if (userRecord.role === "coach") {
-    coachId = userRecord.id;
-    clientIdForInsert = clientId;
-    sender = "coach";
-  } else if (userRecord.role === "client") {
-    coachId = userRecord.coach_id;
-    clientIdForInsert = userRecord.id;
-    sender = "client";
+  if (contentType.includes("application/json")) {
+    const body = await request.json();
+    clientId = body.clientId;
+    groupId = body.groupId;
+    content = body.content;
+    replyToId = body.replyToId;
+    messageType = body.messageType;
+    attachmentUrl = body.attachmentUrl;
+    attachmentMetadata = body.attachmentMetadata;
   } else {
-    return json({ error: "Invalid user role" }, { status: 403 });
+    const formData = await request.formData();
+    clientId = formData.get("clientId")?.toString();
+    groupId = formData.get("groupId")?.toString();
+    content = formData.get("content")?.toString();
+    replyToId = formData.get("replyToId")?.toString();
+    messageType = formData.get("messageType")?.toString();
+    attachmentUrl = formData.get("attachmentUrl")?.toString();
+    const metadataRaw = formData.get("attachmentMetadata")?.toString();
+    if (metadataRaw) {
+      try {
+        attachmentMetadata = JSON.parse(metadataRaw) as Record<string, unknown>;
+      } catch {
+        attachmentMetadata = undefined;
+      }
+    }
   }
 
-  // Insert the message
-  const { data, error } = await supabase
-    .from("chats")
-    .insert({
+  if (!content?.trim() && !attachmentUrl) {
+    return json({ error: "content or attachment is required" }, { status: 400 });
+  }
+  if (!clientId && !groupId) {
+    return json({ error: "clientId or groupId is required" }, { status: 400 });
+  }
+
+  const supabase = createServiceClient();
+  let insertRow: Record<string, unknown>;
+
+  if (groupId) {
+    const hasAccess = await verifyGroupAccess(user, groupId);
+    if (!hasAccess) {
+      return json({ error: "Access denied" }, { status: 403 });
+    }
+
+    const { data: group } = await supabase
+      .from("chat_groups")
+      .select("coach_id")
+      .eq("id", groupId)
+      .single();
+    if (!group) {
+      return json({ error: "Group not found" }, { status: 404 });
+    }
+
+    insertRow = {
+      coach_id: group.coach_id,
+      group_id: groupId,
+      client_id: user.role === "client" ? user.id : null,
+      sender: user.role,
+      content: content?.trim() ?? "",
+      reply_to_id: replyToId ?? null,
+      message_type: messageType ?? "text",
+      attachment_url: attachmentUrl ?? null,
+      attachment_metadata: attachmentMetadata ?? null,
+    };
+
+    await supabase
+      .from("chat_groups")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", groupId);
+  } else {
+    let coachId: string;
+    let clientIdForInsert: string;
+
+    if (user.role === "coach") {
+      coachId = user.id;
+      clientIdForInsert = clientId!;
+      const owns = await verifyCoachOwnsClient(user.id, clientIdForInsert);
+      if (!owns) {
+        return json({ error: "Access denied" }, { status: 403 });
+      }
+    } else {
+      coachId = user.coach_id!;
+      clientIdForInsert = user.id;
+    }
+
+    insertRow = {
       coach_id: coachId,
       client_id: clientIdForInsert,
-      sender,
-      content,
-    })
+      group_id: null,
+      sender: user.role,
+      content: content?.trim() ?? "",
+      reply_to_id: replyToId ?? null,
+      message_type: messageType ?? "text",
+      attachment_url: attachmentUrl ?? null,
+      attachment_metadata: attachmentMetadata ?? null,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("chats")
+    .insert(insertRow)
     .select()
     .single();
 
@@ -172,4 +245,4 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   return json({ message: data });
-} 
+}

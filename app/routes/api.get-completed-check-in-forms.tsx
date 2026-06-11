@@ -94,7 +94,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         sent_at,
         completed_at,
         status,
-        expires_at
+        expires_at,
+        title,
+        description
       `)
       .eq("coach_id", coachUser.id)
       .in("status", ["completed", "expired"])
@@ -141,6 +143,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           .select(`
             id,
             question_id,
+            instance_question_id,
             response_text,
             response_number,
             response_options
@@ -152,8 +155,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           return {
             ...instance,
             form: {
-              title: formData?.title || 'Untitled Form',
-              description: formData?.description,
+              title: instance.title || formData?.title || 'Untitled Form',
+              description: instance.description ?? formData?.description,
             },
             client: {
               name: clientData?.name || 'Unknown',
@@ -165,6 +168,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // Fetch questions for responses
         const responsesWithQuestions = await Promise.all(
           (responses || []).map(async (response) => {
+            if (response.instance_question_id) {
+              const { data: questionData, error: questionError } = await supabase
+                .from("check_in_form_instance_questions")
+                .select("id, question_text, question_type")
+                .eq("id", response.instance_question_id)
+                .single();
+
+              if (questionError) {
+                console.error("Error fetching instance question data:", questionError);
+                return {
+                  id: response.id,
+                  question_id: response.instance_question_id,
+                  response_text: response.response_text,
+                  response_number: response.response_number,
+                  response_options: response.response_options,
+                  question: {
+                    question_text: 'Unknown Question',
+                    question_type: 'text',
+                  },
+                };
+              }
+
+              return {
+                id: response.id,
+                question_id: response.instance_question_id,
+                response_text: response.response_text,
+                response_number: response.response_number,
+                response_options: response.response_options,
+                question: {
+                  question_text: questionData.question_text,
+                  question_type: questionData.question_type,
+                },
+              };
+            }
+
             const { data: questionData, error: questionError } = await supabase
               .from("check_in_form_questions")
               .select("id, question_text, question_type")
@@ -210,8 +248,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: instance.status,
           expires_at: instance.expires_at,
           form: {
-            title: formData?.title || 'Untitled Form',
-            description: formData?.description,
+            title: instance.title || formData?.title || 'Untitled Form',
+            description: instance.description ?? formData?.description,
           },
           client: {
             name: clientData?.name || 'Unknown',

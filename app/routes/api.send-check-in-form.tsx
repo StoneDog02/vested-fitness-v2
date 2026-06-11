@@ -37,6 +37,9 @@ export async function action({ request }: ActionFunctionArgs) {
   const formId = formData.get("formId")?.toString();
   const clientId = formData.get("clientId")?.toString();
   const expiresInDays = formData.get("expiresInDays")?.toString();
+  const customTitle = formData.get("title")?.toString();
+  const customDescription = formData.get("description")?.toString();
+  const questionsJson = formData.get("questions")?.toString();
 
   if (!formId || !clientId) {
     return json({ error: "Form ID and Client ID are required" }, { status: 400 });
@@ -158,12 +161,73 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "Client not found or not accessible" }, { status: 404 });
     }
 
+    // Resolve snapshot title/description/questions
+    const instanceTitle = customTitle?.trim() || form.title;
+    const instanceDescription = customDescription?.trim() || form.description || null;
+
+    type SnapshotQuestion = {
+      question_text: string;
+      question_type: string;
+      is_required: boolean;
+      options?: string[] | null;
+      order_index: number;
+      source_question_id?: string | null;
+    };
+
+    let snapshotQuestions: SnapshotQuestion[] = [];
+
+    if (questionsJson) {
+      try {
+        const parsed = JSON.parse(questionsJson) as Array<{
+          id?: string;
+          question_text: string;
+          question_type: string;
+          is_required: boolean;
+          options?: string[];
+          order_index: number;
+        }>;
+        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        snapshotQuestions = parsed
+          .filter((q) => q.question_text?.trim())
+          .map((q, index) => ({
+            question_text: q.question_text.trim(),
+            question_type: q.question_type,
+            is_required: q.is_required ?? false,
+            options: q.options ?? null,
+            order_index: index,
+            source_question_id: q.id && uuidPattern.test(q.id) ? q.id : null,
+          }));
+      } catch {
+        return json({ error: "Invalid questions format" }, { status: 400 });
+      }
+    } else {
+      const { data: masterQuestions, error: masterQuestionsError } = await supabase
+        .from("check_in_form_questions")
+        .select("id, question_text, question_type, is_required, options, order_index")
+        .eq("form_id", formId)
+        .order("order_index");
+
+      if (masterQuestionsError) {
+        console.error("Error fetching master questions:", masterQuestionsError);
+        return json({ error: "Failed to load form questions" }, { status: 500 });
+      }
+
+      snapshotQuestions = (masterQuestions || []).map((q) => ({
+        question_text: q.question_text,
+        question_type: q.question_type,
+        is_required: q.is_required,
+        options: q.options,
+        order_index: q.order_index,
+        source_question_id: q.id,
+      }));
+    }
+
     // Calculate expiration date
     const expiresAt = expiresInDays 
       ? new Date(Date.now() + parseInt(expiresInDays) * 24 * 60 * 60 * 1000).toISOString()
       : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // Default 7 days
 
-    // Create the form instance
+    // Create the form instance with snapshot metadata
     const { data: instance, error: instanceError } = await supabase
       .from("check_in_form_instances")
       .insert({
@@ -171,6 +235,8 @@ export async function action({ request }: ActionFunctionArgs) {
         client_id: clientId,
         coach_id: coachUser.id,
         expires_at: expiresAt,
+        title: instanceTitle,
+        description: instanceDescription,
       })
       .select()
       .single();
@@ -180,13 +246,36 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "Failed to send form" }, { status: 500 });
     }
 
+    // Snapshot questions onto the instance
+    if (snapshotQuestions.length > 0) {
+      const questionsToInsert = snapshotQuestions.map((q) => ({
+        instance_id: instance.id,
+        question_text: q.question_text,
+        question_type: q.question_type,
+        is_required: q.is_required,
+        options: q.options,
+        order_index: q.order_index,
+        source_question_id: q.source_question_id,
+      }));
+
+      const { error: snapshotError } = await supabase
+        .from("check_in_form_instance_questions")
+        .insert(questionsToInsert);
+
+      if (snapshotError) {
+        console.error("Error snapshotting questions:", snapshotError);
+        await supabase.from("check_in_form_instances").delete().eq("id", instance.id);
+        return json({ error: "Failed to send form" }, { status: 500 });
+      }
+    }
+
     // Create an automatic coach update
     const { data: update, error: updateError } = await supabase
       .from("coach_updates")
       .insert({
         coach_id: coachUser.id,
         client_id: clientId,
-        message: `${form.title} sent!`,
+        message: `${instanceTitle} sent!`,
       })
       .select()
       .single();
@@ -202,13 +291,13 @@ export async function action({ request }: ActionFunctionArgs) {
         await resend.emails.send({
           from: "Kava Training <noreply@kavatraining.com>",
           to: clientUser.email,
-          subject: `New Check-In Form: ${form.title}`,
+          subject: `New Check-In Form: ${instanceTitle}`,
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <h2 style="color: #333;">New Check-In Form Available</h2>
               <p>Hi ${clientUser.name},</p>
-              <p>Your coach ${coachUser.name} has sent you a new check-in form: <strong>${form.title}</strong></p>
-              ${form.description ? `<p>${form.description}</p>` : ''}
+              <p>Your coach ${coachUser.name} has sent you a new check-in form: <strong>${instanceTitle}</strong></p>
+              ${instanceDescription ? `<p>${instanceDescription}</p>` : ''}
               <p>Please log into your Kava Training dashboard to complete this form.</p>
               <p>This form will expire on ${new Date(expiresAt).toLocaleDateString()}.</p>
               <br>
@@ -224,7 +313,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     return json({ 
       instance,
-      message: `Check-in form "${form.title}" sent successfully to ${clientUser.name}`
+      message: `Check-in form "${instanceTitle}" sent successfully to ${clientUser.name}`
     });
   } catch (error) {
     console.error("Error sending check-in form:", error);

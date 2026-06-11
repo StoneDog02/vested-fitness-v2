@@ -197,6 +197,8 @@ export interface Database {
           completed_at?: string;
           status: 'sent' | 'completed' | 'expired';
           expires_at?: string;
+          title?: string;
+          description?: string;
         };
         Insert: {
           id?: string;
@@ -207,6 +209,8 @@ export interface Database {
           completed_at?: string;
           status?: 'sent' | 'completed' | 'expired';
           expires_at?: string;
+          title?: string;
+          description?: string;
         };
         Update: {
           id?: string;
@@ -217,13 +221,51 @@ export interface Database {
           completed_at?: string;
           status?: 'sent' | 'completed' | 'expired';
           expires_at?: string;
+          title?: string;
+          description?: string;
+        };
+      };
+      check_in_form_instance_questions: {
+        Row: {
+          id: string;
+          instance_id: string;
+          question_text: string;
+          question_type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+          is_required: boolean;
+          options?: any;
+          order_index: number;
+          source_question_id?: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          instance_id: string;
+          question_text: string;
+          question_type: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+          is_required?: boolean;
+          options?: any;
+          order_index: number;
+          source_question_id?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          instance_id?: string;
+          question_text?: string;
+          question_type?: 'text' | 'textarea' | 'number' | 'select' | 'radio' | 'checkbox';
+          is_required?: boolean;
+          options?: any;
+          order_index?: number;
+          source_question_id?: string;
+          created_at?: string;
         };
       };
       check_in_form_responses: {
         Row: {
           id: string;
           instance_id: string;
-          question_id: string;
+          question_id?: string;
+          instance_question_id?: string;
           response_text?: string;
           response_number?: number;
           response_options?: any;
@@ -232,7 +274,8 @@ export interface Database {
         Insert: {
           id?: string;
           instance_id: string;
-          question_id: string;
+          question_id?: string;
+          instance_question_id?: string;
           response_text?: string;
           response_number?: number;
           response_options?: any;
@@ -242,6 +285,7 @@ export interface Database {
           id?: string;
           instance_id?: string;
           question_id?: string;
+          instance_question_id?: string;
           response_text?: string;
           response_number?: number;
           response_options?: any;

@@ -14,14 +14,14 @@ interface SendCheckInFormModalProps {
   onClose: () => void;
   clientId: string;
   clientName: string;
-  onSubmit: (formId: string, expiresInDays: number) => void;
+  onContinue: (formId: string, expiresInDays: number) => void;
 }
 
 export default function SendCheckInFormModal({
   isOpen,
   onClose,
   clientName,
-  onSubmit,
+  onContinue,
 }: SendCheckInFormModalProps) {
   const [forms, setForms] = useState<CheckInForm[]>([]);
   const [selectedFormId, setSelectedFormId] = useState("");
@@ -65,7 +65,7 @@ export default function SendCheckInFormModal({
       
       // Add mobile-specific error handling
       try {
-        await onSubmit(selectedFormId, expiresInDays);
+        await onContinue(selectedFormId, expiresInDays);
         setSelectedFormId("");
         setExpiresInDays(7);
         onClose();
@@ -148,7 +148,7 @@ export default function SendCheckInFormModal({
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
               </svg>
               <span>
-                This will send the form to {clientName} and create an automatic form sent update.
+                You&apos;ll review and can customize the form before sending it to {clientName}.
               </span>
             </div>
           </div>
@@ -169,7 +169,7 @@ export default function SendCheckInFormModal({
               touchAction: 'manipulation',
             }}
           >
-            {isSubmitting ? 'Sending...' : 'Send Form'}
+            {isSubmitting ? 'Loading...' : 'Continue'}
           </Button>
         </div>
       </form>

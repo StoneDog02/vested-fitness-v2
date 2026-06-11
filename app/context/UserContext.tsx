@@ -3,6 +3,7 @@ import { createContext, useContext } from "react";
 export interface UserContextType {
   id: string;
   role: "coach" | "client";
+  coach_id?: string | null;
   chat_bubble_color?: string;
 }
 

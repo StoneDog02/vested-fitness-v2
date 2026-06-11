@@ -1,94 +1,10 @@
-import type { MetaFunction } from "@remix-run/node";
-import Card from "~/components/ui/Card";
-import Button from "~/components/ui/Button";
-import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
-import { useState } from "react";
-import { ChatBox } from "~/components/ui/ChatBox";
-import { useParams, useLoaderData, useMatches } from "@remix-run/react";
-import dayjs from "dayjs";
-import { getCurrentTimestampISO } from "~/lib/timezone";
+import { redirect } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 
-interface Message {
-  id: string;
-  sender: "coach" | "client";
-  content: string;
-  timestamp: string;
-}
-
-export const meta: MetaFunction = () => {
-  return [
-    { title: "Client Chat | Kava Training" },
-    { name: "description", content: "Chat with your client" },
-  ];
-};
-
-export default function ClientChat() {
-  // Move all hooks to the top level
-  const params = useParams();
-  const [newMessage, setNewMessage] = useState("");
-  const matches = useMatches();
-  // Find the parent route with client loader data
-  const parentData = matches.find((m) => m.data && typeof m.data === 'object' && m.data !== null && 'client' in m.data) ?.data as { client: { id: string; name?: string; created_at?: string; goal?: string } | null };
-
-  // Defensive: handle missing client
-  if (!parentData?.client) {
-    return (
-      <div className="p-6 text-center text-red-600">
-        Client not found or unavailable.
-      </div>
-    );
+export const loader = async ({ params }: LoaderFunctionArgs) => {
+  const clientId = params.clientId;
+  if (clientId) {
+    return redirect(`/dashboard/messages?clientId=${clientId}`);
   }
-
-  const startDate = parentData.client.created_at ? dayjs(parentData.client.created_at).format("MMM D, YYYY") : "N/A";
-  const goal = parentData.client.goal || "N/A";
-
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim()) return;
-
-    const message: Message = {
-      id: Date.now().toString(), // Use timestamp as a temporary id if needed
-      sender: "coach",
-      content: newMessage,
-      timestamp: getCurrentTimestampISO(),
-    };
-
-    // setMessages([...messages, message]); // This line is removed as per the new_code
-    setNewMessage("");
-  };
-
-  return (
-    <ClientDetailLayout>
-      <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-secondary dark:text-alabaster">
-            Chat with {parentData.client.name || "Client"}
-          </h1>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Left side - Chat Messages */}
-          <div>
-            <ChatBox clientId={parentData.client.id} />
-          </div>
-          {/* Right side - Client Info */}
-          <div className="space-y-6">
-            {/* Client Info */}
-            <Card title="Client Information">
-              <div className="space-y-2">
-                <p className="text-sm text-gray-dark dark:text-gray-light">
-                  <span className="font-medium">Name:</span> {parentData.client.name || "Unknown"}
-                </p>
-                <p className="text-sm text-gray-dark dark:text-gray-light">
-                  <span className="font-medium">Goal:</span> {goal}
-                </p>
-                <p className="text-sm text-gray-dark dark:text-gray-light">
-                  <span className="font-medium">Start Date:</span> {startDate}
-                </p>
-              </div>
-            </Card>
-          </div>
-        </div>
-      </div>
-    </ClientDetailLayout>
-  );
-}
+  return redirect("/dashboard/messages");
+};

@@ -4,6 +4,7 @@ import Button from "./Button";
 import Card from "./Card";
 import Tooltip from "./Tooltip";
 import { useUser } from "~/context/UserContext";
+import { isMessageFromCurrentUser } from "~/lib/chat.types";
 
 interface Message {
   id: string;
@@ -41,7 +42,7 @@ const Spinner = () => (
 );
 
 export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
-  const { role: currentUserRole, chat_bubble_color } = useUser();
+  const { role: currentUserRole, chat_bubble_color, id: currentUserId } = useUser();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -182,7 +183,7 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
       const missing = messages.filter((m) => !m.avatar_url);
       if (missing.length === 0) return;
       const userIds = Array.from(new Set(missing.map((m) => m.sender === "coach" ? m.coach_id : m.client_id)));
-      const res = await fetch(`/api.get-avatars?userIds=${userIds.join(",")}`);
+      const res = await fetch(`/api/get-avatars?userIds=${userIds.join(",")}`);
       const data = await res.json();
       if (res.ok && data.avatars) {
         setMessages((prev) =>
@@ -261,7 +262,15 @@ export const ChatBox: React.FC<ChatBoxProps> = ({ clientId }) => {
             )}
             {messages.map((msg) => {
               // Align right if this message was sent by the current user
-              const isMine = msg.sender === currentUserRole;
+              const isMine = isMessageFromCurrentUser(
+                {
+                  ...msg,
+                  group_id: null,
+                  client_id: msg.client_id,
+                  coach_id: msg.coach_id,
+                },
+                currentUserId
+              );
               return (
                 <div key={msg.id} className={`flex items-end gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
                   {!isMine && msg.avatar_url && (

@@ -101,6 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
         coach_id,
         status,
         expires_at,
+        title,
         check_in_forms!inner (
           title
         )
@@ -129,9 +130,9 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: "This form has expired" }, { status: 400 });
     }
 
-    // Fetch questions for this form
-    const { data: questions, error: questionsError } = await supabase
-      .from("check_in_form_questions")
+    // Fetch questions from instance snapshot, fallback to master
+    const { data: instanceQuestions, error: instanceQuestionsError } = await supabase
+      .from("check_in_form_instance_questions")
       .select(`
         id,
         question_text,
@@ -139,12 +140,35 @@ export async function action({ request }: ActionFunctionArgs) {
         is_required,
         options
       `)
-      .eq("form_id", instance.form_id)
+      .eq("instance_id", instanceId)
       .order("order_index");
 
-    if (questionsError) {
-      console.error("Error fetching questions:", questionsError);
+    if (instanceQuestionsError) {
+      console.error("Error fetching instance questions:", instanceQuestionsError);
       return json({ error: "Failed to load form questions" }, { status: 500 });
+    }
+
+    let questions = instanceQuestions;
+    let useInstanceQuestions = instanceQuestions && instanceQuestions.length > 0;
+
+    if (!useInstanceQuestions) {
+      const { data: masterQuestions, error: masterQuestionsError } = await supabase
+        .from("check_in_form_questions")
+        .select(`
+          id,
+          question_text,
+          question_type,
+          is_required,
+          options
+        `)
+        .eq("form_id", instance.form_id)
+        .order("order_index");
+
+      if (masterQuestionsError) {
+        console.error("Error fetching questions:", masterQuestionsError);
+        return json({ error: "Failed to load form questions" }, { status: 500 });
+      }
+      questions = masterQuestions;
     }
 
     // Validate that all required questions are answered
@@ -169,10 +193,15 @@ export async function action({ request }: ActionFunctionArgs) {
         return null;
       }
 
-      const responseData: any = {
+      const responseData: Record<string, unknown> = {
         instance_id: instanceId,
-        question_id: questionId,
       };
+
+      if (useInstanceQuestions) {
+        responseData.instance_question_id = questionId;
+      } else {
+        responseData.question_id = questionId;
+      }
 
       // Handle different response types
       if (question.question_type === 'number') {
@@ -254,7 +283,7 @@ export async function action({ request }: ActionFunctionArgs) {
                 </p>
                 
                 <div style="background: #f3f4f6; border-left: 4px solid #6366f1; padding: 16px; margin: 20px 0; border-radius: 4px;">
-                  <p style="margin: 0; color: #374151; font-weight: 500;">Form: ${instance.check_in_forms[0]?.title || 'Check-in Form'}</p>
+                  <p style="margin: 0; color: #374151; font-weight: 500;">Form: ${instance.title || instance.check_in_forms[0]?.title || 'Check-in Form'}</p>
                 </div>
                 
                 <p style="margin: 20px 0; color: #374151; font-size: 16px;">
@@ -288,7 +317,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     return json({ 
       success: true,
-      message: `Form "${instance.check_in_forms[0]?.title || 'Check-in Form'}" completed successfully`
+      message: `Form "${instance.title || instance.check_in_forms[0]?.title || 'Check-in Form'}" completed successfully`
     });
   } catch (error) {
     console.error("Error submitting form responses:", error);

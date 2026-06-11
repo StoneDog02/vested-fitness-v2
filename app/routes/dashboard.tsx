@@ -215,6 +215,7 @@ export default function Dashboard() {
     <UserContext.Provider value={user && role ? {
       id: user.id,
       role: role as 'coach' | 'client',
+      coach_id: user.coach_id,
       chat_bubble_color: user.chat_bubble_color
     } : undefined}>
       <DashboardLayout userRole={role as UserRole} user={user as { id: string; name: string; email: string; avatar_url?: string; font_size?: string; access_status?: string } | null}>
