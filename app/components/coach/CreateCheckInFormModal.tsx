@@ -26,6 +26,7 @@ interface CreateCheckInFormModalProps {
   initialForm?: FormTemplate | null;
   mode?: "create" | "edit" | "send";
   clientName?: string;
+  isRecurring?: boolean;
 }
 
 export default function CreateCheckInFormModal({
@@ -35,6 +36,7 @@ export default function CreateCheckInFormModal({
   initialForm = null,
   mode = "create",
   clientName,
+  isRecurring = false,
 }: CreateCheckInFormModalProps) {
   const [title, setTitle] = useState(initialForm?.title ?? "");
   const [description, setDescription] = useState(initialForm?.description ?? "");
@@ -158,7 +160,9 @@ export default function CreateCheckInFormModal({
       isOpen={isOpen}
       onClose={onClose}
       title={
-        mode === "send"
+        mode === "send" && isRecurring
+          ? `Schedule Form for ${clientName || "Client"}`
+          : mode === "send"
           ? `Review Form for ${clientName || "Client"}`
           : mode === "edit"
           ? "Edit Check-In Form"
@@ -170,7 +174,9 @@ export default function CreateCheckInFormModal({
         {mode === "send" && (
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
             <p className="text-sm text-blue-700 dark:text-blue-300">
-              Changes here apply only to this send. Your saved template will not be modified.
+              {isRecurring
+                ? "Changes here apply only to this recurring schedule. Your saved template will not be modified."
+                : "Changes here apply only to this send. Your saved template will not be modified."}
             </p>
           </div>
         )}
@@ -353,11 +359,15 @@ export default function CreateCheckInFormModal({
             disabled={!title.trim() || isSubmitting}
           >
             {isSubmitting
-              ? mode === "send"
+              ? mode === "send" && isRecurring
+                ? "Scheduling..."
+                : mode === "send"
                 ? "Sending..."
                 : mode === "edit"
                 ? "Saving..."
                 : "Creating..."
+              : mode === "send" && isRecurring
+              ? "Set Up Recurring Send"
               : mode === "send"
               ? `Send to ${clientName || "Client"}`
               : mode === "edit"

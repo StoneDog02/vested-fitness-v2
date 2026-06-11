@@ -326,6 +326,16 @@ export const action = async ({
   }
   if (intent === "remove") {
     const id = formData.get("id") as string;
+
+    // Remove completion records first (FK constraint blocks direct supplement delete)
+    const { error: completionsError } = await supabase
+      .from("supplement_completions")
+      .delete()
+      .eq("supplement_id", id);
+    if (completionsError) {
+      return json({ error: completionsError.message || "Failed to delete supplement completions" }, { status: 500 });
+    }
+
     const { data, error } = await supabase
       .from("supplements")
       .delete()
@@ -375,6 +385,7 @@ export default function ClientSupplements() {
     null
   );
   const [removingSupplementId, setRemovingSupplementId] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   // Cleanup processed data on unmount
   useEffect(() => {
@@ -483,6 +494,7 @@ export default function ClientSupplements() {
   };
 
   const handleRemoveClick = (supplementId: string) => {
+    setRemoveError(null);
     setRemovingSupplementId(supplementId);
   };
 
@@ -494,40 +506,48 @@ export default function ClientSupplements() {
   // Get current date string for comparison
   const currentDateString = new Date().toISOString().split('T')[0];
 
-  // Refresh page data when supplement form submission completes successfully
+  // Refresh page data when supplement form submission completes
   useEffect(() => {
-    // Only process if we have new data and haven't processed it yet
-    if (fetcher.state === "idle" && fetcher.data && 
-        (fetcher.data.supplement || fetcher.data.deletedSupplement) &&
-        processedFetcherData.current !== fetcher.data) {
-      
-      processedFetcherData.current = fetcher.data;
-      
-      // For delete operations, clear cache immediately and delay revalidation
-      if (fetcher.data.deletedSupplement) {
-        // Clear cache immediately using the correct key
-        if (clientId) {
-          delete clientSupplementsCache[clientId];
-        }
-        // Clear removing state
-        setRemovingSupplementId(null);
-        // Delay revalidation to ensure cache is cleared
-        setTimeout(() => {
-          revalidator.revalidate();
-        }, 200);
-      } else {
-        // For add/edit operations, proceed normally
-        if (client?.id) {
-          flushSupplementDraft(client.id, lastSubmittedSupplementDraftIdRef.current);
-          clearSupplementDraft(client.id, lastSubmittedSupplementDraftIdRef.current);
-        }
-        revalidator.revalidate();
-        
-        setIsAddModalOpen(false);
-        setEditingSupplement(null);
-      }
+    if (fetcher.state !== "idle" || !fetcher.data || processedFetcherData.current === fetcher.data) {
+      return;
     }
-  }, [fetcher.state, fetcher.data, revalidator, clientId, client?.id]);
+
+    processedFetcherData.current = fetcher.data;
+
+    if (fetcher.data.error) {
+      setRemovingSupplementId(null);
+      if (removingSupplementId) {
+        setRemoveError(fetcher.data.error);
+      }
+      return;
+    }
+
+    if (!fetcher.data.supplement && !fetcher.data.deletedSupplement) {
+      return;
+    }
+
+    // For delete operations, clear cache immediately and delay revalidation
+    if (fetcher.data.deletedSupplement) {
+      if (clientId) {
+        delete clientSupplementsCache[clientId];
+      }
+      setRemovingSupplementId(null);
+      setRemoveError(null);
+      setTimeout(() => {
+        revalidator.revalidate();
+      }, 200);
+    } else {
+      // For add/edit operations, proceed normally
+      if (client?.id) {
+        flushSupplementDraft(client.id, lastSubmittedSupplementDraftIdRef.current);
+        clearSupplementDraft(client.id, lastSubmittedSupplementDraftIdRef.current);
+      }
+      revalidator.revalidate();
+
+      setIsAddModalOpen(false);
+      setEditingSupplement(null);
+    }
+  }, [fetcher.state, fetcher.data, revalidator, clientId, client?.id, removingSupplementId]);
 
   return (
     <ClientDetailLayout>
@@ -540,6 +560,12 @@ export default function ClientSupplements() {
             Add Supplement
           </Button>
         </div>
+
+        {removeError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
+            {removeError}
+          </div>
+        )}
 
         <div className="flex flex-col gap-6 md:flex-row">
           {/* Supplements List */}

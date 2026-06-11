@@ -260,6 +260,68 @@ export interface Database {
           created_at?: string;
         };
       };
+      check_in_form_schedules: {
+        Row: {
+          id: string;
+          coach_id: string;
+          client_id: string;
+          form_id: string;
+          frequency: 'daily' | 'weekly' | 'monthly';
+          day_of_week?: number | null;
+          day_of_month?: number | null;
+          time_of_day: string;
+          timezone: string;
+          expires_in_days: number;
+          title: string;
+          description?: string | null;
+          questions_snapshot: any;
+          is_active: boolean;
+          last_sent_at?: string | null;
+          next_send_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          coach_id: string;
+          client_id: string;
+          form_id: string;
+          frequency: 'daily' | 'weekly' | 'monthly';
+          day_of_week?: number | null;
+          day_of_month?: number | null;
+          time_of_day: string;
+          timezone?: string;
+          expires_in_days?: number;
+          title: string;
+          description?: string | null;
+          questions_snapshot: any;
+          is_active?: boolean;
+          last_sent_at?: string | null;
+          next_send_at: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          coach_id?: string;
+          client_id?: string;
+          form_id?: string;
+          frequency?: 'daily' | 'weekly' | 'monthly';
+          day_of_week?: number | null;
+          day_of_month?: number | null;
+          time_of_day?: string;
+          timezone?: string;
+          expires_in_days?: number;
+          title?: string;
+          description?: string | null;
+          questions_snapshot?: any;
+          is_active?: boolean;
+          last_sent_at?: string | null;
+          next_send_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       check_in_form_responses: {
         Row: {
           id: string;

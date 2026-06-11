@@ -9,11 +9,14 @@ import UpdateHistoryModal from "~/components/coach/UpdateHistoryModal";
 import MediaPlayerModal from "~/components/ui/MediaPlayerModal";
 import ProgressPhotosModal from "~/components/coach/ProgressPhotosModal";
 import CreateCheckInFormModal, { FormTemplate } from "~/components/coach/CreateCheckInFormModal";
-import SendCheckInFormModal from "~/components/coach/SendCheckInFormModal";
+import SendCheckInFormModal, {
+  type RecurringScheduleConfig,
+} from "~/components/coach/SendCheckInFormModal";
+import { formatScheduleSummary } from "~/lib/checkInFormUtils";
+import type { ScheduleFrequency } from "~/lib/checkInFormUtils";
 import CheckInFormResponseViewer from "~/components/coach/CheckInFormResponseViewer";
 import CheckInFormHistoryModal from "~/components/coach/CheckInFormHistoryModal";
 import ViewCheckInFormsModal from "~/components/coach/ViewCheckInFormsModal";
-import Tooltip from "~/components/ui/Tooltip";
 import { useState, useEffect } from "react";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
@@ -745,9 +748,44 @@ export default function ClientDetails() {
   const [editingForm, setEditingForm] = useState<FormTemplate | null>(null);
   const [showSendFormEditor, setShowSendFormEditor] = useState(false);
   const [sendFormDraft, setSendFormDraft] = useState<FormTemplate | null>(null);
-  const [sendFormMeta, setSendFormMeta] = useState<{ formId: string; expiresInDays: number } | null>(null);
+  const [sendFormMeta, setSendFormMeta] = useState<{
+    formId: string;
+    expiresInDays: number;
+    recurring?: RecurringScheduleConfig;
+  } | null>(null);
+  const [activeSchedules, setActiveSchedules] = useState<
+    Array<{
+      id: string;
+      form_id: string;
+      frequency: ScheduleFrequency;
+      day_of_week?: number | null;
+      day_of_month?: number | null;
+      time_of_day: string;
+      next_send_at: string;
+      title: string;
+      expires_in_days: number;
+    }>
+  >([]);
   const [formsRefreshToken, setFormsRefreshToken] = useState(0);
   const fetcher = useFetcher();
+
+  const fetchActiveSchedules = async () => {
+    try {
+      const response = await fetch(
+        `/api/get-check-in-form-schedules?clientId=${client.id}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setActiveSchedules(data.schedules || []);
+      }
+    } catch (error) {
+      console.error("Error fetching form schedules:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchActiveSchedules();
+  }, [client.id]);
 
   // Local state for updates, checkIns, and supplements
   const [updates, setUpdates] = useState<Update[]>(loaderUpdates); // Already filtered on server
@@ -1052,7 +1090,11 @@ export default function ClientDetails() {
     }
   };
 
-  const handleContinueSendCheckInForm = async (formId: string, expiresInDays: number) => {
+  const handleContinueSendCheckInForm = async (
+    formId: string,
+    expiresInDays: number,
+    recurring?: RecurringScheduleConfig
+  ) => {
     try {
       const response = await fetch(`/api/get-check-in-form/${formId}`);
       if (!response.ok) {
@@ -1076,7 +1118,7 @@ export default function ClientDetails() {
           order_index: q.order_index,
         })),
       });
-      setSendFormMeta({ formId, expiresInDays });
+      setSendFormMeta({ formId, expiresInDays, recurring });
       setShowSendCheckInForm(false);
       setShowSendFormEditor(true);
     } catch (error) {
@@ -1092,7 +1134,7 @@ export default function ClientDetails() {
   const handleSendCheckInForm = async (formData: FormTemplate) => {
     if (!sendFormMeta) return;
 
-    const { formId, expiresInDays } = sendFormMeta;
+    const { formId, expiresInDays, recurring } = sendFormMeta;
 
     try {
       const formDataToSend = new FormData();
@@ -1103,87 +1145,100 @@ export default function ClientDetails() {
       formDataToSend.append("description", formData.description);
       formDataToSend.append("questions", JSON.stringify(formData.questions));
 
-      // Add mobile-specific logging
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      console.log('Sending check-in form:', { 
-        formId, 
-        clientId: client.id, 
-        expiresInDays, 
-        isMobile,
-        userAgent: navigator.userAgent 
-      });
+      if (recurring) {
+        formDataToSend.append("frequency", recurring.frequency);
+        formDataToSend.append("timeOfDay", recurring.timeOfDay);
+        if (recurring.dayOfWeek !== undefined) {
+          formDataToSend.append("dayOfWeek", recurring.dayOfWeek.toString());
+        }
+        if (recurring.dayOfMonth !== undefined) {
+          formDataToSend.append("dayOfMonth", recurring.dayOfMonth.toString());
+        }
+      }
 
-      // Mobile-friendly fetch with retry logic
-      const fetchWithRetry = async (url: string, options: RequestInit, retries = 3): Promise<Response> => {
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      );
+
+      const fetchWithRetry = async (
+        url: string,
+        options: RequestInit,
+        retries = 3
+      ): Promise<Response> => {
         for (let i = 0; i < retries; i++) {
           try {
             const response = await fetch(url, {
               ...options,
-              // Mobile-specific timeout
               signal: AbortSignal.timeout(isMobile ? 30000 : 10000),
             });
             return response;
           } catch (error) {
             if (i === retries - 1) throw error;
-            // Wait before retry (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+            await new Promise((resolve) =>
+              setTimeout(resolve, Math.pow(2, i) * 1000)
+            );
           }
         }
-        throw new Error('Max retries exceeded');
+        throw new Error("Max retries exceeded");
       };
 
-      const response = await fetchWithRetry('/api/send-check-in-form', {
-        method: 'POST',
+      const endpoint = recurring
+        ? "/api/create-check-in-form-schedule"
+        : "/api/send-check-in-form";
+
+      const response = await fetchWithRetry(endpoint, {
+        method: "POST",
         body: formDataToSend,
-        // Add mobile-specific headers (don't set Content-Type for FormData)
         headers: {
-          'X-Requested-With': 'XMLHttpRequest',
+          "X-Requested-With": "XMLHttpRequest",
         },
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('Form submission failed:', { 
-          status: response.status, 
-          statusText: response.statusText, 
-          errorData,
-          isMobile 
-        });
-        throw new Error(errorData.error || 'Failed to send form');
+        throw new Error(
+          errorData.error ||
+            (recurring ? "Failed to create schedule" : "Failed to send form")
+        );
       }
 
       const result = await response.json();
-      
-      // Show success toast
-      toast.success(
-        "Form Sent Successfully", 
-        `Check-in form has been sent to ${client.name || 'client'} and will expire in ${expiresInDays} days.`
-      );
-      
-      // Add the automatic update to the local state
-      if (result.instance) {
-        const newUpdate: Update = {
-          id: `temp-${Date.now()}`,
-          coach_id: client.coach_id || '',
-          client_id: client.id,
-          message: `${result.instance.title || formData.title || 'Form'} sent!`,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        
-        setUpdates((prev) => filterUpdatesWithinSevenDays([newUpdate, ...prev]));
-        setAllUpdates((prev) => [newUpdate, ...prev]);
+
+      if (recurring && result.schedule) {
+        toast.success(
+          "Recurring Send Scheduled",
+          `First send for ${client.name || "client"}: ${formatScheduleSummary(result.schedule)}`
+        );
+        await fetchActiveSchedules();
+      } else {
+        toast.success(
+          "Form Sent Successfully",
+          `Check-in form has been sent to ${client.name || "client"} and will expire in ${expiresInDays} days.`
+        );
+
+        if (result.instance) {
+          const newUpdate: Update = {
+            id: `temp-${Date.now()}`,
+            coach_id: client.coach_id || "",
+            client_id: client.id,
+            message: `${result.instance.title || formData.title || "Form"} sent!`,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+
+          setUpdates((prev) => filterUpdatesWithinSevenDays([newUpdate, ...prev]));
+          setAllUpdates((prev) => [newUpdate, ...prev]);
+        }
       }
-      
+
       setShowSendFormEditor(false);
       setSendFormDraft(null);
       setSendFormMeta(null);
-      
     } catch (error) {
-      console.error('Error sending form:', error);
+      console.error("Error sending form:", error);
       toast.error(
-        "Failed to Send Form", 
-        error instanceof Error ? error.message : 'An unexpected error occurred'
+        sendFormMeta.recurring ? "Failed to Schedule Form" : "Failed to Send Form",
+        error instanceof Error ? error.message : "An unexpected error occurred"
       );
       throw error;
     }
@@ -1222,71 +1277,107 @@ export default function ClientDetails() {
           {/* Left column with two stacked cards */}
           <div className="space-y-6">
             <Card title="Form Manager">
-              <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
                 Build, send, and manage the check-in forms you use with clients.
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <Tooltip content="Build a new check-in form template for future use." className="w-full block">
-                  <button
-                    onClick={() => {
-                      setEditingForm(null);
-                      setShowViewForms(false);
-                      setShowCreateCheckInForm(true);
-                    }}
-                    className="group w-full rounded-xl border border-gray-light dark:border-davyGray bg-white dark:bg-night p-8 flex flex-col items-center justify-center gap-4 shadow-sm transition-all duration-200 hover:border-primary hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[140px]"
-                  >
-                    <span className="rounded-full bg-primary/10 p-4 text-primary transition-all duration-200 group-hover:bg-primary group-hover:text-white group-hover:scale-110">
-                      <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M11 9V4a1 1 0 10-2 0v5H4a1 1 0 100 2h5v5a1 1 0 102 0v-5h5a1 1 0 100-2h-5z" />
-                      </svg>
-                    </span>
-                    <span className="text-lg font-semibold text-secondary dark:text-alabaster">
-                      Create Form
-                    </span>
-                  </button>
-                </Tooltip>
 
-                <Tooltip content="Send an existing form to this client with an expiration date." className="w-full block">
-                  <button
-                    onClick={() => {
-                      setEditingForm(null);
-                      setShowCreateCheckInForm(false);
-                      setShowViewForms(false);
-                      setShowSendCheckInForm(true);
-                    }}
-                    className="group w-full rounded-xl border border-gray-light dark:border-davyGray bg-white dark:bg-night p-8 flex flex-col items-center justify-center gap-4 shadow-sm transition-all duration-200 hover:border-primary hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[140px]"
-                  >
-                    <span className="rounded-full bg-primary/10 p-4 text-primary transition-all duration-200 group-hover:bg-primary group-hover:text-white group-hover:scale-110">
-                      <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M2.94 2.94a1.5 1.5 0 011.58-.33l12 4.5a1.5 1.5 0 010 2.78l-12 4.5A1.5 1.5 0 012 13.5v-3.086a1 1 0 01.293-.707L5 7.293a1 1 0 011.414 1.414L4.414 10H8a1 1 0 010 2H4.414l1.999 1.999A1 1 0 014.999 15h-.003a1 1 0 01-.706-.293L2.293 12.707A1 1 0 012 12v-9a1 1 0 01.94-.06z" />
-                      </svg>
-                    </span>
-                    <span className="text-lg font-semibold text-secondary dark:text-alabaster">
-                      Send Form
-                    </span>
-                  </button>
-                </Tooltip>
+              {activeSchedules.length > 0 && (
+                <div className="mb-4 space-y-2">
+                  {activeSchedules.map((schedule) => (
+                    <div
+                      key={schedule.id}
+                      className="rounded-lg border border-primary/30 bg-primary/5 dark:bg-primary/10 px-3 py-2.5"
+                    >
+                      <p className="text-xs text-secondary dark:text-alabaster">
+                        {formatScheduleSummary(schedule)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const cancelData = new FormData();
+                            cancelData.append("scheduleId", schedule.id);
+                            const response = await fetch(
+                              "/api/cancel-check-in-form-schedule",
+                              { method: "POST", body: cancelData }
+                            );
+                            if (!response.ok) {
+                              const errorData = await response.json().catch(() => ({}));
+                              throw new Error(errorData.error || "Failed to cancel schedule");
+                            }
+                            toast.success(
+                              "Schedule Canceled",
+                              `Recurring send for "${schedule.title}" has been stopped.`
+                            );
+                            await fetchActiveSchedules();
+                          } catch (error) {
+                            toast.error(
+                              "Failed to Cancel Schedule",
+                              error instanceof Error
+                                ? error.message
+                                : "An unexpected error occurred"
+                            );
+                          }
+                        }}
+                        className="mt-1.5 text-xs text-red-600 dark:text-red-400 hover:underline"
+                      >
+                        Cancel schedule
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-                <Tooltip content="Review and edit the forms you've already created." className="w-full block">
-                  <button
-                    onClick={() => {
-                      setEditingForm(null);
-                      setShowCreateCheckInForm(false);
-                      setShowSendCheckInForm(false);
-                      setShowViewForms(true);
-                    }}
-                    className="group w-full rounded-xl border border-gray-light dark:border-davyGray bg-white dark:bg-night p-8 flex flex-col items-center justify-center gap-4 shadow-sm transition-all duration-200 hover:border-primary hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[140px]"
-                  >
-                    <span className="rounded-full bg-primary/10 p-4 text-primary transition-all duration-200 group-hover:bg-primary group-hover:text-white group-hover:scale-110">
-                      <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zM7 9a1 1 0 012 0v3a1 1 0 11-2 0V9zm4-1a1 1 0 100 2h1a1 1 0 110 2h-1a1 1 0 100 2 1 1 0 100 2h1a3 3 0 000-6h-1V8a1 1 0 10-2 0z" clipRule="evenodd" />
-                      </svg>
-                    </span>
-                    <span className="text-lg font-semibold text-secondary dark:text-alabaster">
-                      View Forms
-                    </span>
-                  </button>
-                </Tooltip>
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    setEditingForm(null);
+                    setShowViewForms(false);
+                    setShowCreateCheckInForm(true);
+                  }}
+                  className="w-full rounded-lg border border-gray-light dark:border-davyGray bg-white dark:bg-night px-3.5 py-2.5 flex flex-col items-start text-left transition-all duration-200 hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                >
+                  <span className="text-sm font-semibold text-primary">
+                    Create Form
+                  </span>
+                  <span className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                    Build a new check-in template.
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setEditingForm(null);
+                    setShowCreateCheckInForm(false);
+                    setShowViewForms(false);
+                    setShowSendCheckInForm(true);
+                  }}
+                  className="w-full rounded-lg border border-gray-light dark:border-davyGray bg-white dark:bg-night px-3.5 py-2.5 flex flex-col items-start text-left transition-all duration-200 hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                >
+                  <span className="text-sm font-semibold text-primary">
+                    Send Form
+                  </span>
+                  <span className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                    Share an existing form now.
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setEditingForm(null);
+                    setShowCreateCheckInForm(false);
+                    setShowSendCheckInForm(false);
+                    setShowViewForms(true);
+                  }}
+                  className="w-full rounded-lg border border-gray-light dark:border-davyGray bg-white dark:bg-night px-3.5 py-2.5 flex flex-col items-start text-left transition-all duration-200 hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                >
+                  <span className="text-sm font-semibold text-primary">
+                    View Forms
+                  </span>
+                  <span className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                    Review and edit saved forms.
+                  </span>
+                </button>
               </div>
             </Card>
 
@@ -1675,6 +1766,7 @@ export default function ClientDetails() {
           initialForm={sendFormDraft}
           mode="send"
           clientName={client.name}
+          isRecurring={!!sendFormMeta?.recurring}
         />
 
         <ViewCheckInFormsModal
