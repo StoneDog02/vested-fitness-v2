@@ -215,23 +215,13 @@ export default function CreateCheckInFormModal({
 
         {/* Questions Section */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-secondary dark:text-alabaster">
-              Questions
-            </h3>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={addQuestion}
-              className="text-sm"
-            >
-              + Add Question
-            </Button>
-          </div>
+          <h3 className="text-lg font-medium text-secondary dark:text-alabaster">
+            Questions
+          </h3>
 
           {questions.length === 0 && (
             <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <p>No questions added yet. Click &quot;Add Question&quot; to get started.</p>
+              <p>No questions added yet.</p>
             </div>
           )}
 
@@ -346,6 +336,15 @@ export default function CreateCheckInFormModal({
               )}
             </div>
           ))}
+
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={addQuestion}
+            className="text-sm"
+          >
+            + Add Question
+          </Button>
         </div>
 
         {/* Form Actions */}
