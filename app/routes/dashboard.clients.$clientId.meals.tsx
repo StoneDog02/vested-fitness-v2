@@ -2,7 +2,7 @@ import { useLoaderData, useRevalidator , useFetcher, useParams } from "@remix-ru
 import type { MetaFunction } from "@remix-run/node";
 import ClientDetailLayout from "~/components/coach/ClientDetailLayout";
 import { json , ActionFunctionArgs, redirect } from "@remix-run/node";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import React, { useEffect, useState, useRef } from "react";
 import Card from "~/components/ui/Card";
@@ -61,8 +61,22 @@ const getActivationStatus = (plan: { isActive: boolean; activatedAt?: string }) 
   }
 };
 
-// In-memory cache for client meal plans (expires after 30s)
-const clientMealsCache: Record<string, { data: any; expires: number }> = {};
+// Removes a meal plan along with its meals and foods.
+async function deleteMealPlanCascade(
+  supabase: SupabaseClient<Database>,
+  planId: string
+) {
+  const { data: meals } = await supabase
+    .from("meals")
+    .select("id")
+    .eq("meal_plan_id", planId);
+
+  for (const meal of meals ?? []) {
+    await supabase.from("foods").delete().eq("meal_id", meal.id);
+  }
+  await supabase.from("meals").delete().eq("meal_plan_id", planId);
+  await supabase.from("meal_plans").delete().eq("id", planId);
+}
 
 export const loader = async ({
   params,
@@ -72,10 +86,6 @@ export const loader = async ({
   request: Request;
 }) => {
   const clientIdParam = params.clientId;
-  // Check cache (per client)
-  if (clientIdParam && clientMealsCache[clientIdParam] && clientMealsCache[clientIdParam].expires > Date.now()) {
-    return json(clientMealsCache[clientIdParam].data);
-  }
 
   const supabase = createClient<Database>(
     process.env.SUPABASE_URL!,
@@ -104,14 +114,7 @@ export const loader = async ({
       complianceData: [0, 0, 0, 0, 0, 0, 0],
       client: null,
     };
-    
-    if (clientIdParam) {
-      clientMealsCache[clientIdParam] = {
-        data: emptyData,
-        expires: Date.now() + 30000 // 30 seconds
-      };
-    }
-    
+
     return json(emptyData);
   }
 
@@ -469,7 +472,7 @@ export const loader = async ({
   }
 
   // Assemble the final data structure
-  const cacheData = {
+  const loaderData = {
     mealPlans,
     libraryPlans,
     complianceData,
@@ -494,14 +497,7 @@ export const loader = async ({
     }
   };
 
-  if (clientIdParam) {
-    clientMealsCache[clientIdParam] = {
-      data: cacheData,
-      expires: Date.now() + 30000 // 30 seconds
-    };
-  }
-
-  return json(cacheData, {
+  return json(loaderData, {
     headers: needsTokenRefresh && newTokens ? {
       "Set-Cookie": [
         `accessToken=${newTokens.accessToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600`,
@@ -619,26 +615,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return json({ error: "Cannot delete templates created by other coaches" }, { status: 403 });
     }
 
-    // Delete meals and foods first
-    const { data: meals } = await supabase
-      .from("meals")
-      .select("id")
-      .eq("meal_plan_id", planId);
-    
-    if (meals) {
-      for (const meal of meals) {
-        await supabase.from("foods").delete().eq("meal_id", meal.id);
-      }
-      await supabase.from("meals").delete().eq("meal_plan_id", planId);
-    }
-    
-    // Delete the meal plan
-    await supabase.from("meal_plans").delete().eq("id", planId);
-    
-    // Clear cache to force fresh data
-    if (params.clientId && clientMealsCache[params.clientId]) {
-      delete clientMealsCache[params.clientId];
-    }
+    await deleteMealPlanCascade(supabase, planId);
+
     return redirect(request.url);
   }
 
@@ -660,12 +638,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       .from("meal_plans")
       .update({ is_active: true, activated_at: activationDate, deactivated_at: null })
       .eq("id", planId);
-    
-    // Clear cache to force refresh of compliance data
-    if (params.clientId && clientMealsCache[params.clientId]) {
-      delete clientMealsCache[params.clientId];
-    }
-    
+
     return redirect(request.url);
   }
 
@@ -761,12 +734,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         }
       }
     }
-    
-    // Clear cache to force fresh data
-    if (params.clientId && clientMealsCache[params.clientId]) {
-      delete clientMealsCache[params.clientId];
-    }
-    
+
     return json({ success: true, planId: clientPlan.id });
   }
 
@@ -788,22 +756,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return json({ error: "Unauthorized to delete this template" }, { status: 403 });
     }
 
-    // Get all meals for this template
-    const { data: meals } = await supabase
-      .from("meals")
-      .select("id")
-      .eq("meal_plan_id", templateId);
+    await deleteMealPlanCascade(supabase, templateId);
 
-    // Delete foods, meals, then template plan
-    if (meals) {
-      for (const meal of meals) {
-        await supabase.from("foods").delete().eq("meal_id", meal.id);
-      }
-      await supabase.from("meals").delete().eq("meal_plan_id", templateId);
-    }
-    
-    await supabase.from("meal_plans").delete().eq("id", templateId);
-    
     return redirect(`${request.url}?deletedTemplate=${templateId}`);
   }
 
@@ -811,7 +765,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const title = formData.get("title") as string;
   const description = formData.get("description") as string;
   const mealsJson = formData.get("meals") as string;
-  const meals = JSON.parse(mealsJson);
+
+  let meals: any[];
+  try {
+    meals = JSON.parse(mealsJson);
+  } catch (e) {
+    console.error("[ACTION] Could not parse submitted meals:", e);
+    meals = [];
+  }
+  if (!Array.isArray(meals)) {
+    return json(
+      { error: "Meal plan data was malformed, so nothing was saved. Please reload the page and try again." },
+      { status: 400 }
+    );
+  }
+
   const planId = formData.get("planId") as string | null;
 
   // Filter out meals and foods with empty required fields for data quality
@@ -831,6 +799,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     )
   }));
 
+  // Incomplete meals are dropped above, so an empty result means nothing would be saved.
+  if (validMeals.length === 0) {
+    return json(
+      {
+        error:
+          "Nothing was saved. Every meal needs a name, a time, and at least one food with both a name and a portion.",
+      },
+      { status: 400 }
+    );
+  }
+
+  if (!title || title.trim() === "") {
+    return json({ error: "Nothing was saved. The meal plan needs a title." }, { status: 400 });
+  }
+
   if (intent === "edit" && planId) {
     // Check if this is a template (templates are immutable)
     const { data: planCheck } = await supabase
@@ -844,12 +827,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     // Update the meal plan title and description
-    const { data: updatedPlan } = await supabase
+    const { data: updatedPlan, error: updateError } = await supabase
       .from("meal_plans")
       .update({ title, description })
       .eq("id", planId)
       .select()
       .single();
+
+    if (updateError) {
+      console.error("[ACTION] Meal plan update error:", updateError);
+    }
 
     if (updatedPlan) {
       // SMART UPDATE: Instead of delete+insert, update existing meals and foods
@@ -964,14 +951,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           .in("id", excessMealIds);
       }
 
-      // Invalidate server cache for this client
-      if (params.clientId && clientMealsCache[params.clientId]) {
-        delete clientMealsCache[params.clientId];
-      }
-      
       return json({ success: true, isEdit: true, message: "Meal plan updated successfully" });
     }
+
+    return json({ error: "Failed to update meal plan" }, { status: 500 });
   } else if (intent === "create" || !planId) {
+    // The template is owned by the coach, so an unreadable/expired session must fail loudly
+    // rather than attempting an insert with a null user_id.
+    if (!coachId) {
+      return json(
+        {
+          error:
+            "Your session has expired, so nothing was saved. Please refresh the page, sign in again, and re-save the plan.",
+        },
+        { status: 401 }
+      );
+    }
+
     // SIMPLE APPROACH: Create template and client copy in one step
     
     // 1. Create immutable master template
@@ -988,48 +984,60 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       .single();
     
     if (templateError || !newTemplate) {
+      console.error("[ACTION] Template insert error:", templateError);
       return json({ error: "Failed to create template" }, { status: 500 });
     }
 
-    // Insert meals and foods for the master template
-    for (const [i, meal] of validMeals.entries()) {
-      const { data: newMeal, error: mealError } = await supabase
-        .from("meals")
-        .insert({
-          meal_plan_id: newTemplate.id,
-          name: meal.name,
-          time: meal.time,
-          sequence_order: i,
-          meal_option: meal.mealOption || 'A',
-        })
-        .select()
-        .single();
-      
-      if (mealError || !newMeal) {
-        console.error(`[ACTION] Meal insert error for ${meal.name}:`, mealError);
-        continue;
-      }
-      
-      // Insert foods for this meal
-      for (const [foodIndex, food] of meal.foods.entries()) {
-        const { error: foodError } = await supabase
-          .from("foods")
+    // Inserts every meal and its foods into a plan. Any failure aborts so the caller can
+    // roll back instead of leaving the coach with a plan that is missing meals.
+    const insertMealsInto = async (targetPlanId: string) => {
+      for (const [i, meal] of validMeals.entries()) {
+        const { data: newMeal, error: mealError } = await supabase
+          .from("meals")
           .insert({
-            meal_id: newMeal.id,
-            name: food.name,
-            portion: food.portion,
-            calories: food.calories,
-            protein: food.protein,
-            carbs: food.carbs,
-            fat: food.fat,
-            sequence_order: foodIndex,
-            food_option: food.foodOption || 'A',
-          });
-        
-        if (foodError) {
-          console.error(`[ACTION] Food insert error for ${food.name}:`, foodError);
+            meal_plan_id: targetPlanId,
+            name: meal.name,
+            time: meal.time,
+            sequence_order: i,
+            meal_option: meal.mealOption || 'A',
+          })
+          .select()
+          .single();
+
+        if (mealError || !newMeal) {
+          console.error(`[ACTION] Meal insert error for ${meal.name}:`, mealError);
+          return `Failed to save the meal "${meal.name}". Nothing was saved.`;
+        }
+
+        for (const [foodIndex, food] of meal.foods.entries()) {
+          const { error: foodError } = await supabase
+            .from("foods")
+            .insert({
+              meal_id: newMeal.id,
+              name: food.name,
+              portion: food.portion,
+              calories: food.calories,
+              protein: food.protein,
+              carbs: food.carbs,
+              fat: food.fat,
+              sequence_order: foodIndex,
+              food_option: food.foodOption || 'A',
+            });
+
+          if (foodError) {
+            console.error(`[ACTION] Food insert error for ${food.name}:`, foodError);
+            return `Failed to save "${food.name}" in the meal "${meal.name}". Nothing was saved.`;
+          }
         }
       }
+      return null;
+    };
+
+    // Insert meals and foods for the master template
+    const templateMealsError = await insertMealsInto(newTemplate.id);
+    if (templateMealsError) {
+      await deleteMealPlanCascade(supabase, newTemplate.id);
+      return json({ error: templateMealsError }, { status: 500 });
     }
 
     // 2. Create editable client copy by copying the template
@@ -1047,53 +1055,31 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       .single();
     
     if (clientError || !clientPlan) {
+      console.error("[ACTION] Client plan insert error:", clientError);
+      await deleteMealPlanCascade(supabase, newTemplate.id);
       return json({ error: "Failed to create client meal plan" }, { status: 500 });
     }
 
     // Copy meals and foods to client plan (much simpler than complex queries)
-    for (const [i, meal] of validMeals.entries()) {
-      const { data: clientMeal } = await supabase
-        .from("meals")
-        .insert({
-          meal_plan_id: clientPlan.id,
-          name: meal.name,
-          time: meal.time,
-          sequence_order: i,
-          meal_option: meal.mealOption || 'A',
-        })
-        .select()
-        .single();
+    const clientMealsError = await insertMealsInto(clientPlan.id);
+    if (clientMealsError) {
+      await deleteMealPlanCascade(supabase, clientPlan.id);
+      await deleteMealPlanCascade(supabase, newTemplate.id);
+      return json({ error: clientMealsError }, { status: 500 });
+    }
 
-      if (clientMeal) {
-        // Copy foods for this meal
-        for (const [foodIndex, food] of meal.foods.entries()) {
-          await supabase.from("foods").insert({
-            meal_id: clientMeal.id,
-            name: food.name,
-            portion: food.portion,
-            calories: food.calories,
-            protein: food.protein,
-            carbs: food.carbs,
-            fat: food.fat,
-            sequence_order: foodIndex,
-            food_option: food.foodOption || 'A',
-          });
-        }
-      }
-    }
-    
-    // Clear cache to force fresh data
-    if (params.clientId && clientMealsCache[params.clientId]) {
-      delete clientMealsCache[params.clientId];
-    }
-    
+    // The new plan is created active, so retire whichever plan was active before it.
+    await supabase
+      .from("meal_plans")
+      .update({ is_active: false, deactivated_at: new Date().toISOString() })
+      .eq("user_id", client.id)
+      .eq("is_active", true)
+      .eq("is_template", false)
+      .neq("id", clientPlan.id);
+
     return json({ success: true, isEdit: false, message: "Meal plan created successfully" });
   }
 
-  // Invalidate server cache for this client
-  if (params.clientId && clientMealsCache[params.clientId]) {
-    delete clientMealsCache[params.clientId];
-  }
   return redirect(request.url);
 };
 
@@ -1187,9 +1173,6 @@ export default function ClientMeals() {
         setTimeout(() => {
           fetcher.load(window.location.pathname); // Backup refresh
         }, 100);
-        if (params.clientId && clientMealsCache[params.clientId]) {
-          delete clientMealsCache[params.clientId]; // Clear in-memory cache
-        }
       } else if (data.error) {
         toast.error("Failed to Save Meal Plan", data.error);
       }
