@@ -112,6 +112,14 @@ function normalizeMealsFromDraft(raw: unknown): Meal[] {
   }));
 }
 
+/** Meal ids identify A/B pairs and tab selection, so they must stay unique as meals are added
+ * and removed. Length-based ids collide after a removal. */
+function nextMealId(meals: Meal[]): number {
+  return (
+    meals.reduce((max, meal) => (meal.id > max ? meal.id : max), 0) + 1
+  );
+}
+
 function mealFormBaseline(data: MealPlanFormData, activeMealIndex: number): string {
   return JSON.stringify({
     title: data.title,
@@ -370,6 +378,17 @@ export default function CreateMealPlanForm({
     snapshotRef.current = { formData, activeMealIndex };
   }, [formData, activeMealIndex]);
 
+  // The meal editor writes through activeMealIndex, so it has to point at a real meal.
+  // Removals, restored drafts, and tab lookups that miss can otherwise strand it out of range,
+  // which reads as an empty form until the first keystroke throws.
+  const mealCount = formData.meals.length;
+  useEffect(() => {
+    if (mealCount === 0) return;
+    if (activeMealIndex < 0 || activeMealIndex >= mealCount) {
+      setActiveMealIndex(Math.max(0, Math.min(activeMealIndex, mealCount - 1)));
+    }
+  }, [mealCount, activeMealIndex]);
+
   useEffect(() => {
     if (!draftClientId) {
       setDraftReady(true);
@@ -460,14 +479,19 @@ export default function CreateMealPlanForm({
       description: p.description,
       meals: normalizeMealsFromDraft(p.meals),
     };
+    // A draft can hold an index that no longer exists in its own meals (older payload,
+    // or meals that failed to normalize), so clamp it to what was actually restored.
+    const restoredIndex =
+      typeof p.activeMealIndex === "number"
+        ? Math.max(0, Math.min(p.activeMealIndex, restored.meals.length - 1))
+        : 0;
+
     setFormData(restored);
-    setActiveMealIndex(
-      typeof p.activeMealIndex === "number" ? p.activeMealIndex : 0
-    );
+    setActiveMealIndex(restoredIndex);
     setShowDraftPrompt(false);
     setPendingDraftEnvelope(null);
     setDraftReady(true);
-    baselineRef.current = mealFormBaseline(restored, p.activeMealIndex ?? 0);
+    baselineRef.current = mealFormBaseline(restored, restoredIndex);
   };
 
   const handleStartFreshDraft = () => {
@@ -494,7 +518,7 @@ export default function CreateMealPlanForm({
 
   const addMeal = () => {
     const newMeal: Meal = {
-      id: formData.meals.length + 1,
+      id: nextMealId(formData.meals),
       name: "",
       time: "",
       foods: [
@@ -505,23 +529,23 @@ export default function CreateMealPlanForm({
           protein: 0,
           carbs: 0,
           fat: 0,
-
         },
       ],
       mealOption: 'A',
     };
 
-    setFormData((prev) => ({
-      ...prev,
-      meals: [...prev.meals, newMeal],
-    }));
-    setActiveMealIndex(formData.meals.length);
+    // Both pieces of state derive from the same snapshot so the index always matches the array.
+    const updatedMeals = [...formData.meals, newMeal];
+    setFormData((prev) => ({ ...prev, meals: updatedMeals }));
+    setActiveMealIndex(updatedMeals.length - 1);
   };
 
   const addMealOption = (mealIndex: number) => {
     const existingMeal = formData.meals[mealIndex];
+    if (!existingMeal) return;
+
     const newMeal: Meal = {
-      id: formData.meals.length + 1,
+      id: nextMealId(formData.meals),
       name: existingMeal.name,
       time: existingMeal.time,
       foods: [
@@ -532,17 +556,14 @@ export default function CreateMealPlanForm({
           protein: 0,
           carbs: 0,
           fat: 0,
-
         },
       ],
       mealOption: 'B',
     };
 
-    setFormData((prev) => ({
-      ...prev,
-      meals: [...prev.meals, newMeal],
-    }));
-    setActiveMealIndex(formData.meals.length);
+    const updatedMeals = [...formData.meals, newMeal];
+    setFormData((prev) => ({ ...prev, meals: updatedMeals }));
+    setActiveMealIndex(updatedMeals.length - 1);
   };
 
   const updateMeal = (
@@ -550,23 +571,22 @@ export default function CreateMealPlanForm({
     field: "name" | "time" | "foods" | "mealOption",
     value: string | Food[] | 'A' | 'B'
   ) => {
-    const updatedMeals = [...formData.meals];
-    if (field === "foods") {
-      updatedMeals[index][field] = value as Food[];
-    } else if (field === "mealOption") {
-      updatedMeals[index][field] = value as 'A' | 'B';
-    } else {
-      updatedMeals[index][field] = value as string;
-    }
+    setFormData((prev) => {
+      if (!prev.meals[index]) return prev;
 
-    setFormData((prev) => ({
-      ...prev,
-      meals: updatedMeals,
-    }));
+      const updatedMeals = prev.meals.map((meal, i) => {
+        if (i !== index) return meal;
+        if (field === "foods") return { ...meal, foods: value as Food[] };
+        if (field === "mealOption")
+          return { ...meal, mealOption: value as 'A' | 'B' };
+        return { ...meal, [field]: value as string };
+      });
+
+      return { ...prev, meals: updatedMeals };
+    });
   };
 
   const addFood = (mealIndex: number) => {
-    const updatedMeals = [...formData.meals];
     const newFood: Food = {
       name: "",
       portion: "",
@@ -576,12 +596,15 @@ export default function CreateMealPlanForm({
       fat: 0,
     };
 
-    updatedMeals[mealIndex].foods.push(newFood);
-
-    setFormData((prev) => ({
-      ...prev,
-      meals: updatedMeals,
-    }));
+    setFormData((prev) => {
+      if (!prev.meals[mealIndex]) return prev;
+      return {
+        ...prev,
+        meals: prev.meals.map((meal, i) =>
+          i === mealIndex ? { ...meal, foods: [...meal.foods, newFood] } : meal
+        ),
+      };
+    });
   };
 
 
@@ -594,73 +617,76 @@ export default function CreateMealPlanForm({
     isBlur?: boolean
   ) => {
     setFormData((prev) => {
-      const updatedMeals = [...prev.meals];
-      const updatedFoods = [...updatedMeals[mealIndex].foods];
-      const food = updatedFoods[foodIndex];
-      
-      // Simple approach: always update the current food item
-      if (field === "protein" || field === "carbs" || field === "fat") {
-        if (isBlur) {
-          updatedFoods[foodIndex][field] = value === "" ? 0 : Number(value);
-        } else {
-          updatedFoods[foodIndex][field] = value as string;
+      const targetMeal = prev.meals[mealIndex];
+      if (!targetMeal || !targetMeal.foods[foodIndex]) return prev;
+
+      const updatedFoods = targetMeal.foods.map((food, i) => {
+        if (i !== foodIndex) return food;
+
+        // Simple approach: always update the current food item
+        if (field === "protein" || field === "carbs" || field === "fat") {
+          const nextValue = isBlur ? (value === "" ? 0 : Number(value)) : value;
+          const updated = { ...food, [field]: nextValue };
+          // Always recalculate calories
+          const protein = Number(updated.protein) || 0;
+          const carbs = Number(updated.carbs) || 0;
+          const fat = Number(updated.fat) || 0;
+          return { ...updated, calories: protein * 4 + carbs * 4 + fat * 9 };
         }
-        // Always recalculate calories
-        const protein = Number(field === "protein" ? value : updatedFoods[foodIndex].protein) || 0;
-        const carbs = Number(field === "carbs" ? value : updatedFoods[foodIndex].carbs) || 0;
-        const fat = Number(field === "fat" ? value : updatedFoods[foodIndex].fat) || 0;
-        updatedFoods[foodIndex].calories = protein * 4 + carbs * 4 + fat * 9;
-      } else if (field === "foodOption") {
-        updatedFoods[foodIndex].foodOption = value === "B" ? "B" : "A";
-      } else {
-        updatedFoods[foodIndex][field] = value as string;
-      }
-      
-      updatedMeals[mealIndex].foods = updatedFoods;
-      return { ...prev, meals: updatedMeals };
+        if (field === "foodOption") {
+          return { ...food, foodOption: value === "B" ? ("B" as const) : ("A" as const) };
+        }
+        return { ...food, [field]: value as string };
+      });
+
+      return {
+        ...prev,
+        meals: prev.meals.map((meal, i) =>
+          i === mealIndex ? { ...meal, foods: updatedFoods } : meal
+        ),
+      };
     });
   };
 
   const removeFood = (mealIndex: number, foodIndex: number) => {
-    const updatedMeals = [...formData.meals];
-    updatedMeals[mealIndex].foods.splice(foodIndex, 1);
+    setFormData((prev) => {
+      if (!prev.meals[mealIndex]) return prev;
 
-    // Ensure at least one food item remains
-    if (updatedMeals[mealIndex].foods.length === 0) {
-              updatedMeals[mealIndex].foods.push({
-          name: "",
-          portion: "",
-          calories: 0,
-          protein: 0,
-          carbs: 0,
-          fat: 0,
+      return {
+        ...prev,
+        meals: prev.meals.map((meal, i) => {
+          if (i !== mealIndex) return meal;
 
-        });
-    }
+          const remaining = meal.foods.filter((_, fi) => fi !== foodIndex);
 
-    setFormData((prev) => ({
-      ...prev,
-      meals: updatedMeals,
-    }));
+          // Ensure at least one food item remains
+          if (remaining.length === 0) {
+            remaining.push({
+              name: "",
+              portion: "",
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            });
+          }
+
+          return { ...meal, foods: remaining };
+        }),
+      };
+    });
   };
 
   const removeMeal = (index: number) => {
-    if (formData.meals.length <= 1) {
-      return; // Don't remove the last meal
-    }
-
-    const updatedMeals = [...formData.meals];
-    updatedMeals.splice(index, 1);
-
-    setFormData((prev) => ({
-      ...prev,
-      meals: updatedMeals,
-    }));
-
-    // Adjust active meal index if needed
-    if (activeMealIndex >= updatedMeals.length) {
-      setActiveMealIndex(updatedMeals.length - 1);
-    }
+    setFormData((prev) => {
+      if (prev.meals.length <= 1 || !prev.meals[index]) {
+        return prev; // Don't remove the last meal
+      }
+      return {
+        ...prev,
+        meals: prev.meals.filter((_, i) => i !== index),
+      };
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -996,7 +1022,10 @@ export default function CreateMealPlanForm({
                     ? "bg-gradient-to-r from-primary to-primary-light text-white shadow-glow"
                     : "bg-white dark:bg-night text-secondary dark:text-alabaster hover:bg-gray-lightest dark:hover:bg-secondary-light/50 border border-gray-light dark:border-davyGray shadow-soft hover:shadow-medium"
                 }`}
-                onClick={() => setActiveMealIndex(formData.meals.findIndex(m => m.id === firstMeal.id))}
+                onClick={() => {
+                  const targetIndex = formData.meals.findIndex(m => m.id === firstMeal.id);
+                  if (targetIndex >= 0) setActiveMealIndex(targetIndex);
+                }}
               >
                 <span>{firstMeal.name || `Meal ${groupIndex + 1}`}</span>
                 {hasMealB && (
