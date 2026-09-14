@@ -9,6 +9,11 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { USER_TIMEZONE } from "~/lib/timezone";
+import {
+  WORKOUT_COMPLETION_SELECT,
+  getSubmittedTemplateIds,
+  isRestCompletion,
+} from "~/lib/workoutCompletions";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -106,7 +111,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Get completion data for the week
   const { data: completionsRaw } = await supabase
     .from("workout_completions")
-    .select("completed_at, completed_groups")
+    .select(WORKOUT_COMPLETION_SELECT)
     .eq("user_id", user.id)
     .gte("completed_at", weekStart.format("YYYY-MM-DD"))
     .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
@@ -194,31 +199,15 @@ export const loader: LoaderFunction = async ({ request }) => {
     const workoutDaysPerWeek = plan.workout_days_per_week || 4;
     const restDaysAllowed = 7 - workoutDaysPerWeek;
     
-    // Count rest days used this week (completions with empty completed_groups)
-    const restDaysUsed = (completionsRaw || []).filter(completion => 
-      !completion.completed_groups || completion.completed_groups.length === 0
+    // Count rest days used this week
+    const restDaysUsed = (completionsRaw || []).filter(completion =>
+      isRestCompletion(completion)
     ).length;
 
-    // Temporarily disable filtering to show all templates
-    // Track completed templates to remove from available options
-    const completedTemplateIds = new Set();
-    
-    // For flexible schedules, we need to match completed groups to template groups
-    (completionsRaw || []).forEach(completion => {
-      if (completion.completed_groups && completion.completed_groups.length > 0) {
-        // Find which template has matching groups
-        workoutTemplates.forEach(template => {
-          const templateGroupIds = template.groups.map((group: any) => group.id).sort();
-          const completedGroupIds = [...completion.completed_groups].sort();
-          
-          // If the groups match exactly, this template is completed
-          if (templateGroupIds.length === completedGroupIds.length &&
-              templateGroupIds.every((id, index) => id === completedGroupIds[index])) {
-            completedTemplateIds.add(template.id);
-          }
-        });
-      }
-    });
+    const completedTemplateIds = getSubmittedTemplateIds(
+      completionsRaw || [],
+      workoutTemplates
+    );
 
     // Available templates are all templates minus completed ones
     const availableTemplates = workoutTemplates.filter(template => 

@@ -67,7 +67,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Parse request body
     const body = await request.json();
-    const { completedGroups, completedAt } = body;
+    const { completedGroups, completedAt, isRest, totalGroups, workoutDayId } = body;
 
     if (!completedAt) {
       return json({ error: "completedAt is required" }, { status: 400 });
@@ -83,6 +83,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
+    const parsedIsRest =
+      isRest === true || isRest === "true" || isRest === 1 || isRest === "1";
+
+    let parsedTotalGroups =
+      typeof totalGroups === "string" ? Number(totalGroups) : totalGroups;
+    if (!Number.isFinite(parsedTotalGroups) || parsedTotalGroups < 0) {
+      parsedTotalGroups = parsedIsRest
+        ? 0
+        : Array.isArray(parsedCompletedGroups)
+          ? parsedCompletedGroups.length
+          : 0;
+    }
+
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const parsedWorkoutDayId =
+      typeof workoutDayId === "string" && uuidPattern.test(workoutDayId)
+        ? workoutDayId
+        : null;
+
     // Delete any existing completion for this user and date
     await supabase
       .from("workout_completions")
@@ -90,13 +110,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       .eq("user_id", user.id)
       .eq("completed_at", completedAt);
 
-    // Insert new completion record (without workout_id)
     const { error: insertError } = await supabase
       .from("workout_completions")
       .insert({
         user_id: user.id,
         completed_groups: parsedCompletedGroups || [],
         completed_at: completedAt,
+        is_rest: parsedIsRest,
+        total_groups: parsedTotalGroups,
+        workout_day_id: parsedWorkoutDayId,
       });
 
     if (insertError) {

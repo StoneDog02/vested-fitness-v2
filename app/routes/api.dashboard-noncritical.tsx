@@ -6,6 +6,7 @@ import type { Database } from "~/lib/supabase";
 import jwt from "jsonwebtoken";
 import dayjs from "dayjs";
 import { getCurrentDate, USER_TIMEZONE } from "~/lib/timezone";
+import { WORKOUT_COMPLETION_SELECT, isWorkoutCompletion } from "~/lib/workoutCompletions";
 
 type Activity = {
   id: string;
@@ -116,10 +117,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .gte("completed_at", todayStart)
       .lte("completed_at", todayEnd)
       .order("completed_at", { ascending: false }),
-    // Workout completions - filter for actual workouts in JavaScript (non-empty completed_groups)
+    // Workout completions - actual workouts only (exclude explicit rest days)
     supabase
       .from("workout_completions")
-      .select("user_id, completed_at, completed_groups")
+      .select("user_id, " + WORKOUT_COMPLETION_SELECT)
       .in("user_id", clientIds)
       .gte("completed_at", todayStart)
       .lte("completed_at", todayEnd)
@@ -174,7 +175,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Process workout completions
   (workoutCompletionsRes.data || []).forEach((completion: any) => {
     const clientName = clientMap.get(completion.user_id);
-    if (clientName && completion.completed_groups && Array.isArray(completion.completed_groups) && completion.completed_groups.length > 0) {
+    if (clientName && isWorkoutCompletion(completion)) {
       activities.push({
         id: `workout-${completion.user_id}-${completion.completed_at}`,
         clientName,

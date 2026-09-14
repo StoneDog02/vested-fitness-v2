@@ -3,6 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "~/lib/supabase";
 import dayjs from "dayjs";
 import { USER_TIMEZONE, toUserTimezone } from "~/lib/timezone";
+import {
+  WORKOUT_COMPLETION_SELECT,
+  completionComplianceValue,
+} from "~/lib/workoutCompletions";
 
 export const loader = async ({ request }: { request: Request }) => {
   const url = new URL(request.url);
@@ -38,7 +42,7 @@ export const loader = async ({ request }: { request: Request }) => {
   // Fetch workout completions for this client for the week
   const { data: completions } = await supabase
     .from("workout_completions")
-    .select("completed_at, completed_groups")
+    .select(WORKOUT_COMPLETION_SELECT)
     .eq("user_id", clientId)
     .gte("completed_at", weekStart.format("YYYY-MM-DD"))
     .lt("completed_at", weekEnd.format("YYYY-MM-DD"));
@@ -73,12 +77,8 @@ export const loader = async ({ request }: { request: Request }) => {
     }
     
     // Check for workout completion (not rest day)
-    const hasWorkoutCompletion = (completions || []).some((c: any) => 
-      c.completed_at === dayStr && 
-      c.completed_groups && 
-      c.completed_groups.length > 0
-    );
-    complianceData.push(hasWorkoutCompletion ? 1 : 0);
+    const completion = (completions || []).find((c: any) => c.completed_at === dayStr);
+    complianceData.push(completion ? completionComplianceValue(completion) : 0);
   }
 
   return json({ complianceData, completions });

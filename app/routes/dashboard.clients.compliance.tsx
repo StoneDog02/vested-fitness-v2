@@ -9,6 +9,7 @@ import jwt from "jsonwebtoken";
 import type { Database } from "~/lib/supabase";
 import { Buffer } from "buffer";
 import { getCurrentDate, getCurrentTimestampISO } from "~/lib/timezone";
+import { WORKOUT_COMPLETION_SELECT, isWorkoutCompletion } from "~/lib/workoutCompletions";
 
 // Type for compliance client with separate tracking
 type ComplianceClient = {
@@ -121,7 +122,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         ] = await Promise.all([
           supabase
             .from("workout_completions")
-            .select("id, completed_at, user_id, completed_groups")
+            .select("id, user_id, " + WORKOUT_COMPLETION_SELECT)
             .in("user_id", clientIds)
             .gte("completed_at", weekAgoStr)
             .lt("completed_at", tomorrowStr),
@@ -230,14 +231,10 @@ export const loader: LoaderFunction = async ({ request }) => {
             return supp.active_from <= todayStr;
           });
           expectedSupplements = activeSupplements.length * 7;
-          // Completions - filter by completed_groups to get actual workouts (not rest days)
-          // Workouts have non-empty completed_groups, rest days have empty/null completed_groups
+          // Completions - actual workouts, excluding explicit rest days
           const clientWorkoutCompletions = workoutCompletionsByUser[client.id] || [];
           const completedWorkouts = clientWorkoutCompletions.filter((completion: any) => {
-            // Check if completed_groups exists and is a non-empty array
-            return completion.completed_groups && 
-                   Array.isArray(completion.completed_groups) && 
-                   completion.completed_groups.length > 0;
+            return isWorkoutCompletion(completion);
           }).length;
           
           // Calculate completed meals by grouping A/B options and counting per day

@@ -23,6 +23,10 @@ import {
   isFuture,
   USER_TIMEZONE 
 } from "~/lib/timezone";
+import {
+  WORKOUT_COMPLETION_SELECT,
+  completionComplianceValue,
+} from "~/lib/workoutCompletions";
 
 export const meta: MetaFunction = () => {
   return [
@@ -194,13 +198,14 @@ export const loader: LoaderFunction = async ({ request }) => {
   // Fetch workout completions for this week
   const { data: completions } = await supabase
     .from("workout_completions")
-    .select("completed_at, completed_groups")
+    .select(WORKOUT_COMPLETION_SELECT)
     .eq("user_id", user.id)
     .gte("completed_at", startOfWeek.format("YYYY-MM-DD"))
     .lt("completed_at", endOfWeek.add(1, "day").format("YYYY-MM-DD"));
 
   // Build compliance data for the week
   const complianceData: number[] = [];
+  const completedDays: boolean[] = [];
   for (let i = 0; i < 7; i++) {
     const day = startOfWeek.add(i, "day");
     const dayStr = day.format("YYYY-MM-DD");
@@ -217,6 +222,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     // If there's no active plan for this day, return -3 for NABadge (no plan)
     if (!hasActivePlanForThisDay) {
       complianceData.push(-3);
+      completedDays.push(false);
       continue;
     }
     
@@ -226,6 +232,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       if (day.isBefore(signupDate)) {
         // Return -1 to indicate N/A for days before signup
         complianceData.push(-1);
+        completedDays.push(false);
         continue;
       }
     }
@@ -241,45 +248,27 @@ export const loader: LoaderFunction = async ({ request }) => {
     if (activePlan && activePlan.is_active) {
       // Return -1 to indicate N/A for activation day of currently active plan
       complianceData.push(-1);
+      completedDays.push(false);
       continue;
     }
     
-    const hasCompletion = (completions || []).some((c: any) => c.completed_at === dayStr);
     const completion = (completions || []).find((c: any) => c.completed_at === dayStr);
-    const isRestDayCompletion = completion && (!completion.completed_groups || completion.completed_groups.length === 0);
+    const hasCompletion = !!completion;
+    completedDays.push(hasCompletion);
     
     // For flexible schedules, return -2 for days without completion (to show "Pending")
     // For fixed schedules, return 0 for days without completion (to show "0%")
     if (activeWorkoutPlan && activeWorkoutPlan.builderMode === 'day') {
-      // Flexible schedule
       if (hasCompletion) {
-        if (isRestDayCompletion) {
-          // Rest day completion
-          complianceData.push(2);
-        } else {
-          // Workout completion
-          complianceData.push(1);
-        }
-      } else if (day.isSame(today, "day")) {
-        // Today without completion = pending
-        complianceData.push(-2);
-      } else if (day.isAfter(today, "day")) {
-        // Future day = pending
+        complianceData.push(completionComplianceValue(completion));
+      } else if (day.isSame(today, "day") || day.isAfter(today, "day")) {
         complianceData.push(-2);
       } else {
-        // Past day without completion = 0%
         complianceData.push(0);
       }
     } else {
-      // Fixed schedule
       if (hasCompletion) {
-        if (isRestDayCompletion) {
-          // Rest day completion
-          complianceData.push(2);
-        } else {
-          // Workout completion
-          complianceData.push(1);
-        }
+        complianceData.push(completionComplianceValue(completion));
       } else {
         complianceData.push(0);
       }
@@ -296,6 +285,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     },
     workoutPlan: activeWorkoutPlan,
     complianceData,
+    completedDays,
     todaysWorkout: null, // This will be calculated in the component
     todaysCompletedGroups: [], // This will be calculated in the component
     timestamp: Date.now(), // Force fresh data
@@ -303,7 +293,7 @@ export const loader: LoaderFunction = async ({ request }) => {
 };
 
 export default function Workouts() {
-  const { user, workoutPlan, todaysWorkout, complianceData: initialComplianceData, todaysCompletedGroups } = useLoaderData<{ 
+  const { user, workoutPlan, todaysWorkout, complianceData: initialComplianceData, completedDays: initialCompletedDays, todaysCompletedGroups } = useLoaderData<{ 
     user: any;
     workoutPlan: any;
     todaysWorkout: null | {
@@ -315,6 +305,7 @@ export default function Workouts() {
       isRest: boolean;
     };
     complianceData: number[];
+    completedDays: boolean[];
     todaysCompletedGroups: string[];
   }>();
   
@@ -325,6 +316,7 @@ export default function Workouts() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [completedGroups, setCompletedGroups] = useState<Record<string, boolean>>({});
   const [complianceData, setComplianceData] = useState<number[]>(initialComplianceData);
+  const [completedDays, setCompletedDays] = useState<boolean[]>(initialCompletedDays || []);
   const [isWorkoutSubmitted, setIsWorkoutSubmitted] = useState(false);
   const [isActivationDay, setIsActivationDay] = useState(false);
   const [currentDayWorkout, setCurrentDayWorkout] = useState(todaysWorkout);
@@ -366,22 +358,12 @@ export default function Workouts() {
   // Update compliance data when initial data changes
   useEffect(() => {
     setComplianceData(initialComplianceData);
-  }, [initialComplianceData]);
+    setCompletedDays(initialCompletedDays || []);
+  }, [initialComplianceData, initialCompletedDays]);
 
   // Determine if this is a flexible schedule based on workout plan
   useEffect(() => {
-    if (workoutPlan) {
-      // Check if the plan has a builder_mode field or if it's structured as a flexible schedule
-      const isFlexible = workoutPlan.builderMode === 'day' || 
-                        (workoutPlan.days && workoutPlan.days.length > 0 && 
-                         workoutPlan.days.some((day: any) => day.dayLabel || day.workoutName)) ||
-                        // Additional check: if plan has workout templates (flexible schedule indicator)
-                        (workoutPlan.days && workoutPlan.days.length > 0 &&
-                         workoutPlan.days.filter((day: any) => !day.isRest).length > 0);
-      setIsFlexibleSchedule(isFlexible);
-    } else {
-      setIsFlexibleSchedule(false);
-    }
+    setIsFlexibleSchedule(workoutPlan?.builderMode === 'day');
   }, [workoutPlan]);
 
   // Calculate the current date with offset
@@ -411,7 +393,9 @@ export default function Workouts() {
             });
           }
           setCompletedGroups(groupMap);
-          setIsWorkoutSubmitted(matchCount > 0);
+          setIsWorkoutSubmitted(matchCount > 0 || data.hasCompletion);
+        } else if (data.hasCompletion) {
+          setIsWorkoutSubmitted(true);
         }
       }
     } catch (e) {
@@ -441,18 +425,22 @@ export default function Workouts() {
       }
       if (completionData.length > 0) {
         const dayCompletedGroups: Record<string, boolean> = {};
-        const matchingGroupsCount = completionData.filter((groupId: string) => {
+        completionData.forEach((groupId: string) => {
           const groupExists = workoutData?.groups?.some((group: any) => group.id === groupId);
           if (groupExists) {
             dayCompletedGroups[groupId] = true;
           }
-          return groupExists;
-        }).length;
+        });
         setCompletedGroups(dayCompletedGroups);
-        setIsWorkoutSubmitted(matchingGroupsCount > 0);
+        setIsWorkoutSubmitted(true);
       } else {
         setCompletedGroups({});
-        setIsWorkoutSubmitted(false);
+        const dayIndex = targetDate.day();
+        const savedWorkout =
+          !!completedDays[dayIndex] &&
+          complianceData[dayIndex] !== 2 &&
+          complianceData[dayIndex] >= 0;
+        setIsWorkoutSubmitted(savedWorkout);
         // For today, always re-fetch completions from backend when dayOffset changes to 0
         if (dayOffset === 0) {
           fetchCompletedGroupsForToday();
@@ -616,9 +604,28 @@ export default function Workouts() {
 
 
   // Function to refresh compliance data
+  const markDaySubmitted = (value: number) => {
+    const dayIndex = currentDate.day();
+    setComplianceData(prev => {
+      const next = [...prev];
+      if (dayIndex >= 0 && dayIndex < next.length) {
+        next[dayIndex] = value;
+      }
+      return next;
+    });
+    setCompletedDays(prev => {
+      const next = [...prev];
+      if (dayIndex >= 0 && dayIndex < next.length) {
+        next[dayIndex] = true;
+      } else if (next.length === 0) {
+        return Array.from({ length: 7 }, (_, i) => i === dayIndex);
+      }
+      return next;
+    });
+  };
+
   const refreshComplianceData = async () => {
     try {
-      const today = getCurrentDate();
       const startOfWeek = getStartOfWeek();
       const endOfWeek = getEndOfWeek();
       const response = await fetch(`/api/get-workout-completions?start=${startOfWeek.format("YYYY-MM-DD")}&end=${endOfWeek.format("YYYY-MM-DD")}`);
@@ -628,8 +635,12 @@ export default function Workouts() {
         for (let i = 0; i < 7; i++) {
           const day = startOfWeek.add(i, "day");
           const dayStr = day.format("YYYY-MM-DD");
-          const hasCompletion = data.completions.some((c: any) => c.completed_at === dayStr);
-          newComplianceData.push(hasCompletion ? 1 : 0);
+          const completion = (data.completions || []).find((c: any) => c.completed_at === dayStr);
+          if (completion) {
+            newComplianceData.push(completionComplianceValue(completion));
+          } else {
+            newComplianceData.push(0);
+          }
         }
         setComplianceData(newComplianceData);
       }
@@ -663,12 +674,15 @@ export default function Workouts() {
     // Optimistically update UI
     setShowSuccess(true);
     setIsWorkoutSubmitted(true);
+    markDaySubmitted(2);
+    setRestDaysUsed(prev => prev + 1);
     
-    // Submit using fetcher (same pattern as meals and supplements)
     submitFetcher.submit(
       { 
         completedAt: currentDateApi, 
-        completedGroups: JSON.stringify([]) // Empty array for rest day
+        completedGroups: JSON.stringify([]),
+        isRest: true,
+        totalGroups: 0,
       },
       { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
     );
@@ -704,6 +718,7 @@ export default function Workouts() {
     // This prevents submitting groups from a different template if user switched templates
     const validCompletedGroups = Object.keys(completedGroups)
       .filter(id => completedGroups[id] && validTemplateGroupIds.has(id));
+    const totalGroups = validTemplateGroupIds.size;
     
     // Update personal bests before submitting
     if (updatePersonalBests) {
@@ -717,13 +732,15 @@ export default function Workouts() {
     // Optimistically update UI
     setShowSuccess(true);
     setIsWorkoutSubmitted(true);
+    markDaySubmitted(totalGroups > 0 ? validCompletedGroups.length / totalGroups : 0);
     
-    // Submit using fetcher (same pattern as meals and supplements)
-    // Use the captured values to ensure consistency
     submitFetcher.submit(
       { 
         completedAt: dateToSubmit,
-        completedGroups: JSON.stringify(validCompletedGroups)
+        completedGroups: JSON.stringify(validCompletedGroups),
+        isRest: false,
+        totalGroups,
+        workoutDayId: templateToSubmit.id || null,
       },
       { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
     );
@@ -759,17 +776,20 @@ export default function Workouts() {
     // This prevents submitting groups from a different day if user navigates during submission
     const validCompletedGroups = Object.keys(completedGroups)
       .filter(id => completedGroups[id] && validWorkoutGroupIds.has(id));
+    const totalGroups = validWorkoutGroupIds.size;
     
     // Optimistically update UI
     setShowSuccess(true);
     setIsWorkoutSubmitted(true);
+    markDaySubmitted(totalGroups > 0 ? validCompletedGroups.length / totalGroups : 0);
     
-    // Submit using fetcher (same pattern as meals and supplements)
-    // Use the captured values to ensure consistency
     submitFetcher.submit(
       { 
         completedAt: dateToSubmit,
-        completedGroups: JSON.stringify(validCompletedGroups)
+        completedGroups: JSON.stringify(validCompletedGroups),
+        isRest: false,
+        totalGroups,
+        workoutDayId: workoutToSubmit.id || null,
       },
       { method: "POST", action: "/api/submit-workout-completion", encType: "application/json" }
     );
@@ -1548,14 +1568,15 @@ export default function Workouts() {
                 const hasWorkoutsAssigned = dayWorkout && !dayWorkout.isRest && dayWorkout.groups && dayWorkout.groups.length > 0;
                 
                 // For flexible schedules, check if there are any completions for this day
-                const hasCompletionForDay = safeComplianceData[i] > 0;
+                const hasCompletionForDay = !!completedDays[i] || safeComplianceData[i] === 2 || (safeComplianceData[i] > 0 && safeComplianceData[i] <= 1);
                 
                 // Determine status and display
                 let status: string;
                 let displayText: string;
                 let showNABadge = false;
                 let naReason = "";
-                const percentage = Math.round((safeComplianceData[i] || 0) * 100);
+                const rawCompliance = safeComplianceData[i] === 2 ? 0 : (safeComplianceData[i] || 0);
+                const percentage = Math.round(rawCompliance * 100);
                 
                 // Check if this day is before the user signed up
                 const signupDate = user?.created_at ? dayjs(user.created_at).tz(USER_TIMEZONE).startOf("day") : null;

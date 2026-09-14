@@ -24,6 +24,11 @@ import {
   USER_TIMEZONE 
 } from "~/lib/timezone";
 import { extractAuthFromCookie, validateAndRefreshToken } from "~/lib/supabase";
+import {
+  WORKOUT_COMPLETION_SELECT,
+  isRestCompletion,
+  isWorkoutCompletion,
+} from "~/lib/workoutCompletions";
 
 type LoaderData = {
   clientData?: ClientDashboardData;
@@ -353,13 +358,13 @@ export const loader: LoaderFunction = async ({ request }) => {
       ] = await Promise.all([
         supabase
           .from("workout_completions")
-          .select("completed_at, completed_groups")
+          .select(WORKOUT_COMPLETION_SELECT)
           .eq("user_id", user.id)
           .gte("completed_at", todayStr)
           .lt("completed_at", tomorrowStr),
         supabase
           .from("workout_completions")
-          .select("completed_at, completed_groups")
+          .select(WORKOUT_COMPLETION_SELECT)
           .eq("user_id", user.id)
           .gte("completed_at", today.subtract(7, "day").format("YYYY-MM-DD"))
           .lt("completed_at", tomorrowStr),
@@ -468,7 +473,7 @@ export const loader: LoaderFunction = async ({ request }) => {
       let todaysWorkoutCompletion = null;
       if (workoutCompletionsResult.data && workoutCompletionsResult.data.length > 0) {
         const todayCompletion = workoutCompletionsResult.data[0];
-        const isRestDayCompletion = !todayCompletion.completed_groups || todayCompletion.completed_groups.length === 0;
+        const isRestDayCompletion = isRestCompletion(todayCompletion);
         
         if (isFlexibleSchedule) {
           // For flexible schedules, we need to determine the workout name from the completed groups
@@ -510,9 +515,9 @@ export const loader: LoaderFunction = async ({ request }) => {
         if (workoutDays) {
           const expectedWorkoutDays = workoutDays.filter(day => !day.is_rest).length;
           
-          // Filter completions that are actually workout completions (non-empty completed_groups)
+          // Filter completions that are actual workouts (not explicit rest days)
           const validCompletions = weeklyWorkoutCompletionsResult.data.filter(completion => {
-            return completion.completed_groups && completion.completed_groups.length > 0;
+            return isWorkoutCompletion(completion);
           });
           
           workoutCompliance = expectedWorkoutDays > 0 
@@ -533,9 +538,9 @@ export const loader: LoaderFunction = async ({ request }) => {
         if (workoutDays) {
           const expectedRestDays = workoutDays.filter(day => day.is_rest).length;
           
-          // Filter completions that are actually rest day completions (empty completed_groups)
+          // Filter completions that are explicit rest days
           const restDayCompletions = weeklyWorkoutCompletionsResult.data.filter(completion => {
-            return !completion.completed_groups || completion.completed_groups.length === 0;
+            return isRestCompletion(completion);
           });
           
           restDayCompliance = expectedRestDays > 0 
@@ -615,7 +620,7 @@ export const loader: LoaderFunction = async ({ request }) => {
         ] = await Promise.all([
           supabase
             .from("workout_completions")
-            .select("id, completed_at, user_id, completed_groups")
+            .select("id, user_id, " + WORKOUT_COMPLETION_SELECT)
             .in("user_id", activeClientIds)
             .gte("completed_at", weekAgoStr)
             .lt("completed_at", tomorrowStr),
@@ -722,8 +727,8 @@ export const loader: LoaderFunction = async ({ request }) => {
           // Completions - filter out completions on rest days
           const clientWorkoutCompletions = workoutCompletionsByUser[clientId] || [];
           const completedWorkouts = clientWorkoutCompletions.filter((completion: any) => {
-            // Filter completions that are actually workout completions (non-empty completed_groups)
-            return completion.completed_groups && completion.completed_groups.length > 0;
+            // Filter completions that are actual workouts (not explicit rest days)
+            return isWorkoutCompletion(completion);
           }).length;
           // Calculate completed meals by grouping A/B options and counting per day
           let completedMeals = 0;

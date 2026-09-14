@@ -507,23 +507,32 @@ export interface Database {
         Row: {
           id: string;
           user_id: string;
-          workout_day_id: string;
+          workout_day_id: string | null;
           completed_at: string;
           created_at: string;
+          completed_groups: string[] | null;
+          is_rest: boolean;
+          total_groups: number | null;
         };
         Insert: {
           id?: string;
           user_id: string;
-          workout_day_id: string;
+          workout_day_id?: string | null;
           completed_at: string;
           created_at?: string;
+          completed_groups?: string[] | null;
+          is_rest?: boolean;
+          total_groups?: number | null;
         };
         Update: {
           id?: string;
           user_id?: string;
-          workout_day_id?: string;
+          workout_day_id?: string | null;
           completed_at?: string;
           created_at?: string;
+          completed_groups?: string[] | null;
+          is_rest?: boolean;
+          total_groups?: number | null;
         };
       };
       habit_presets: {

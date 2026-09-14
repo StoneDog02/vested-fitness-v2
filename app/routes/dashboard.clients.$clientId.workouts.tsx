@@ -23,6 +23,12 @@ import { Buffer } from "buffer";
 import NABadge from "../components/ui/NABadge";
 import { clearWorkoutDraft, flushWorkoutDraft } from "~/utils/coachDraftStorage";
 import { getCurrentDate, USER_TIMEZONE, getStartOfWeek } from "~/lib/timezone";
+import {
+  WORKOUT_COMPLETION_SELECT,
+  completionComplianceValue,
+  isRestCompletion,
+  isWorkoutCompletion,
+} from "~/lib/workoutCompletions";
 import dayjs from "dayjs";
 import { useToast } from "~/context/ToastContext";
 import React from "react";
@@ -252,7 +258,7 @@ export const loader = async ({
       .eq("is_template", true),
     supabase
       .from("workout_completions")
-      .select("completed_at, completed_groups")
+      .select(WORKOUT_COMPLETION_SELECT)
       .eq("user_id", client.id)
       .gte("completed_at", weekStart.toISOString().slice(0, 10))
       .lt("completed_at", weekEnd.toISOString().slice(0, 10)),
@@ -468,12 +474,8 @@ export const loader = async ({
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + i);
     const dayStr = day.toISOString().slice(0, 10);
-    const hasWorkoutCompletion = completions.some((c: any) => 
-      c.completed_at === dayStr && 
-      c.completed_groups && 
-      c.completed_groups.length > 0
-    );
-    complianceData.push(hasWorkoutCompletion ? 1 : 0);
+    const completion = completions.find((c: any) => c.completed_at === dayStr);
+    complianceData.push(completion ? completionComplianceValue(completion) : 0);
   }
 
   const result = {
@@ -1751,20 +1753,17 @@ export default function ClientWorkouts() {
                   if (activePlan && Array.isArray(activePlan.days) && activePlan.days[i]) {
                     if (activePlan.builderMode === 'day') {
                       // For flexible schedule plans, check if client has chosen rest for this day
-                      // A rest day completion is indicated by a completion record with empty completed_groups
                       const dayStr = thisDate.format("YYYY-MM-DD");
                       
                       // First check if there's a workout completion (takes priority)
                       const hasWorkoutCompletion = complianceFetcher.data?.completions?.some((c: any) => 
                         c.completed_at === dayStr && 
-                        c.completed_groups && 
-                        c.completed_groups.length > 0
+                        isWorkoutCompletion(c)
                       );
                       
-                      // Only mark as rest day if there's no workout completion and there's a rest day completion
                       const hasRestCompletion = complianceFetcher.data?.completions?.some((c: any) => 
                         c.completed_at === dayStr && 
-                        (!c.completed_groups || c.completed_groups.length === 0)
+                        isRestCompletion(c)
                       ) || false;
                       
                       isRestDay = !hasWorkoutCompletion && hasRestCompletion;
@@ -1776,7 +1775,9 @@ export default function ClientWorkouts() {
                   // --- END ---
                   
                   // Determine percentage for display
-                  const percentage = Math.round((complianceData[i] || 0) * 100);
+                  const percentage = Math.round(
+                    complianceData[i] === 2 ? 0 : (complianceData[i] || 0) * 100
+                  );
                   let displayPercentage = percentage;
                   let displayText = `${percentage}%`;
                   let barColor = getBarColor(complianceData[i] || 0);
@@ -1797,12 +1798,17 @@ export default function ClientWorkouts() {
                   });
                   const isNoPlan = !planForDay;
                   
+                  const dayStr = thisDate.format("YYYY-MM-DD");
+                  const hasSavedCompletion = complianceFetcher.data?.completions?.some(
+                    (c: any) => c.completed_at === dayStr
+                  );
+                  
                   // Handle N/A cases - these should show gray bars
                   if (isBeforeSignup || complianceData[i] === -1 || isNoPlan) {
                     displayPercentage = 0;
                     displayText = "N/A";
                     barColor = '#E5E7EB'; // Gray bar for N/A
-                  } else if (isRestDay) {
+                  } else if (isRestDay || complianceData[i] === 2) {
                     // If rest day, show no bar and "Rest" text
                     displayPercentage = 0;
                     displayText = "Rest";
@@ -1811,7 +1817,7 @@ export default function ClientWorkouts() {
                     displayPercentage = 0;
                     displayText = "Pending";
                     barColor = 'transparent';
-                  } else if (isToday && complianceData[i] === 0) {
+                  } else if (isToday && complianceData[i] === 0 && !hasSavedCompletion) {
                     displayPercentage = 0;
                     displayText = "Pending";
                     barColor = 'transparent';
@@ -1824,7 +1830,7 @@ export default function ClientWorkouts() {
                       </span>
                       <div className="flex-1" />
                       <div className="flex items-center min-w-[120px] max-w-[200px] w-2/5">
-                        {!isRestDay ? (
+                        {!isRestDay && complianceData[i] !== 2 ? (
                           <div className="relative flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div
                               className="absolute left-0 top-0 h-2 rounded-full"
@@ -1843,9 +1849,9 @@ export default function ClientWorkouts() {
                             <NABadge reason="Client was not signed up yet" />
                                                       ) : complianceData[i] === -1 ? (
                               <NABadge reason="Plan added today - compliance starts tomorrow" />
-                          ) : isRestDay ? (
+                          ) : isRestDay || complianceData[i] === 2 ? (
                             <span className="text-gray-600 dark:text-gray-400 font-medium">Rest</span>
-                          ) : isToday && complianceData[i] === 0 ? (
+                          ) : isToday && complianceData[i] === 0 && !hasSavedCompletion ? (
                             <span className="bg-primary/10 dark:bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/20">Pending</span>
                           ) : isFuture ? (
                             <span className="text-gray-500">Pending</span>
@@ -1899,8 +1905,7 @@ export default function ClientWorkouts() {
                                  const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
                                  return completionDate.isAfter(weekStart) && 
                                         completionDate.isBefore(weekEnd) && 
-                                        // Rest day detection: no completed groups
-                                        (!c.completed_groups || c.completed_groups.length === 0);
+                                        isRestCompletion(c);
                                }).length || 0;
                               
                               const restDaysAllowed = activePlan.workoutDaysPerWeek ? 7 - activePlan.workoutDaysPerWeek : 3;
@@ -1943,8 +1948,7 @@ export default function ClientWorkouts() {
                               const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
                               return completionDate.isAfter(weekStart) && 
                                      completionDate.isBefore(weekEnd) && 
-                                     c.completed_groups && 
-                                     c.completed_groups.length > 0;
+                                     isWorkoutCompletion(c);
                             }) || false;
                             
                             // For debugging: only show completion for the first template to avoid confusion
@@ -2078,8 +2082,7 @@ export default function ClientWorkouts() {
                                const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
                                return completionDate.isAfter(weekStart) && 
                                       completionDate.isBefore(weekEnd) && 
-                                      // Rest day detection: no completed groups
-                                      (!c.completed_groups || c.completed_groups.length === 0);
+                                      isRestCompletion(c);
                              }) || false;
 
                             return (
@@ -2139,8 +2142,7 @@ export default function ClientWorkouts() {
                                const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
                                return completionDate.isAfter(weekStart) && 
                                       completionDate.isBefore(weekEnd) && 
-                                      c.completed_groups && 
-                                      c.completed_groups.length > 0;
+                                      isWorkoutCompletion(c);
                              }) || false;
 
                             return (
@@ -2267,8 +2269,7 @@ export default function ClientWorkouts() {
                                     const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
                                     return completionDate.isAfter(weekStart) && 
                                            completionDate.isBefore(weekEnd) && 
-                                           // Rest day detection: no completed groups
-                                           (!c.completed_groups || c.completed_groups.length === 0);
+                                           isRestCompletion(c);
                                   }).length || 0;
                                   
                                   const restDaysAllowed = activePlan.workoutDaysPerWeek ? 7 - activePlan.workoutDaysPerWeek : 3;
@@ -2287,8 +2288,7 @@ export default function ClientWorkouts() {
                               const completionDate = dayjs(c.completed_at).tz(USER_TIMEZONE);
                               return completionDate.isAfter(weekStart) && 
                                      completionDate.isBefore(weekEnd) && 
-                                     c.completed_groups && 
-                                     c.completed_groups.length > 0;
+                                     isWorkoutCompletion(c);
                             }) || false;
 
                             return (

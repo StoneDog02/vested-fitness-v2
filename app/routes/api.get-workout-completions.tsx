@@ -5,6 +5,10 @@ import type { Database } from "~/lib/supabase";
 import { parse } from "cookie";
 import jwt from "jsonwebtoken";
 import { Buffer } from "buffer";
+import {
+  WORKOUT_COMPLETION_SELECT,
+  isRestCompletion,
+} from "~/lib/workoutCompletions";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
@@ -68,27 +72,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const end = url.searchParams.get("end");
 
     if (date) {
-      // Get completions for a specific date
       const { data: completions } = await supabase
         .from("workout_completions")
-        .select("id, user_id, workout_id, completed_at")
+        .select(`id, user_id, ${WORKOUT_COMPLETION_SELECT}`)
         .eq("user_id", userId)
         .eq("completed_at", date);
 
-      return json({ 
+      const completion = (completions || [])[0];
+      const completedGroupIds = Array.isArray(completion?.completed_groups)
+        ? completion.completed_groups
+        : [];
+
+      return json({
         hasCompletion: (completions || []).length > 0,
-        completions: completions || []
+        completions: completions || [],
+        completedGroupIds,
+        isRest: isRestCompletion(completion),
       });
     } else if (start && end) {
-      // Get completions for a date range
       const { data: completions } = await supabase
         .from("workout_completions")
-        .select("id, user_id, workout_id, completed_at")
+        .select(`id, user_id, ${WORKOUT_COMPLETION_SELECT}`)
         .eq("user_id", userId)
         .gte("completed_at", start)
         .lte("completed_at", end);
 
-      // Group by date
       const completionsByDate: Record<string, any[]> = {};
       (completions || []).forEach((completion) => {
         const dateKey = completion.completed_at;
@@ -98,7 +106,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         completionsByDate[dateKey].push(completion);
       });
 
-      return json({ completionsByDate });
+      return json({
+        completionsByDate,
+        completions: completions || [],
+      });
     } else {
       return json({ error: "date or start/end parameters required" }, { status: 400 });
     }
