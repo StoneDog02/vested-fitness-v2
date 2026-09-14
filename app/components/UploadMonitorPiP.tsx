@@ -9,9 +9,26 @@ import { uploadQueue, type UploadTask, type UploadProgress } from '~/utils/uploa
 
 interface UploadMonitorPiPProps {
   uploads: UploadTask[];
+  onDismiss: (uploadId: string) => void;
 }
 
-export default function UploadMonitorPiP({ uploads }: UploadMonitorPiPProps) {
+const STATUS_PRIORITY: Array<NonNullable<UploadTask['status']>> = [
+  'uploading',
+  'processing',
+  'pending',
+  'completed',
+  'error',
+];
+
+function pickActiveUpload(uploads: UploadTask[]): UploadTask {
+  for (const status of STATUS_PRIORITY) {
+    const match = uploads.find((upload) => (upload.status || 'pending') === status);
+    if (match) return match;
+  }
+  return uploads[0];
+}
+
+export default function UploadMonitorPiP({ uploads, onDismiss }: UploadMonitorPiPProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [position, setPosition] = useState(() => {
     if (typeof window === 'undefined') return { x: 0, y: 0 };
@@ -130,7 +147,7 @@ export default function UploadMonitorPiP({ uploads }: UploadMonitorPiPProps) {
     return null;
   }
 
-  const activeUpload = uploads[0]; // Show first active upload
+  const activeUpload = pickActiveUpload(uploads);
   const progress = uploadProgresses.get(activeUpload.id) || activeUpload.progress || { percent: 0, loaded: 0, total: activeUpload.fileSize };
   const status = activeUpload.status || 'pending';
 
@@ -188,20 +205,46 @@ export default function UploadMonitorPiP({ uploads }: UploadMonitorPiPProps) {
             <p className="text-xs text-gray-600 dark:text-gray-400">{activeUpload.clientName}</p>
           </div>
         </div>
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-          aria-label={isExpanded ? 'Collapse' : 'Expand'}
-        >
-          <svg
-            className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+        <div className="flex items-center space-x-1">
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            aria-label={isExpanded ? 'Collapse' : 'Expand'}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+            <svg
+              className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss(activeUpload.id);
+            }}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            aria-label="Close upload progress"
+          >
+            <svg
+              className="w-5 h-5 text-gray-600 dark:text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Content */}

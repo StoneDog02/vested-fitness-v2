@@ -191,7 +191,7 @@ export function taskToMetadata(task: UploadTask): StoredUploadMetadata {
     mimeType: task.mimeType,
     status: task.status,
     progress: task.progress,
-    createdAt: Date.now(),
+    createdAt: task.createdAt || Date.now(),
   };
 }
 

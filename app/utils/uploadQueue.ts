@@ -43,6 +43,7 @@ export interface UploadTask {
   onComplete?: (result: { path: string }) => void | Promise<void>;
   onError?: (error: Error) => void;
   _onCompleteCalled?: boolean; // Guard to prevent duplicate callback execution
+  createdAt?: number;
 }
 
 class UploadQueue {
@@ -74,7 +75,14 @@ class UploadQueue {
    * Add an upload task to the queue
    */
   async add(task: UploadTask): Promise<void> {
+    // Drop leftover failed/completed tasks so a new recording takes over the PiP
+    const staleIds = Array.from(this.uploads.values())
+      .filter((existing) => existing.status === 'error' || existing.status === 'completed')
+      .map((existing) => existing.id);
+    await Promise.all(staleIds.map((id) => this.remove(id)));
+
     task.status = 'pending';
+    task.createdAt = task.createdAt || Date.now();
     this.uploads.set(task.id, task);
     
     // Store file in IndexedDB for persistence
@@ -160,8 +168,6 @@ class UploadQueue {
       signedUrl,
       filePath,
       onProgress,
-      onComplete,
-      onError,
     } = task;
 
     try {
@@ -286,18 +292,18 @@ class UploadQueue {
       
       // Call onComplete callback (this creates the check-in record)
       // Guard: Only call once to prevent duplicate check-in creation
-      if (onComplete && !task._onCompleteCalled) {
+      // Read callbacks from the live task so UploadMonitor wrappers are used
+      if (task.onComplete && !task._onCompleteCalled) {
         task._onCompleteCalled = true; // Mark as called immediately
         this.saveMetadata(); // Save the guard flag
         
         try {
-          await onComplete({ path: filePath });
+          await task.onComplete({ path: filePath });
           // Only mark as completed if onComplete succeeds
           task.status = 'completed';
           this.saveMetadata(); // Save completed state
           
-          // Remove from queue immediately after completion to prevent reprocessing
-          // Keep in memory briefly for UI updates, but mark as completed
+          // Keep in memory briefly so the PiP can show Complete, then auto-dismiss
           console.log('Upload task completed successfully:', id);
         } catch (error) {
           // If check-in creation fails, mark as error
@@ -311,7 +317,7 @@ class UploadQueue {
             task.onError(task.error);
           }
         }
-      } else if (!onComplete) {
+      } else if (!task.onComplete) {
         // No callback, just mark as completed
         task.status = 'completed';
         this.saveMetadata();
@@ -341,8 +347,8 @@ class UploadQueue {
       task.status = 'error';
       task.error = errorObj;
       
-      if (onError) {
-        onError(errorObj);
+      if (task.onError) {
+        task.onError(errorObj);
       }
 
       // Continue processing queue (don't block other uploads)
@@ -387,20 +393,10 @@ class UploadQueue {
       const metadataList = getStoredUploadMetadata();
       
       for (const metadata of metadataList) {
-        // Clean up old completed or errored uploads (older than 1 hour)
+        // Never revive failed or completed uploads — they must not re-queue the old file
         if (metadata.status === 'completed' || metadata.status === 'error') {
-          const age = Date.now() - (metadata.createdAt || 0);
-          if (age > 3600000) { // 1 hour
-            await removeFile(metadata.id);
-            // Also remove from metadata
-            const updatedMetadata = metadataList.filter(m => m.id !== metadata.id);
-            storeUploadMetadata(updatedMetadata);
-            continue;
-          }
-          // Skip recent completed uploads - they're done
-          if (metadata.status === 'completed') {
-            continue;
-          }
+          await removeFile(metadata.id);
+          continue;
         }
         
         // Skip tasks that are in 'processing' state - they're already being processed
@@ -523,6 +519,7 @@ class UploadQueue {
           mimeType: mimeType,
           status: 'pending', // Always reset to pending for recovery - let it restart
           progress: metadata.progress,
+          createdAt: metadata.createdAt,
         };
         
         this.uploads.set(metadata.id, task);
